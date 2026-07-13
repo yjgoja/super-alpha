@@ -11,7 +11,7 @@ export default function ConnectPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [doneToken, setDoneToken] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -28,8 +28,8 @@ export default function ConnectPage() {
       setError(data.error || "연결 실패");
       return;
     }
-    setDoneToken(data.account?.syncToken || "");
-    setTimeout(() => router.push("/dashboard"), 2500);
+    setDone(true);
+    setTimeout(() => router.push("/dashboard"), 1800);
   }
 
   return (
@@ -44,18 +44,16 @@ export default function ConnectPage() {
 
         <h1 className="mt-6 text-2xl font-semibold">MT5 계좌 연결</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          계좌를 연결한 뒤, EA Sync Token으로 실데이터를 동기화합니다.
+          실제 MT5 계좌번호와 거래 비밀번호를 입력하세요. 별도 토큰은 없습니다.
+          EA가 같은 비밀번호로 동기화해야 대시보드에 실데이터가 표시됩니다.
         </p>
 
-        {doneToken !== null ? (
+        {done ? (
           <div className="mt-8 rounded-2xl border border-[var(--accent)]/40 bg-[rgba(200,245,66,0.08)] p-5">
-            <div className="font-display text-2xl text-[var(--accent)]">연결 완료</div>
+            <div className="font-display text-2xl text-[var(--accent)]">등록 완료</div>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              대시보드에서 Sync Token을 EA에 넣으면 MT5 실데이터가 표시됩니다.
+              상태: 대기중 → MT5 EA 연동 후 LIVE로 전환됩니다.
             </p>
-            <code className="mt-3 block break-all text-xs text-[var(--accent2)]">
-              {doneToken}
-            </code>
           </div>
         ) : (
           <div className="mt-6 space-y-4">
@@ -65,34 +63,36 @@ export default function ConnectPage() {
                 className="sa-input"
                 inputMode="numeric"
                 required
+                pattern="[0-9]{5,15}"
                 value={login}
-                onChange={(e) => setLogin(e.target.value)}
-                placeholder="예: 135055717"
+                onChange={(e) => setLogin(e.target.value.replace(/\D/g, ""))}
+                placeholder="실제 MT5 계좌번호"
               />
             </div>
             <div>
-              <label className="sa-label">암호 (MT5 Password)</label>
+              <label className="sa-label">거래 비밀번호 (MT5 Password)</label>
               <input
                 className="sa-input"
                 type="password"
                 required
+                minLength={4}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="거래 비밀번호"
+                placeholder="실제 거래 비밀번호"
               />
             </div>
             <div>
-              <label className="sa-label">서버 (MT5 Server)</label>
-              <input
-                className="sa-input opacity-80"
-                value={FIXED_MT5_SERVER}
-                readOnly
-              />
+              <label className="sa-label">서버</label>
+              <input className="sa-input opacity-80" value={FIXED_MT5_SERVER} readOnly />
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>
-              {loading ? "연결 중…" : "즉시 연결하기"}
+              {loading ? "등록 중…" : "계좌 등록하기"}
             </button>
+            <p className="text-xs text-[var(--muted)]">
+              잘못된 비밀번호로 등록하면 EA 동기화가 거부됩니다. 브로커 서버에 직접
+              로그인 검증은 MetaAPI 연동 단계에서 추가됩니다.
+            </p>
           </div>
         )}
       </form>

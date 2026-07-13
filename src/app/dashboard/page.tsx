@@ -9,7 +9,6 @@ type AccountPayload = {
   server: string;
   mode: string;
   status: string;
-  syncToken?: string | null;
   lastSyncAt?: string | null;
   syncAgeSec?: number | null;
   botEnabled: boolean;
@@ -176,7 +175,11 @@ export default function DashboardPage() {
           </Link>
           <div className="mt-2 flex flex-wrap gap-2">
             <span className="sa-badge sa-badge-live">
-              {account.mode === "live" ? "MT5 LIVE" : "DEMO PAPER"}
+              {account.mode === "live" && account.status === "connected"
+                ? "MT5 LIVE"
+                : account.status === "pending"
+                  ? "EA 대기중"
+                  : "미연결"}
             </span>
             <span className="sa-badge">
               {account.login} · {account.server}
@@ -185,10 +188,8 @@ export default function DashboardPage() {
               {account.mode === "live"
                 ? account.syncAgeSec != null
                   ? `동기화 ${account.syncAgeSec}s 전`
-                  : "EA 대기중"
-                : account.botEnabled
-                  ? "페이퍼 ON"
-                  : "페이퍼 OFF"}
+                  : "동기화 대기"
+                : "실데이터 대기"}
             </span>
           </div>
         </div>
@@ -207,14 +208,14 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {account.syncToken && (
+      {account.status !== "connected" || account.mode !== "live" ? (
         <section className="sa-panel mt-4 border-[var(--accent)]/30">
           <div className="text-sm font-semibold text-[var(--accent)]">
-            MT5 실데이터 연동 (필수)
+            MT5 실연동 방법 (토큰 없음)
           </div>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            웹 대시보드는 기본적으로 시뮬레이션입니다. 실제 MT5와 맞추려면 EA에 아래
-            값을 넣고, MT5에서 WebRequest URL을 허용하세요.
+            웹에 등록한 <strong>MT5 계좌번호 + 거래 비밀번호</strong>를 EA에도 그대로
+            넣으면 됩니다. Sync Token은 더 이상 필요 없습니다.
           </p>
           <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
             <div>
@@ -224,20 +225,22 @@ export default function DashboardPage() {
               </code>
             </div>
             <div>
-              <div className="sa-label">InpWebLogin</div>
-              <code className="text-[var(--accent2)]">{account.login}</code>
+              <div className="sa-label">InpWebPassword</div>
+              <code className="text-[var(--accent2)]">웹에 입력한 MT5 거래 비밀번호</code>
             </div>
             <div className="md:col-span-2">
-              <div className="sa-label">InpWebToken (Sync Token)</div>
-              <code className="break-all text-[var(--accent2)]">{account.syncToken}</code>
+              <div className="sa-label">계좌번호</div>
+              <code className="text-[var(--accent2)]">
+                EA가 자동으로 AccountInfo Login({account.login}) 사용
+              </code>
             </div>
           </div>
           <p className="mt-3 text-xs text-[var(--muted)]">
-            MT5: 도구 → 옵션 → 전문가 어드바이저 → `https://super-alpha-inky.vercel.app` 허용
-            체크. EA v1.20 이상 필요.
+            MT5: 도구 → 옵션 → 전문가 어드바이저 → WebRequest에
+            https://super-alpha-inky.vercel.app 허용. 비밀번호가 다르면 동기화 거부됩니다.
           </p>
         </section>
-      )}
+      ) : null}
 
       {msg && <p className="mt-3 text-sm text-[var(--accent2)]">{msg}</p>}
 

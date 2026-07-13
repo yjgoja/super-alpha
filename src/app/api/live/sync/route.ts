@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 const positionSchema = z.object({
@@ -14,7 +15,9 @@ const positionSchema = z.object({
 
 const schema = z.object({
   login: z.string().min(3),
-  token: z.string().min(8),
+  password: z.string().min(1),
+  /** EA AccountInfo().Login — must match login */
+  accountLogin: z.string().optional(),
   balance: z.number(),
   equity: z.number(),
   tpCount: z.number().int().optional(),
@@ -44,14 +47,34 @@ function todayKey() {
 export async function POST(req: Request) {
   try {
     const body = schema.parse(await req.json());
-    const account = await prisma.brokerAccount.findFirst({
-      where: { login: body.login.trim(), syncToken: body.token },
-    });
-    if (!account) {
-      return NextResponse.json({ error: "invalid login/token" }, { status: 401 });
+    const login = body.login.trim();
+    const accountLogin = (body.accountLogin || login).trim();
+
+    if (accountLogin !== login) {
+      return NextResponse.json(
+        { error: "accountLogin mismatch — EA must run on the registered MT5 account" },
+        { status: 403 },
+      );
     }
 
-    // First live sync: lock starting balance to real balance once
+    const account = await prisma.brokerAccount.findFirst({
+      where: { login },
+    });
+    if (!account) {
+      return NextResponse.json(
+        { error: "등록되지 않은 계좌입니다. 웹에서 먼저 계좌를 연결하세요." },
+        { status: 404 },
+      );
+    }
+
+    const ok = await verifyPassword(body.password, account.passwordEnc);
+    if (!ok) {
+      return NextResponse.json(
+        { error: "MT5 비밀번호가 웹 등록 정보와 일치하지 않습니다." },
+        { status: 401 },
+      );
+    }
+
     const startingBalance =
       account.mode === "live" || account.lastSyncAt
         ? account.startingBalance
@@ -66,14 +89,13 @@ export async function POST(req: Request) {
         balance: body.balance,
         equity: body.equity,
         startingBalance,
-        botEnabled: body.botEnabled ?? account.botEnabled,
+        botEnabled: body.botEnabled ?? true,
         tpCount: body.tpCount ?? account.tpCount,
         slCount: body.slCount ?? account.slCount,
         cycleCount: body.cycleCount ?? account.cycleCount,
       },
     });
 
-    // Rebuild open baskets from live positions (group by symbol)
     await prisma.basketLeg.deleteMany({
       where: { basket: { accountId: account.id, status: "open" } },
     });
@@ -129,7 +151,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Daily + snapshot
     const date = todayKey();
     const existing = await prisma.dailyStat.findUnique({
       where: { accountId_date: { accountId: account.id, date } },

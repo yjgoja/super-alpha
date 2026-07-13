@@ -63,7 +63,6 @@ export async function GET() {
       server: account.server,
       mode: account.mode,
       status: account.status,
-      syncToken: account.syncToken,
       lastSyncAt: account.lastSyncAt,
       syncAgeSec,
       botEnabled: account.botEnabled,

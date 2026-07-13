@@ -63,10 +63,10 @@ function LoginForm() {
               className="sa-input"
               type="password"
               required
-              minLength={4}
+              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="4자 이상"
+              placeholder="8자 이상"
             />
           </div>
         </div>
