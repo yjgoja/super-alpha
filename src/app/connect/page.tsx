@@ -3,13 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { DEMO_SERVERS } from "@/lib/dca";
+import { FIXED_MT5_SERVER } from "@/lib/dca";
 
 export default function ConnectPage() {
   const router = useRouter();
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
-  const [server, setServer] = useState<string>(DEMO_SERVERS[0]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -21,7 +20,7 @@ export default function ConnectPage() {
     const res = await fetch("/api/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login, password, server }),
+      body: JSON.stringify({ login, password, server: FIXED_MT5_SERVER }),
     });
     const data = await res.json();
     setLoading(false);
@@ -45,7 +44,7 @@ export default function ConnectPage() {
 
         <h1 className="mt-6 text-2xl font-semibold">MT5 계좌 연결</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          계좌번호 · 비밀번호 · 서버만 입력하세요. 담당자 승인 대기 없음.
+          계좌번호 · 비밀번호만 입력하세요. 서버는 ZeroMarkets-1 고정입니다.
         </p>
 
         {done ? (
@@ -81,17 +80,11 @@ export default function ConnectPage() {
             </div>
             <div>
               <label className="sa-label">서버 (MT5 Server)</label>
-              <select
-                className="sa-input"
-                value={server}
-                onChange={(e) => setServer(e.target.value)}
-              >
-                {DEMO_SERVERS.map((s) => (
-                  <option key={s} value={s} className="bg-[#0c1a24]">
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <input
+                className="sa-input opacity-80"
+                value={FIXED_MT5_SERVER}
+                readOnly
+              />
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>

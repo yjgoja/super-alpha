@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { encodeSecret, getSessionUserId } from "@/lib/auth";
-import { DEMO_SERVERS } from "@/lib/dca";
+import { FIXED_MT5_SERVER } from "@/lib/dca";
 import { prisma } from "@/lib/db";
 
 const schema = z.object({
   login: z.string().min(3),
   password: z.string().min(1),
-  server: z.string().min(3),
+  server: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -25,9 +25,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const server = DEMO_SERVERS.includes(body.server as (typeof DEMO_SERVERS)[number])
-      ? body.server
-      : body.server;
+    const server = FIXED_MT5_SERVER;
 
     // Instant connect — no admin wait (unlike Super Meta)
     const existing = await prisma.brokerAccount.findFirst({
