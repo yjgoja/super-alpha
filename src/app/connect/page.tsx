@@ -44,7 +44,7 @@ export default function ConnectPage() {
 
         <h1 className="mt-6 text-2xl font-semibold">MT5 계좌 연결</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          계좌번호 · 비밀번호만 입력하세요. 서버는 ZeroMarkets-1 고정입니다.
+          계좌번호 · 비밀번호 · 서버만 입력하세요. 담당자 승인 대기 없음.
         </p>
 
         {done ? (

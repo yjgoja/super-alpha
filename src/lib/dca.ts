@@ -72,7 +72,7 @@ export function estimateBasketPnl(
 
 export const FIXED_MT5_SERVER = "ZeroMarkets-1" as const;
 
-/** @deprecated use FIXED_MT5_SERVER */
+/** @deprecated use FIXED_MT5_SERVER — kept for UI list compatibility */
 export const DEMO_SERVERS = [FIXED_MT5_SERVER] as const;
 
 export const DEFAULT_SYMBOLS = ["EURUSD", "XAUUSD"] as const;
