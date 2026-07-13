@@ -4,6 +4,7 @@
  */
 import fs from "fs";
 import path from "path";
+import { randomBytes } from "crypto";
 
 const PROVISIONING =
   process.env.METAAPI_PROVISIONING_URL ||
@@ -11,6 +12,10 @@ const PROVISIONING =
 const CLIENT_API =
   process.env.METAAPI_CLIENT_URL ||
   "https://mt-client-api-v1.new-york.agiliumtrade.ai";
+
+function newTransactionId() {
+  return randomBytes(16).toString("hex"); // exactly 32 hex chars
+}
 
 export type MetaApiVerifyOk = {
   ok: true;
@@ -344,7 +349,7 @@ export async function verifyMt5Credentials(input: {
   if (profileId) payload.provisioningProfileId = profileId;
 
   const created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
-    "transaction-id": `sa-${input.login}-${Date.now()}`,
+    "transaction-id": newTransactionId(),
   });
 
   if (created.status >= 400) {
