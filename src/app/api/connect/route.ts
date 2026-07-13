@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { encodeSecret, getSessionUserId } from "@/lib/auth";
@@ -9,6 +10,10 @@ const schema = z.object({
   password: z.string().min(1),
   server: z.string().optional(),
 });
+
+function newSyncToken() {
+  return randomBytes(24).toString("hex");
+}
 
 export async function POST(req: Request) {
   const userId = await getSessionUserId();
@@ -26,8 +31,8 @@ export async function POST(req: Request) {
     }
 
     const server = FIXED_MT5_SERVER;
+    const syncToken = newSyncToken();
 
-    // Instant connect — no admin wait (unlike Super Meta)
     const existing = await prisma.brokerAccount.findFirst({
       where: { userId },
       orderBy: { createdAt: "desc" },
@@ -42,7 +47,9 @@ export async function POST(req: Request) {
           passwordEnc: encodeSecret(body.password),
           server,
           status: "connected",
-          mode: "demo",
+          syncToken,
+          // keep live if already synced; otherwise wait for EA
+          mode: existing.mode === "live" ? "live" : "demo",
         },
       });
       if (!(await prisma.strategyConfig.findUnique({ where: { accountId: account.id } }))) {
@@ -57,9 +64,10 @@ export async function POST(req: Request) {
           server,
           mode: "demo",
           status: "connected",
-          balance: 10000,
-          equity: 10000,
-          startingBalance: 10000,
+          syncToken,
+          balance: 0,
+          equity: 0,
+          startingBalance: 0,
           config: { create: {} },
         },
       });
@@ -68,13 +76,20 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       instant: true,
-      message: "서버 등록 완료 — 바로 이용할 수 있습니다.",
+      message: "계좌 연결 완료. EA에 Sync Token을 넣으면 MT5 실데이터가 표시됩니다.",
       account: {
         id: account.id,
         login: account.login,
         server: account.server,
         mode: account.mode,
         status: account.status,
+        syncToken: account.syncToken,
+      },
+      eaHint: {
+        url: "https://super-alpha-inky.vercel.app",
+        endpoint: "/api/live/sync",
+        login: account.login,
+        token: account.syncToken,
       },
     });
   } catch (e) {
@@ -93,5 +108,12 @@ export async function GET() {
     include: { config: true },
     orderBy: { createdAt: "desc" },
   });
-  return NextResponse.json({ account });
+  return NextResponse.json({
+    account: account
+      ? {
+          ...account,
+          passwordEnc: undefined,
+        }
+      : null,
+  });
 }

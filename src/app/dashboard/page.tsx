@@ -9,6 +9,9 @@ type AccountPayload = {
   server: string;
   mode: string;
   status: string;
+  syncToken?: string | null;
+  lastSyncAt?: string | null;
+  syncAgeSec?: number | null;
   botEnabled: boolean;
   balance: number;
   equity: number;
@@ -101,9 +104,10 @@ export default function DashboardPage() {
   useEffect(() => {
     load();
     const tick = setInterval(async () => {
+      // paper engine only when not live
       await fetch("/api/stats", { method: "POST" }).catch(() => null);
       await load();
-    }, 8000);
+    }, 5000);
     return () => clearInterval(tick);
   }, [load]);
 
@@ -171,19 +175,29 @@ export default function DashboardPage() {
             Super Alpha
           </Link>
           <div className="mt-2 flex flex-wrap gap-2">
-            <span className="sa-badge sa-badge-live">DEMO</span>
+            <span className="sa-badge sa-badge-live">
+              {account.mode === "live" ? "MT5 LIVE" : "DEMO PAPER"}
+            </span>
             <span className="sa-badge">
               {account.login} · {account.server}
             </span>
             <span className="sa-badge">
-              {account.botEnabled ? "자동매매 ON" : "자동매매 OFF"}
+              {account.mode === "live"
+                ? account.syncAgeSec != null
+                  ? `동기화 ${account.syncAgeSec}s 전`
+                  : "EA 대기중"
+                : account.botEnabled
+                  ? "페이퍼 ON"
+                  : "페이퍼 OFF"}
             </span>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="sa-btn sa-btn-primary" disabled={busy} onClick={toggleBot}>
-            {account.botEnabled ? "정지" : "자동매매 시작"}
-          </button>
+          {account.mode !== "live" && (
+            <button className="sa-btn sa-btn-primary" disabled={busy} onClick={toggleBot}>
+              {account.botEnabled ? "페이퍼 정지" : "페이퍼 시작"}
+            </button>
+          )}
           <button className="sa-btn sa-btn-ghost" disabled={busy} onClick={resume}>
             재진입 재개
           </button>
@@ -192,6 +206,38 @@ export default function DashboardPage() {
           </button>
         </div>
       </header>
+
+      {account.syncToken && (
+        <section className="sa-panel mt-4 border-[var(--accent)]/30">
+          <div className="text-sm font-semibold text-[var(--accent)]">
+            MT5 실데이터 연동 (필수)
+          </div>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            웹 대시보드는 기본적으로 시뮬레이션입니다. 실제 MT5와 맞추려면 EA에 아래
+            값을 넣고, MT5에서 WebRequest URL을 허용하세요.
+          </p>
+          <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
+            <div>
+              <div className="sa-label">InpWebUrl</div>
+              <code className="break-all text-[var(--accent2)]">
+                https://super-alpha-inky.vercel.app
+              </code>
+            </div>
+            <div>
+              <div className="sa-label">InpWebLogin</div>
+              <code className="text-[var(--accent2)]">{account.login}</code>
+            </div>
+            <div className="md:col-span-2">
+              <div className="sa-label">InpWebToken (Sync Token)</div>
+              <code className="break-all text-[var(--accent2)]">{account.syncToken}</code>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-[var(--muted)]">
+            MT5: 도구 → 옵션 → 전문가 어드바이저 → `https://super-alpha-inky.vercel.app` 허용
+            체크. EA v1.20 이상 필요.
+          </p>
+        </section>
+      )}
 
       {msg && <p className="mt-3 text-sm text-[var(--accent2)]">{msg}</p>}
 

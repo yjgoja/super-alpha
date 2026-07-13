@@ -11,7 +11,7 @@ export default function ConnectPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
+  const [doneToken, setDoneToken] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -28,8 +28,8 @@ export default function ConnectPage() {
       setError(data.error || "연결 실패");
       return;
     }
-    setDone(true);
-    setTimeout(() => router.push("/dashboard"), 900);
+    setDoneToken(data.account?.syncToken || "");
+    setTimeout(() => router.push("/dashboard"), 2500);
   }
 
   return (
@@ -39,20 +39,23 @@ export default function ConnectPage() {
           <Link href="/" className="font-display text-2xl">
             Super Alpha
           </Link>
-          <span className="sa-badge sa-badge-live">즉시 연결</span>
+          <span className="sa-badge sa-badge-live">ZeroMarkets-1</span>
         </div>
 
         <h1 className="mt-6 text-2xl font-semibold">MT5 계좌 연결</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          계좌번호 · 비밀번호 · 서버만 입력하세요. 담당자 승인 대기 없음.
+          계좌를 연결한 뒤, EA Sync Token으로 실데이터를 동기화합니다.
         </p>
 
-        {done ? (
+        {doneToken !== null ? (
           <div className="mt-8 rounded-2xl border border-[var(--accent)]/40 bg-[rgba(200,245,66,0.08)] p-5">
-            <div className="font-display text-2xl text-[var(--accent)]">
-              서버 생성이 완료되었습니다
-            </div>
-            <p className="mt-2 text-sm text-[var(--muted)]">대시보드로 이동합니다…</p>
+            <div className="font-display text-2xl text-[var(--accent)]">연결 완료</div>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              대시보드에서 Sync Token을 EA에 넣으면 MT5 실데이터가 표시됩니다.
+            </p>
+            <code className="mt-3 block break-all text-xs text-[var(--accent2)]">
+              {doneToken}
+            </code>
           </div>
         ) : (
           <div className="mt-6 space-y-4">
@@ -90,10 +93,6 @@ export default function ConnectPage() {
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>
               {loading ? "연결 중…" : "즉시 연결하기"}
             </button>
-            <p className="text-xs text-[var(--muted)]">
-              현재는 데모 엔진으로 동작합니다. 입력한 계좌 정보는 저장되며 UI는
-              실계좌 연동과 동일합니다.
-            </p>
           </div>
         )}
       </form>

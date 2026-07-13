@@ -4,7 +4,28 @@ import { runEngineTick } from "@/lib/engine";
 import { prisma } from "@/lib/db";
 
 export async function POST() {
-  // Public tick endpoint for demo cron / client poll
+  const userId = await getSessionUserId();
+  if (!userId) {
+    // allow anonymous demo tick only for accounts still in demo mode
+    await runEngineTick();
+    return NextResponse.json({ ok: true, at: new Date().toISOString() });
+  }
+
+  const account = await prisma.brokerAccount.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // Live accounts are driven by MT5 EA sync — do not run paper engine
+  if (account?.mode === "live") {
+    return NextResponse.json({
+      ok: true,
+      skipped: "live",
+      lastSyncAt: account.lastSyncAt,
+      at: new Date().toISOString(),
+    });
+  }
+
   await runEngineTick();
   return NextResponse.json({ ok: true, at: new Date().toISOString() });
 }
@@ -27,11 +48,13 @@ export async function GET() {
 
   if (!account) return NextResponse.json({ account: null });
 
-  const totalReturnPct =
-    account.startingBalance > 0
-      ? ((account.equity - account.startingBalance) / account.startingBalance) * 100
-      : 0;
+  const start =
+    account.startingBalance > 0 ? account.startingBalance : account.balance || 1;
+  const totalReturnPct = ((account.equity - start) / start) * 100;
   const today = account.dailyStats[0] ?? null;
+  const syncAgeSec = account.lastSyncAt
+    ? Math.max(0, Math.floor((Date.now() - account.lastSyncAt.getTime()) / 1000))
+    : null;
 
   return NextResponse.json({
     account: {
@@ -40,6 +63,9 @@ export async function GET() {
       server: account.server,
       mode: account.mode,
       status: account.status,
+      syncToken: account.syncToken,
+      lastSyncAt: account.lastSyncAt,
+      syncAgeSec,
       botEnabled: account.botEnabled,
       balance: account.balance,
       equity: account.equity,

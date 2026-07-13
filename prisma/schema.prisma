@@ -27,6 +27,8 @@ model BrokerAccount {
   server          String
   mode            String   @default("demo")
   status          String   @default("connected")
+  syncToken       String?
+  lastSyncAt      DateTime?
   botEnabled      Boolean  @default(false)
   balance         Float    @default(10000)
   equity          Float    @default(10000)
@@ -44,6 +46,7 @@ model BrokerAccount {
   dailyStats DailyStat[]
 
   @@index([userId])
+  @@index([login])
 }
 
 model StrategyConfig {
