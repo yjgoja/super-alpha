@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts BrokerAccount[]
+}
+
+model BrokerAccount {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  login           String
+  passwordEnc     String
+  server          String
+  mode            String   @default("demo")
+  status          String   @default("connected")
+  botEnabled      Boolean  @default(false)
+  balance         Float    @default(10000)
+  equity          Float    @default(10000)
+  startingBalance Float    @default(10000)
+  tpCount         Int      @default(0)
+  slCount         Int      @default(0)
+  cycleCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  config     StrategyConfig?
+  baskets    Basket[]
+  fills      Fill[]
+  snapshots  EquitySnapshot[]
+  dailyStats DailyStat[]
+
+  @@index([userId])
+}
+
+model StrategyConfig {
+  id              String  @id @default(cuid())
+  accountId       String  @unique
+  account         BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  baseLots        Float   @default(0.01)
+  profitTarget    Float   @default(10)
+  profitScale     Float   @default(1)
+  maxDcaLevel     Int     @default(5)
+  devScale        Float   @default(0.15)
+  finalSlExtraPct Float   @default(5)
+  enableFinalSl   Boolean @default(true)
+  reenterAfterTp  Boolean @default(true)
+  reenterAfterSl  Boolean @default(false)
+  symbols         String  @default("EURUSD,XAUUSD")
+}
+
+model Basket {
+  id              String   @id @default(cuid())
+  accountId       String
+  account         BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol          String
+  direction       String
+  filledLevel     Int      @default(0)
+  firstEntryPrice Float
+  status          String   @default("open")
+  unrealizedPnl   Float    @default(0)
+  realizedPnl     Float    @default(0)
+  tradingPaused   Boolean  @default(false)
+  lastExitAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  legs BasketLeg[]
+
+  @@index([accountId, symbol, status])
+}
+
+model BasketLeg {
+  id        String   @id @default(cuid())
+  basketId  String
+  basket    Basket   @relation(fields: [basketId], references: [id], onDelete: Cascade)
+  level     Int
+  lots      Float
+  price     Float
+  createdAt DateTime @default(now())
+}
+
+model Fill {
+  id        String   @id @default(cuid())
+  accountId String
+  account   BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol    String
+  side      String
+  lots      Float
+  price     Float
+  pnl       Float    @default(0)
+  kind      String
+  level     Int?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([accountId, createdAt])
+}
+
+model EquitySnapshot {
+  id        String   @id @default(cuid())
+  accountId String
+  account   BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  equity    Float
+  balance   Float
+  createdAt DateTime @default(now())
+
+  @@index([accountId, createdAt])
+}
+
+model DailyStat {
+  id          String @id @default(cuid())
+  accountId   String
+  account     BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date        String
+  startEquity Float
+  endEquity   Float
+  pnl         Float  @default(0)
+  returnPct   Float  @default(0)
+  tpCount     Int    @default(0)
+  slCount     Int    @default(0)
+
+  @@unique([accountId, date])
+}
+
+model PriceTick {
+  symbol    String   @id
+  bid       Float
+  ask       Float
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #071018;
+  --bg2: #0c1a24;
+  --ink: #e8f1f4;
+  --muted: #8aa0ab;
+  --line: rgba(232, 241, 244, 0.1);
+  --accent: #c8f542;
+  --accent2: #3de7c3;
+  --danger: #ff6b6b;
+  --ok: #c8f542;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(61, 231, 195, 0.12), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(200, 245, 66, 0.1), transparent 50%),
+    linear-gradient(180deg, #071018 0%, #0a1520 45%, #071018 100%);
+  background-attachment: fixed;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+.sa-shell {
+  width: min(1120px, calc(100% - 2rem));
+  margin-inline: auto;
+}
+
+.sa-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.85rem 1.4rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+.sa-btn:hover {
+  transform: translateY(-1px);
+}
+
+.sa-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.sa-btn-primary {
+  background: var(--accent);
+  color: #081018;
+}
+
+.sa-btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.sa-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  outline: none;
+}
+
+.sa-input:focus {
+  border-color: rgba(200, 245, 66, 0.55);
+}
+
+.sa-label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.sa-panel {
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border-radius: 20px;
+  padding: 1.25rem;
+}
+
+.sa-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.sa-badge-live {
+  color: #081018;
+  background: var(--accent);
+  border-color: transparent;
+  font-weight: 700;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sa-rise {
+  animation: rise 0.55s ease both;
+}
+
+.sa-rise-delay {
+  animation-delay: 0.12s;
+}
