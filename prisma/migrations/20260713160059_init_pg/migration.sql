@@ -39,12 +39,12 @@ CREATE TABLE "StrategyConfig" (
     "baseLots" DOUBLE PRECISION NOT NULL DEFAULT 0.01,
     "profitTarget" DOUBLE PRECISION NOT NULL DEFAULT 10,
     "profitScale" DOUBLE PRECISION NOT NULL DEFAULT 1,
-    "maxDcaLevel" INTEGER NOT NULL DEFAULT 5,
+    "maxDcaLevel" INTEGER NOT NULL DEFAULT 9,
     "devScale" DOUBLE PRECISION NOT NULL DEFAULT 0.15,
     "finalSlExtraPct" DOUBLE PRECISION NOT NULL DEFAULT 5,
     "enableFinalSl" BOOLEAN NOT NULL DEFAULT true,
     "reenterAfterTp" BOOLEAN NOT NULL DEFAULT true,
-    "reenterAfterSl" BOOLEAN NOT NULL DEFAULT false,
+    "reenterAfterSl" BOOLEAN NOT NULL DEFAULT true,
     "symbols" TEXT NOT NULL DEFAULT 'EURUSD,XAUUSD',
 
     CONSTRAINT "StrategyConfig_pkey" PRIMARY KEY ("id")

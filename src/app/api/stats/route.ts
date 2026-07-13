@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/auth";
-import { runEngineTick } from "@/lib/engine";
 import { prisma } from "@/lib/db";
+import { syncMt5Account } from "@/lib/metaapi";
+
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 export async function POST() {
   const userId = await getSessionUserId();
   if (!userId) {
-    // allow anonymous demo tick only for accounts still in demo mode
-    await runEngineTick();
-    return NextResponse.json({ ok: true, at: new Date().toISOString() });
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const account = await prisma.brokerAccount.findFirst({
@@ -16,17 +17,73 @@ export async function POST() {
     orderBy: { createdAt: "desc" },
   });
 
-  // Live accounts are driven by MT5 EA sync — do not run paper engine
-  if (account?.mode === "live") {
+  if (!account?.metaApiAccountId) {
     return NextResponse.json({
-      ok: true,
-      skipped: "live",
-      lastSyncAt: account.lastSyncAt,
-      at: new Date().toISOString(),
+      ok: false,
+      error: "MetaAPI에 연결된 실계좌가 없습니다.",
     });
   }
 
-  await runEngineTick();
+  const snap = await syncMt5Account(account.metaApiAccountId);
+  if (!snap.ok) {
+    return NextResponse.json({ ok: false, error: snap.message }, { status: 400 });
+  }
+
+  await prisma.brokerAccount.update({
+    where: { id: account.id },
+    data: {
+      balance: snap.balance,
+      equity: snap.equity,
+      lastSyncAt: new Date(),
+      mode: "live",
+      status: "connected",
+    },
+  });
+
+  await prisma.basketLeg.deleteMany({
+    where: { basket: { accountId: account.id, status: "open" } },
+  });
+  await prisma.basket.deleteMany({
+    where: { accountId: account.id, status: "open" },
+  });
+
+  const bySymbol = new Map<string, typeof snap.positions>();
+  for (const p of snap.positions) {
+    const list = bySymbol.get(p.symbol) ?? [];
+    list.push(p);
+    bySymbol.set(p.symbol, list);
+  }
+  for (const [symbol, legs] of bySymbol) {
+    const first = legs[0];
+    const unrealized = legs.reduce((s, l) => s + l.profit, 0);
+    await prisma.basket.create({
+      data: {
+        accountId: account.id,
+        symbol,
+        direction: first.direction,
+        filledLevel: Math.max(0, legs.length - 1),
+        firstEntryPrice: first.price,
+        status: "open",
+        unrealizedPnl: unrealized,
+        legs: {
+          create: legs.map((l, idx) => ({
+            level: idx,
+            lots: l.lots,
+            price: l.price,
+          })),
+        },
+      },
+    });
+  }
+
+  await prisma.equitySnapshot.create({
+    data: {
+      accountId: account.id,
+      equity: snap.equity,
+      balance: snap.balance,
+    },
+  });
+
   return NextResponse.json({ ok: true, at: new Date().toISOString() });
 }
 
@@ -63,6 +120,7 @@ export async function GET() {
       server: account.server,
       mode: account.mode,
       status: account.status,
+      metaApiAccountId: account.metaApiAccountId,
       lastSyncAt: account.lastSyncAt,
       syncAgeSec,
       botEnabled: account.botEnabled,

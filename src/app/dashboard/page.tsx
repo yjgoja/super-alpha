@@ -176,31 +176,31 @@ export default function DashboardPage() {
           <div className="mt-2 flex flex-wrap gap-2">
             <span className="sa-badge sa-badge-live">
               {account.mode === "live" && account.status === "connected"
-                ? "MT5 LIVE"
-                : account.status === "pending"
-                  ? "EA 대기중"
-                  : "미연결"}
+                ? "MT5 METAAPI LIVE"
+                : "미연결"}
             </span>
             <span className="sa-badge">
               {account.login} · {account.server}
             </span>
             <span className="sa-badge">
-              {account.mode === "live"
-                ? account.syncAgeSec != null
-                  ? `동기화 ${account.syncAgeSec}s 전`
-                  : "동기화 대기"
-                : "실데이터 대기"}
+              {account.syncAgeSec != null
+                ? `동기화 ${account.syncAgeSec}s 전`
+                : "동기화 없음"}
             </span>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {account.mode !== "live" && (
-            <button className="sa-btn sa-btn-primary" disabled={busy} onClick={toggleBot}>
-              {account.botEnabled ? "페이퍼 정지" : "페이퍼 시작"}
-            </button>
-          )}
-          <button className="sa-btn sa-btn-ghost" disabled={busy} onClick={resume}>
-            재진입 재개
+          <button
+            className="sa-btn sa-btn-primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await fetch("/api/stats", { method: "POST" });
+              await load();
+              setBusy(false);
+            }}
+          >
+            지금 동기화
           </button>
           <button className="sa-btn sa-btn-ghost" onClick={logout}>
             로그아웃
@@ -209,36 +209,14 @@ export default function DashboardPage() {
       </header>
 
       {account.status !== "connected" || account.mode !== "live" ? (
-        <section className="sa-panel mt-4 border-[var(--accent)]/30">
-          <div className="text-sm font-semibold text-[var(--accent)]">
-            MT5 실연동 방법 (토큰 없음)
-          </div>
+        <section className="sa-panel mt-4 border-[var(--danger)]/40">
+          <div className="text-sm font-semibold text-[var(--danger)]">실계좌 미연결</div>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            웹에 등록한 <strong>MT5 계좌번호 + 거래 비밀번호</strong>를 EA에도 그대로
-            넣으면 됩니다. Sync Token은 더 이상 필요 없습니다.
+            MetaAPI로 MT5 계좌를 검증·연결해야 대시보드 실데이터가 표시됩니다.
           </p>
-          <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
-            <div>
-              <div className="sa-label">InpWebUrl</div>
-              <code className="break-all text-[var(--accent2)]">
-                https://super-alpha-inky.vercel.app
-              </code>
-            </div>
-            <div>
-              <div className="sa-label">InpWebPassword</div>
-              <code className="text-[var(--accent2)]">웹에 입력한 MT5 거래 비밀번호</code>
-            </div>
-            <div className="md:col-span-2">
-              <div className="sa-label">계좌번호</div>
-              <code className="text-[var(--accent2)]">
-                EA가 자동으로 AccountInfo Login({account.login}) 사용
-              </code>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-[var(--muted)]">
-            MT5: 도구 → 옵션 → 전문가 어드바이저 → WebRequest에
-            https://super-alpha-inky.vercel.app 허용. 비밀번호가 다르면 동기화 거부됩니다.
-          </p>
+          <Link href="/connect" className="sa-btn sa-btn-primary mt-4 inline-flex">
+            실계좌 연결하기
+          </Link>
         </section>
       ) : null}
 
@@ -316,7 +294,7 @@ export default function DashboardPage() {
                       {b.symbol} · {b.direction}
                     </div>
                     <div className="text-sm text-[var(--muted)]">
-                      Level {b.filledLevel}/{account.config?.maxDcaLevel ?? 5} ·{" "}
+                      Level {b.filledLevel}/{account.config?.maxDcaLevel ?? 9} ·{" "}
                       {fmt(lots, 2)} lots · entry {fmt(b.firstEntryPrice, 5)}
                     </div>
                   </div>

@@ -29,6 +29,7 @@ model BrokerAccount {
   status          String   @default("connected")
   syncToken       String?
   lastSyncAt      DateTime?
+  metaApiAccountId String?
   botEnabled      Boolean  @default(false)
   balance         Float    @default(10000)
   equity          Float    @default(10000)
@@ -56,12 +57,12 @@ model StrategyConfig {
   baseLots        Float   @default(0.01)
   profitTarget    Float   @default(10)
   profitScale     Float   @default(1)
-  maxDcaLevel     Int     @default(5)
+  maxDcaLevel     Int     @default(9)
   devScale        Float   @default(0.15)
   finalSlExtraPct Float   @default(5)
   enableFinalSl   Boolean @default(true)
   reenterAfterTp  Boolean @default(true)
-  reenterAfterSl  Boolean @default(false)
+  reenterAfterSl  Boolean @default(true)
   symbols         String  @default("EURUSD,XAUUSD")
 }
 

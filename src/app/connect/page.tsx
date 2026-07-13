@@ -29,7 +29,7 @@ export default function ConnectPage() {
       return;
     }
     setDone(true);
-    setTimeout(() => router.push("/dashboard"), 1800);
+    setTimeout(() => router.push("/dashboard"), 1200);
   }
 
   return (
@@ -39,21 +39,19 @@ export default function ConnectPage() {
           <Link href="/" className="font-display text-2xl">
             Super Alpha
           </Link>
-          <span className="sa-badge sa-badge-live">ZeroMarkets-1</span>
+          <span className="sa-badge sa-badge-live">MetaAPI 검증</span>
         </div>
 
-        <h1 className="mt-6 text-2xl font-semibold">MT5 계좌 연결</h1>
+        <h1 className="mt-6 text-2xl font-semibold">MT5 실계좌 연결</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          실제 MT5 계좌번호와 거래 비밀번호를 입력하세요. 별도 토큰은 없습니다.
-          EA가 같은 비밀번호로 동기화해야 대시보드에 실데이터가 표시됩니다.
+          MetaAPI가 ZeroMarkets-1 브로커에 직접 로그인해 계좌·비밀번호가 맞는지
+          확인합니다. 틀리면 등록되지 않습니다.
         </p>
 
         {done ? (
           <div className="mt-8 rounded-2xl border border-[var(--accent)]/40 bg-[rgba(200,245,66,0.08)] p-5">
-            <div className="font-display text-2xl text-[var(--accent)]">등록 완료</div>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              상태: 대기중 → MT5 EA 연동 후 LIVE로 전환됩니다.
-            </p>
+            <div className="font-display text-2xl text-[var(--accent)]">실계좌 검증 완료</div>
+            <p className="mt-2 text-sm text-[var(--muted)]">대시보드로 이동합니다…</p>
           </div>
         ) : (
           <div className="mt-6 space-y-4">
@@ -70,7 +68,7 @@ export default function ConnectPage() {
               />
             </div>
             <div>
-              <label className="sa-label">거래 비밀번호 (MT5 Password)</label>
+              <label className="sa-label">거래 비밀번호</label>
               <input
                 className="sa-input"
                 type="password"
@@ -87,12 +85,8 @@ export default function ConnectPage() {
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>
-              {loading ? "등록 중…" : "계좌 등록하기"}
+              {loading ? "브로커 검증 중… (최대 1분)" : "실계좌 검증 후 연결"}
             </button>
-            <p className="text-xs text-[var(--muted)]">
-              잘못된 비밀번호로 등록하면 EA 동기화가 거부됩니다. 브로커 서버에 직접
-              로그인 검증은 MetaAPI 연동 단계에서 추가됩니다.
-            </p>
           </div>
         )}
       </form>

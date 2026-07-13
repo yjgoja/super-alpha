@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId, hashPassword, verifyPassword } from "@/lib/auth";
+import { getSessionUserId, hashPassword } from "@/lib/auth";
 import { FIXED_MT5_SERVER } from "@/lib/dca";
 import { prisma } from "@/lib/db";
+import { verifyMt5Credentials } from "@/lib/metaapi";
+
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 const schema = z.object({
   login: z
@@ -29,15 +33,13 @@ export async function POST(req: Request) {
     }
     const { login, password } = parsed.data;
     const server = FIXED_MT5_SERVER;
-    const passwordHash = await hashPassword(password);
 
-    // 다른 유저가 이미 등록한 계좌면 거부
     const taken = await prisma.brokerAccount.findFirst({
       where: { login, NOT: { userId } },
     });
     if (taken) {
       return NextResponse.json(
-        { error: "이미 다른 계정에 등록된 MT5 계좌번호입니다." },
+        { error: "이미 다른 회원에게 등록된 MT5 계좌입니다." },
         { status: 409 },
       );
     }
@@ -47,22 +49,43 @@ export async function POST(req: Request) {
       orderBy: { createdAt: "desc" },
     });
 
+    // Real broker validation via MetaAPI — rejects wrong login/password
+    const verified = await verifyMt5Credentials({
+      login,
+      password,
+      server,
+      reuseAccountId: existing?.metaApiAccountId,
+    });
+
+    if (!verified.ok) {
+      return NextResponse.json(
+        {
+          error: verified.message,
+          code: verified.code,
+        },
+        { status: verified.code === "NO_TOKEN" ? 503 : 401 },
+      );
+    }
+
+    const passwordHash = await hashPassword(password);
+
     let account;
     if (existing) {
-      // 같은 계좌 재연결: 비번 갱신 / 다른 계좌로 변경 허용
       account = await prisma.brokerAccount.update({
         where: { id: existing.id },
         data: {
           login,
           passwordEnc: passwordHash,
           server,
-          status: "pending", // EA 실동기화 전까지 대기
-          mode: "demo",
-          lastSyncAt: null,
-          syncToken: null,
-          balance: 0,
-          equity: 0,
-          // startingBalance는 첫 live sync에서 설정
+          status: "connected",
+          mode: "live",
+          metaApiAccountId: verified.metaApiAccountId,
+          lastSyncAt: new Date(),
+          balance: verified.balance,
+          equity: verified.equity,
+          startingBalance:
+            existing.startingBalance > 0 ? existing.startingBalance : verified.balance,
+          botEnabled: true,
         },
       });
       if (!(await prisma.strategyConfig.findUnique({ where: { accountId: account.id } }))) {
@@ -75,34 +98,81 @@ export async function POST(req: Request) {
           login,
           passwordEnc: passwordHash,
           server,
-          mode: "demo",
-          status: "pending",
-          balance: 0,
-          equity: 0,
-          startingBalance: 0,
+          mode: "live",
+          status: "connected",
+          metaApiAccountId: verified.metaApiAccountId,
+          lastSyncAt: new Date(),
+          balance: verified.balance,
+          equity: verified.equity,
+          startingBalance: verified.balance,
+          botEnabled: true,
           config: { create: {} },
         },
       });
     }
 
+    // Refresh open baskets from MetaAPI positions
+    await prisma.basketLeg.deleteMany({
+      where: { basket: { accountId: account.id, status: "open" } },
+    });
+    await prisma.basket.deleteMany({
+      where: { accountId: account.id, status: "open" },
+    });
+
+    const bySymbol = new Map<string, typeof verified.positions>();
+    for (const p of verified.positions) {
+      const list = bySymbol.get(p.symbol) ?? [];
+      list.push(p);
+      bySymbol.set(p.symbol, list);
+    }
+    for (const [symbol, legs] of bySymbol) {
+      const first = legs[0];
+      const unrealized = legs.reduce((s, l) => s + l.profit, 0);
+      await prisma.basket.create({
+        data: {
+          accountId: account.id,
+          symbol,
+          direction: first.direction,
+          filledLevel: Math.max(0, legs.length - 1),
+          firstEntryPrice: first.price,
+          status: "open",
+          unrealizedPnl: unrealized,
+          legs: {
+            create: legs.map((l, idx) => ({
+              level: idx,
+              lots: l.lots,
+              price: l.price,
+            })),
+          },
+        },
+      });
+    }
+
+    await prisma.equitySnapshot.create({
+      data: {
+        accountId: account.id,
+        equity: verified.equity,
+        balance: verified.balance,
+      },
+    });
+
     return NextResponse.json({
       ok: true,
-      message:
-        "계좌가 등록되었습니다. MT5 EA에 같은 계좌 비밀번호를 넣으면 실데이터로 연결됩니다. (별도 토큰 불필요)",
+      message: "MetaAPI 실계좌 검증 완료 — 연결되었습니다.",
       account: {
         id: account.id,
         login: account.login,
         server: account.server,
         mode: account.mode,
         status: account.status,
-      },
-      eaHint: {
-        url: "https://super-alpha-inky.vercel.app",
-        loginFromAccount: true,
-        password: "웹에 입력한 MT5 거래 비밀번호와 동일",
+        balance: account.balance,
+        equity: account.equity,
+        currency: verified.currency,
+        leverage: verified.leverage,
       },
     });
   } catch (e) {
+    console.error(e);
     const msg = e instanceof Error ? e.message : "연결 실패";
     return NextResponse.json({ error: msg }, { status: 400 });
   }
