@@ -34,8 +34,15 @@ async function seedAdmin() {
     .trim()
     .toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD;
+  // Never overwrite prod admin hash unless SEED_ADMIN_PASSWORD is explicitly set
   if (!password || password.length < 8) {
-    throw new Error("SEED_ADMIN_PASSWORD required for e2e-verify seed/login");
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (!existing) {
+      throw new Error(
+        "Admin missing and SEED_ADMIN_PASSWORD unset — set SEED_ADMIN_PASSWORD to seed once",
+      );
+    }
+    return { email: existing.email, id: existing.id, password: null as string | null };
   }
   const passwordHash = await hash(password, 10);
   const user = await prisma.user.upsert({
@@ -172,19 +179,23 @@ async function main() {
   }
 
   console.log("\n=== 6) Prod auth ===");
-  const authRes = await fetch("https://super-alpha-inky.vercel.app/api/auth", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: admin.email,
-      password: admin.password,
-      mode: "login",
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const authBody = await authRes.text();
-  console.log("auth", authRes.status, authBody.slice(0, 200));
-  assert(authRes.status === 200, "prod login 200");
+  if (!admin.password) {
+    console.log("SKIP: prod login (set SEED_ADMIN_PASSWORD to exercise login)");
+  } else {
+    const authRes = await fetch("https://super-alpha-inky.vercel.app/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: admin.email,
+        password: admin.password,
+        mode: "login",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const authBody = await authRes.text();
+    console.log("auth", authRes.status, authBody.slice(0, 200));
+    assert(authRes.status === 200, "prod login 200");
+  }
 
   console.log("\n=== 7) Open bots/baskets ===");
   const bots = await prisma.symbolBot.findMany();
@@ -208,7 +219,7 @@ async function main() {
   console.log(
     JSON.stringify(
       {
-        adminLogin: { email: admin.email, passwordSet: true },
+        adminLogin: { email: admin.email, passwordSet: !!admin.password },
         note:
           "accounts=0 until MT5 connected + bot ON. DCA math verified for deep-loss screenshot cases.",
       },

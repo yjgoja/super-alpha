@@ -32,7 +32,7 @@ jobs:
           echo "HTTP $code"
           head -c 2000 /tmp/tick.json || true
           echo
-# Soft-fail only for transient 5xx; auth/config errors must fail the job
+          # Soft-fail only for transient 5xx; auth/config errors must fail the job
           if [ "$code" = "200" ]; then
             exit 0
           fi
@@ -40,7 +40,7 @@ jobs:
             echo "tick auth failed HTTP $code — check CRON_SECRET"
             exit 1
           fi
-          if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
+          if [ "$code" = "000" ] || [ "$code" -ge 500 ] 2>/dev/null; then
             echo "tick soft-fail HTTP $code (retry next minute)"
             exit 0
           fi
