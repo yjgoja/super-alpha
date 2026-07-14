@@ -410,7 +410,7 @@ export const MT5_REF_MID: Record<string, number> = {
   EURUSD: 1.085,
   GBPUSD: 1.27,
   USDJPY: 155,
-  XAUUSD: 2350,
+  XAUUSD: 4080,
   XAUEUR: 2150,
   XAGUSD: 28,
   BTCUSD: 65000,

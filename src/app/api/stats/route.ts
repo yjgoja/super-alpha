@@ -1,19 +1,25 @@
 import { NextResponse } from "next/server";
-import { getSessionUserId } from "@/lib/auth";
+import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
+import { gateErrorKo } from "@/lib/ko-errors";
 import { syncMt5Account } from "@/lib/metaapi";
+import { runDcaTick } from "@/lib/meta-engine";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
+/**
+ * Soft equity sync only — never rebuild baskets (that desynced filledLevel vs engine).
+ * When bot is ON, also run one user-scoped DCA tick (supplement to GHA / local engine).
+ */
 export async function POST() {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
 
   const account = await prisma.brokerAccount.findFirst({
-    where: { userId },
+    where: { userId: gate.user.id },
     orderBy: { createdAt: "desc" },
   });
 
@@ -36,63 +42,34 @@ export async function POST() {
       equity: snap.equity,
       lastSyncAt: new Date(),
       mode: "live",
-      status: "connected",
+      status: account.botEnabled ? "connected" : account.status,
     },
   });
 
-  await prisma.basketLeg.deleteMany({
-    where: { basket: { accountId: account.id, status: "open" } },
-  });
-  await prisma.basket.deleteMany({
-    where: { accountId: account.id, status: "open" },
-  });
-
-  const bySymbol = new Map<string, typeof snap.positions>();
-  for (const p of snap.positions) {
-    const list = bySymbol.get(p.symbol) ?? [];
-    list.push(p);
-    bySymbol.set(p.symbol, list);
-  }
-  for (const [symbol, legs] of bySymbol) {
-    const first = legs[0];
-    const unrealized = legs.reduce((s, l) => s + l.profit, 0);
-    await prisma.basket.create({
-      data: {
-        accountId: account.id,
-        symbol,
-        direction: first.direction,
-        filledLevel: Math.max(0, legs.length - 1),
-        firstEntryPrice: first.price,
-        status: "open",
-        unrealizedPnl: unrealized,
-        legs: {
-          create: legs.map((l, idx) => ({
-            level: idx,
-            lots: l.lots,
-            price: l.price,
-          })),
-        },
-      },
-    });
+  let tick: unknown = null;
+  if (account.botEnabled && account.status !== "failed") {
+    try {
+      tick = await runDcaTick(account.id);
+    } catch (e) {
+      tick = { ok: false, error: e instanceof Error ? e.message : "tick error" };
+    }
   }
 
-  await prisma.equitySnapshot.create({
-    data: {
-      accountId: account.id,
-      equity: snap.equity,
-      balance: snap.balance,
-    },
+  return NextResponse.json({
+    ok: true,
+    at: new Date().toISOString(),
+    tick,
   });
-
-  return NextResponse.json({ ok: true, at: new Date().toISOString() });
 }
 
 export async function GET() {
-  const userId = await getSessionUserId();
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
+  }
 
   const account = await prisma.brokerAccount.findFirst({
-    where: { userId },
+    where: { userId: gate.user.id },
     include: {
       config: true,
       baskets: { where: { status: "open" }, include: { legs: true } },
@@ -120,6 +97,7 @@ export async function GET() {
       server: account.server,
       mode: account.mode,
       status: account.status,
+      statusMessage: account.statusMessage,
       metaApiAccountId: account.metaApiAccountId,
       lastSyncAt: account.lastSyncAt,
       syncAgeSec,

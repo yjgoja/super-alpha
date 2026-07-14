@@ -201,8 +201,7 @@ export async function findMetaAccountByLogin(login: string) {
     list.find((a) => a.name === `SA-${want}`) ||
     list.find((a) => a.name.includes(want));
   if (exact) return exact;
-  // Single-account MetaAPI workspace: reuse it when resolving a stuck link
-  if (list.length === 1 && list[0].id) return list[0];
+  // Never reuse an unrelated MetaAPI account (multi-user safety).
   return null;
 }
 

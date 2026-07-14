@@ -4,7 +4,7 @@ type Quote = { bid: number; ask: number };
 
 const FALLBACK: Record<string, Quote> = {
   EURUSD: { bid: 1.085, ask: 1.0853 },
-  XAUUSD: { bid: 2350.2, ask: 2350.6 },
+  XAUUSD: { bid: 4080.2, ask: 4080.6 },
 };
 
 function jitter(q: Quote, vol: number): Quote {

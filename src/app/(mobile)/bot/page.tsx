@@ -5,11 +5,13 @@ import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
   DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
+  MT5_REF_MID,
   calcDca1000Defense,
   mt5TpMoneyTarget,
   roiToPricePct,
 } from "@/lib/dca1000";
 import { getTableLevels, isMartinLogic, martinMaxLevels, previewMartinLots, tableLogicMeta } from "@/lib/table-logics";
+import type { Dca1000Level } from "@/lib/dca1000";
 
 /** 표 기본 익절 ROI% (코인선물 profit 컬럼) */
 const DEFAULT_TP_ROI = 20;
@@ -76,6 +78,7 @@ function DefenseCard({
 
 export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
+  const [logicLevels, setLogicLevels] = useState<Record<string, Dca1000Level[]>>({});
   const [groups, setGroups] = useState<Group[]>([...SYMBOL_GROUPS]);
   const [botEnabled, setBotEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -86,6 +89,12 @@ export default function BotPage() {
   const [ready, setReady] = useState(false);
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
+
+  function levelsFor(logic: string, mult: number): Dca1000Level[] {
+    const saved = logicLevels[logic];
+    if (saved && saved.length > 0) return saved;
+    return getTableLevels(logic, mult);
+  }
 
   const defense = useMemo(() => {
     if (!edit) return DCA1000_DEFAULT_DEFENSE;
@@ -98,7 +107,7 @@ export default function BotPage() {
     return calcDca1000Defense({
       stopLossRoiPct: sl > 0 ? sl : DCA1000_DEFAULT_SL_ROI,
       startLots: Number(draft.startLots ?? 0.01),
-      levels: getTableLevels(logic, mult),
+      levels: levelsFor(logic, mult),
       symbol: edit,
     });
   }, [
@@ -108,6 +117,7 @@ export default function BotPage() {
     draft.stopLossEnabled,
     draft.startLots,
     draft.entryMultiplier,
+    logicLevels,
   ]);
 
   const martinPreview = useMemo(() => {
@@ -123,12 +133,15 @@ export default function BotPage() {
     if (!edit) return null;
     const lots = Number(draft.startLots ?? 0.01);
     const tpRoi = Number(draft.takeProfitPct ?? DEFAULT_TP_ROI);
+    const sym = edit.toUpperCase();
     const mid =
-      edit.toUpperCase().includes("XAU") || edit.toUpperCase() === "GOLD"
-        ? 4080
-        : edit.toUpperCase().includes("EUR")
-          ? 1.085
-          : 2000;
+      MT5_REF_MID[
+        sym.includes("XAU") || sym === "GOLD"
+          ? "XAUUSD"
+          : sym.includes("EUR")
+            ? "EURUSD"
+            : sym
+      ] ?? (sym.includes("XAU") ? MT5_REF_MID.XAUUSD : MT5_REF_MID.EURUSD);
     return mt5TpMoneyTarget({
       symbol: edit,
       lots,
@@ -154,6 +167,7 @@ export default function BotPage() {
       return;
     }
     setBots(botsData.bots || []);
+    if (botsData.logicLevels) setLogicLevels(botsData.logicLevels);
     if (botsData.options?.groups) setGroups(botsData.options.groups);
     setBotEnabled(!!statsData.account.botEnabled);
     setReady(true);
@@ -383,7 +397,7 @@ export default function BotPage() {
                     ? bot.stopLossPct
                     : DCA1000_DEFAULT_SL_ROI,
                 startLots: bot.startLots,
-                levels: getTableLevels(
+                levels: levelsFor(
                   bot.logic || "dca_1000",
                   isMartinLogic(bot.logic || "")
                     ? bot.entryMultiplier > 1

@@ -10,6 +10,8 @@ import {
   isMartinLogic,
   tableLogicMeta,
 } from "@/lib/table-logics";
+import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
+import type { Prisma } from "@prisma/client";
 
 async function getAccount(userId: string) {
   return prisma.brokerAccount.findFirst({
@@ -113,6 +115,20 @@ export async function GET() {
   return NextResponse.json({
     bots,
     options: { symbols: SYMBOL_OPTIONS, groups: SYMBOL_GROUPS, logics: LOGIC_OPTIONS },
+    /** Per-logic resolved DCA levels (includes StrategyLogic overrides) for UI defense width */
+    logicLevels: Object.fromEntries(
+      await Promise.all(
+        [...new Set(bots.map((b) => b.logic))].map(async (logic) => {
+          const resolved = await resolveStrategyForAccount(account.id, logic, {
+            startLots: bots.find((b) => b.logic === logic)?.startLots ?? 0.01,
+            entryMultiplier:
+              bots.find((b) => b.logic === logic)?.entryMultiplier ??
+              defaultEntryMultiplier(logic),
+          });
+          return [logic, resolved.levels] as const;
+        }),
+      ),
+    ),
   });
 }
 
@@ -191,6 +207,36 @@ export async function PUT(req: Request) {
       ...(body.stopOnSl != null ? { stopOnSl: body.stopOnSl } : {}),
     },
   });
+
+  // Keep StrategyLogic override in sync so engine lots/TP/SL match /bot edits
+  const logicId = bot.logic;
+  const existing = await prisma.strategyLogic.findUnique({
+    where: { accountId_logicId: { accountId: account.id, logicId } },
+  });
+  if (existing) {
+    const prev = (existing.payload || {}) as Record<string, unknown>;
+    const nextPayload: Record<string, unknown> = {
+      ...prev,
+      mode: (prev.mode as "bulk" | "levels") || (isMartinLogic(logicId) ? "levels" : "bulk"),
+      ...(body.startLots != null ? { startLots: bot.startLots } : {}),
+      ...(body.takeProfitPct != null ? { takeProfitPct: bot.takeProfitPct } : {}),
+      ...(body.stopLossPct != null ? { stopLossPct: bot.stopLossPct } : {}),
+    };
+    if (Array.isArray(prev.levels) && body.startLots != null) {
+      const rows = prev.levels as Array<{ lots: number; profit: number; drop: number }>;
+      if (rows.length > 0) {
+        const ratio = bot.startLots / Math.max(0.01, rows[0].lots || 0.01);
+        nextPayload.levels = rows.map((r, i) => ({
+          ...r,
+          lots: i === 0 ? bot.startLots : Math.max(0.01, Math.round(r.lots * ratio * 100) / 100),
+        }));
+      }
+    }
+    await prisma.strategyLogic.update({
+      where: { id: existing.id },
+      data: { payload: nextPayload as Prisma.InputJsonValue },
+    });
+  }
 
   return NextResponse.json({ ok: true, bot });
 }

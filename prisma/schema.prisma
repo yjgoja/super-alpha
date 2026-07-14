@@ -38,6 +38,8 @@ model BrokerAccount {
   botEnabled       Boolean   @default(false)
   /// When bot was last turned OFF (null while bot running). Used for 24h idle undeploy.
   botStoppedAt     DateTime?
+  /// Cross-process tick mutex (local engine + GHA + Vercel). Stale after ~90s.
+  tickLockedAt     DateTime?
   balance          Float     @default(0)
   equity           Float     @default(0)
   startingBalance  Float     @default(0)
@@ -84,17 +86,16 @@ model SymbolBot {
   account          BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   symbol           String
   enabled          Boolean @default(true)
-  /// dca_martingale | dca_fixed | grid_basic
-  logic            String  @default("dca_martingale")
+  logic            String  @default("dca_1000")
   direction        String  @default("BUY")
   entryCount       Int     @default(10)
   entryMultiplier  Float   @default(2)
   entryIntervalPct Float   @default(5)
-  takeProfitPct    Float   @default(1)
+  takeProfitPct    Float   @default(20)
   startLots        Float   @default(0.01)
   repeatEnabled    Boolean @default(true)
-  stopLossPct      Float   @default(0)
-  stopLossEnabled  Boolean @default(false)
+  stopLossPct      Float   @default(225)
+  stopLossEnabled  Boolean @default(true)
   stopOnSl         Boolean @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

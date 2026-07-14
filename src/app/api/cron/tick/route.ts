@@ -9,11 +9,13 @@ export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get("authorization");
   const isVercelCron = req.headers.get("x-vercel-cron") === "1";
+  // Prefer Authorization header; query ?secret= accepted for legacy but avoid logging URLs with it
   const url = new URL(req.url);
   const q = url.searchParams.get("secret");
   const ok =
-    isVercelCron ||
-    (secret && (auth === `Bearer ${secret}` || q === secret));
+    (secret && auth === `Bearer ${secret}`) ||
+    (secret && q === secret) ||
+    (isVercelCron && !!secret);
   if (!ok) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }

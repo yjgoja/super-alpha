@@ -420,7 +420,7 @@ async function runSymbolTableDca(
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
   const adverse = mt5DcaAdversePct(direction, basket.firstEntryPrice, price.bid, price.ask);
 
-  // 익절·물타기 공통: MT5 사용증거금 기준 ROI (바이낸스와 동일, 레버 1:500)
+  // 익절: SymbolBot 우선, StrategyLogic 오버라이드 보조 (양방향 동기화됨)
   const tpRoi =
     cfg.takeProfitPct > 0
       ? cfg.takeProfitPct
@@ -943,15 +943,48 @@ async function runSymbolDca(
 const tickLocks = new Set<string>();
 const lastEquitySnapAt = new Map<string, number>();
 
-export async function runDcaTick(accountId: string) {
-  if (tickLocks.has(accountId)) {
-    return { skipped: true as const, reason: "busy" };
+const TICK_LOCK_STALE_MS = 90_000;
+
+/** In-process + DB mutex so local engine / GHA / serverless don't double-trade. */
+async function tryAcquireTickLock(accountId: string): Promise<boolean> {
+  if (tickLocks.has(accountId)) return false;
+  const staleBefore = new Date(Date.now() - TICK_LOCK_STALE_MS);
+  try {
+    const grabbed = await prisma.$executeRaw`
+      UPDATE "BrokerAccount"
+      SET "tickLockedAt" = NOW()
+      WHERE "id" = ${accountId}
+        AND ("tickLockedAt" IS NULL OR "tickLockedAt" < ${staleBefore})
+    `;
+    if (Number(grabbed) < 1) return false;
+  } catch {
+    // Column missing / DB flake: fall back to in-process lock only
   }
   tickLocks.add(accountId);
+  return true;
+}
+
+async function releaseTickLock(accountId: string) {
+  tickLocks.delete(accountId);
+  try {
+    await prisma.brokerAccount.update({
+      where: { id: accountId },
+      data: { tickLockedAt: null },
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function runDcaTick(accountId: string) {
+  const got = await tryAcquireTickLock(accountId);
+  if (!got) {
+    return { skipped: true as const, reason: "busy" };
+  }
   try {
     return await runDcaTickInner(accountId);
   } finally {
-    tickLocks.delete(accountId);
+    await releaseTickLock(accountId);
   }
 }
 
@@ -1051,19 +1084,22 @@ async function runDcaTickInner(accountId: string) {
     ];
   }
 
-  // 심볼명 사전 해석 (XAU→GOLD 등) — 병렬 진입 전 캐시 워밍
+  // 심볼명 사전 해석 (XAU→GOLD 등) — 진입 전 캐시 워밍
   await Promise.all(bots.map((b) => resolveBrokerSymbol(metaId, b.symbol)));
 
-  // EUR + XAU 등 켠 종목 동시 처리
-  const results = await Promise.all(
-    bots.map((bot) =>
-      runSymbolDca(account.id, metaId, bot, account.baskets, snap.positions).catch((e) => ({
+  // 동일 계좌 증거금 레이스 방지: 종목 순차 처리 (TP→SL→DCA 순서는 심볼 내부)
+  const results = [];
+  for (const bot of bots) {
+    try {
+      results.push(await runSymbolDca(account.id, metaId, bot, account.baskets, snap.positions));
+    } catch (e) {
+      results.push({
         ok: false as const,
         symbol: bot.symbol,
         error: e instanceof Error ? e.message : "symbol tick error",
-      })),
-    ),
-  );
+      });
+    }
+  }
 
   const failNotes = results
     .filter((r) => r && typeof r === "object" && "error" in r && (r as { error?: string }).error)
@@ -1111,6 +1147,7 @@ async function runDcaTickInner(accountId: string) {
 
 export async function runAllBots() {
   const { undeployIdleAccounts } = await import("./cost-optimize");
+  const { ensureCloudLive } = await import("./metaapi");
   // Opportunistic cleanup when any bot tick runs (Hobby cron is once/day)
   try {
     await undeployIdleAccounts(24);
@@ -1119,12 +1156,35 @@ export async function runAllBots() {
   }
 
   const accounts = await prisma.brokerAccount.findMany({
-    where: { botEnabled: true, status: "connected", metaApiAccountId: { not: null } },
-    select: { id: true },
+    where: {
+      botEnabled: true,
+      metaApiAccountId: { not: null },
+      status: { in: ["connected", "undeployed"] },
+    },
+    select: { id: true, status: true, metaApiAccountId: true },
   });
   const results = [];
   for (const a of accounts) {
     try {
+      if (a.status === "undeployed" && a.metaApiAccountId) {
+        const live = await ensureCloudLive(String(a.metaApiAccountId), 45000);
+        if (!live.ok) {
+          results.push({
+            id: a.id,
+            ok: false,
+            error: live.message || "redeploy failed",
+          });
+          continue;
+        }
+        await prisma.brokerAccount.update({
+          where: { id: a.id },
+          data: {
+            status: "connected",
+            botStoppedAt: null,
+            statusMessage: "클라우드 재활성화 · 봇 실행 중",
+          },
+        });
+      }
       results.push({ id: a.id, ...(await runDcaTick(a.id)) });
     } catch (e) {
       results.push({

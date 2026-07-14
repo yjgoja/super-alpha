@@ -8,8 +8,10 @@ export const SESSION_COOKIE = "sa_session";
 function secret() {
   const s = process.env.AUTH_SECRET;
   if (!s || s.length < 16) {
-    // still allow, but warn in logs
-    console.warn("AUTH_SECRET missing or too short");
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTH_SECRET missing or too short (min 16 chars)");
+    }
+    console.warn("AUTH_SECRET missing or too short — using insecure demo fallback (dev only)");
   }
   return new TextEncoder().encode(s || "super-alpha-demo-secret-change-me");
 }

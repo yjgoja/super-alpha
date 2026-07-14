@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId, hashPassword } from "@/lib/auth";
+import { requireApprovedUser } from "@/lib/access";
+import { hashPassword } from "@/lib/auth";
 import { FIXED_MT5_SERVER } from "@/lib/dca";
 import { prisma } from "@/lib/db";
+import { gateErrorKo } from "@/lib/ko-errors";
 import { verifyMt5Credentials } from "@/lib/metaapi";
 
 export const maxDuration = 60;
@@ -18,10 +20,11 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
+  const userId = gate.user.id;
 
   try {
     const parsed = schema.safeParse(await req.json());
@@ -179,12 +182,12 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
   const account = await prisma.brokerAccount.findFirst({
-    where: { userId },
+    where: { userId: gate.user.id },
     include: { config: true },
     orderBy: { createdAt: "desc" },
   });

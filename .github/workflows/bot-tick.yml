@@ -32,8 +32,17 @@ jobs:
           echo "HTTP $code"
           head -c 2000 /tmp/tick.json || true
           echo
-          # DB 일시 장애 시에도 스케줄은 유지 (다음 분에 재시도)
-          if [ "$code" != "200" ]; then
-            echo "tick soft-fail HTTP $code"
+# Soft-fail only for transient 5xx; auth/config errors must fail the job
+          if [ "$code" = "200" ]; then
             exit 0
           fi
+          if [ "$code" = "403" ] || [ "$code" = "401" ]; then
+            echo "tick auth failed HTTP $code — check CRON_SECRET"
+            exit 1
+          fi
+          if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
+            echo "tick soft-fail HTTP $code (retry next minute)"
+            exit 0
+          fi
+          echo "tick failed HTTP $code"
+          exit 1

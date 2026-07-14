@@ -3,8 +3,9 @@
 import { useEffect } from "react";
 
 /**
- * 봇 ON 동안 백그라운드 틱.
- * Vercel Hobby cron은 하루 1회라서, 앱을 열어두면 10초마다 물타기/익절을 돌린다.
+ * While the app is open and bot is ON, soft-sync equity and run a user-scoped tick.
+ * Complements GHA (~1/min) and local engine (~2s); does not replace always-on workers.
+ * Does NOT rebuild baskets (that used to desync DCA levels).
  */
 export function BotHeartbeat() {
   useEffect(() => {

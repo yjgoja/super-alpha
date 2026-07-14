@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId } from "@/lib/auth";
+import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
+import { gateErrorKo } from "@/lib/ko-errors";
 
 const schema = z.object({
   baseLots: z.number().positive().optional(),
@@ -15,11 +16,13 @@ const schema = z.object({
 });
 
 export async function PATCH(req: Request) {
-  const userId = await getSessionUserId();
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
+  }
 
   const account = await prisma.brokerAccount.findFirst({
-    where: { userId },
+    where: { userId: gate.user.id },
     include: { config: true },
     orderBy: { createdAt: "desc" },
   });
@@ -36,11 +39,12 @@ export async function PATCH(req: Request) {
 }
 
 export async function POST() {
-  // Resume after SL/TP pause
-  const userId = await getSessionUserId();
-  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
+  }
   const account = await prisma.brokerAccount.findFirst({
-    where: { userId },
+    where: { userId: gate.user.id },
     orderBy: { createdAt: "desc" },
   });
   if (!account) return NextResponse.json({ error: "no account" }, { status: 400 });

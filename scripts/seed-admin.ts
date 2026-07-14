@@ -8,7 +8,10 @@ async function main() {
     .split(",")[0]
     .trim()
     .toLowerCase();
-  const password = process.env.SEED_ADMIN_PASSWORD || "SuperAlpha!2026";
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password || password.length < 8) {
+    throw new Error("SEED_ADMIN_PASSWORD env required (min 8 chars) — refuse hardcoded defaults");
+  }
   const passwordHash = await hash(password, 10);
 
   const user = await prisma.user.upsert({

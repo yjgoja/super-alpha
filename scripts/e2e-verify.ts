@@ -33,7 +33,10 @@ async function seedAdmin() {
     .split(",")[0]
     .trim()
     .toLowerCase();
-  const password = process.env.SEED_ADMIN_PASSWORD || "SuperAlpha!2026";
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password || password.length < 8) {
+    throw new Error("SEED_ADMIN_PASSWORD required for e2e-verify seed/login");
+  }
   const passwordHash = await hash(password, 10);
   const user = await prisma.user.upsert({
     where: { email },
@@ -205,7 +208,7 @@ async function main() {
   console.log(
     JSON.stringify(
       {
-        adminLogin: { email: admin.email, password: admin.password },
+        adminLogin: { email: admin.email, passwordSet: true },
         note:
           "accounts=0 until MT5 connected + bot ON. DCA math verified for deep-loss screenshot cases.",
       },
