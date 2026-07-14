@@ -7,6 +7,11 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "yjgoja@gmail.com")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
 
+/** When true, new registrations are approved immediately (default: admin gate). */
+export function autoApproveUsers(): boolean {
+  return process.env.AUTO_APPROVE_USERS === "1" || process.env.AUTO_APPROVE_USERS === "true";
+}
+
 export function isAdminEmail(email: string) {
   return ADMIN_EMAILS.includes(email.toLowerCase());
 }
@@ -33,14 +38,8 @@ export async function requireApprovedUser() {
   if (res.user.approvalStatus === "rejected") {
     return { error: "rejected" as const, status: 403 as const, user: null };
   }
-  // Membership is open; account connection is gated separately by admin provision.
   if (res.user.approvalStatus !== "approved") {
-    // auto-heal legacy pending (one-time write)
-    await prisma.user.update({
-      where: { id: res.user.id },
-      data: { approvalStatus: "approved" },
-    });
-    res.user.approvalStatus = "approved";
+    return { error: "pending_approval" as const, status: 403 as const, user: null };
   }
   return { error: null, status: 200 as const, user: res.user };
 }

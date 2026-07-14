@@ -58,7 +58,7 @@ model BrokerAccount {
   dailyStats DailyStat[]
 
   @@index([userId])
-  @@index([login])
+  @@unique([login])
   @@index([status])
 }
 

@@ -120,6 +120,19 @@ export async function PATCH(req: Request) {
         data: { approvalStatus: parsed.data.approvalStatus },
         select: { id: true, email: true, approvalStatus: true, role: true },
       });
+      // Rejected/pending must not keep trading via cron or live sync
+      if (parsed.data.approvalStatus === "rejected" || parsed.data.approvalStatus === "pending") {
+        await prisma.brokerAccount.updateMany({
+          where: { userId: parsed.data.userId },
+          data: {
+            botEnabled: false,
+            statusMessage:
+              parsed.data.approvalStatus === "rejected"
+                ? "관리자가 이용을 거절해 봇을 정지했습니다."
+                : "승인 대기로 전환되어 봇을 정지했습니다.",
+          },
+        });
+      }
       return NextResponse.json({ ok: true, user });
     }
 

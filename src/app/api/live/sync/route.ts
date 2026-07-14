@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { rateLimit } from "@/lib/rate-limit";
 
 const positionSchema = z.object({
   symbol: z.string(),
@@ -57,13 +58,31 @@ export async function POST(req: Request) {
       );
     }
 
+    const rl = rateLimit(`live-sync:${login}`, { limit: 60, windowMs: 60_000 });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "요청이 너무 많습니다." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } },
+      );
+    }
+
     const account = await prisma.brokerAccount.findFirst({
       where: { login },
+      include: { user: { select: { approvalStatus: true, role: true } } },
     });
     if (!account) {
       return NextResponse.json(
         { error: "등록되지 않은 계좌입니다. 웹에서 먼저 계좌를 연결하세요." },
         { status: 404 },
+      );
+    }
+
+    const ownerOk =
+      account.user.role === "admin" || account.user.approvalStatus === "approved";
+    if (!ownerOk) {
+      return NextResponse.json(
+        { error: "계정 승인 대기 중이거나 거절된 회원입니다." },
+        { status: 403 },
       );
     }
 

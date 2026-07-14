@@ -29,6 +29,10 @@ function LoginForm() {
       setError(data.error || "실패");
       return;
     }
+    if (data.approvalStatus && data.approvalStatus !== "approved") {
+      router.push("/pending");
+      return;
+    }
     router.push("/connect");
   }
 
@@ -74,7 +78,7 @@ function LoginForm() {
         {error && <p className="mt-4 text-sm text-[var(--danger)]">{error}</p>}
 
         <button className="sa-btn sa-btn-primary mt-6 w-full" disabled={loading}>
-          {loading ? "처리 중…" : mode === "login" ? "로그인" : "가입하고 계좌 연결"}
+          {loading ? "처리 중…" : mode === "login" ? "로그인" : "가입하기"}
         </button>
 
         <button

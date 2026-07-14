@@ -59,6 +59,10 @@ export type MetaErr = {
   message: string;
 };
 
+async function sleep(ms: number) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
 async function api(
   base: string,
   method: string,
@@ -71,26 +75,47 @@ async function api(
     throw Object.assign(new Error("MetaAPI 토큰이 없습니다."), { code: "NO_TOKEN" });
   }
 
-  const res = await fetch(`${base}${pathName}`, {
-    method,
-    headers: {
-      "auth-token": t,
-      Accept: "application/json",
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...extraHeaders,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
+  const maxAttempts = 4;
+  let lastStatus = 0;
+  let lastData: unknown = null;
 
-  const text = await res.text();
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text, message: text };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(`${base}${pathName}`, {
+      method,
+      headers: {
+        "auth-token": t,
+        Accept: "application/json",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...extraHeaders,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+
+    const text = await res.text();
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text, message: text };
+    }
+    lastStatus = res.status;
+    lastData = data;
+
+    const retryable = res.status === 429 || res.status === 503;
+    if (retryable && attempt < maxAttempts) {
+      const ra = res.headers.get("retry-after");
+      const parsed = ra ? Number(ra) * 1000 : NaN;
+      const backoff = Number.isFinite(parsed)
+        ? Math.min(parsed, 8_000)
+        : Math.min(1000 * 2 ** (attempt - 1), 8_000);
+      await sleep(backoff);
+      continue;
+    }
+    return { status: res.status, data };
   }
-  return { status: res.status, data };
+
+  return { status: lastStatus, data: lastData };
 }
 
 function errCode(data: unknown): string {

@@ -1145,14 +1145,29 @@ async function runDcaTickInner(accountId: string) {
   return { ok: true as const, results };
 }
 
-export async function runAllBots() {
+export type RunAllBotsOpts = {
+  /** Soft deadline so serverless/GHA finish before hard kill (default 52s). */
+  budgetMs?: number;
+  /** Cron route already undeploys idle — skip duplicate work. */
+  skipIdleUndeploy?: boolean;
+};
+
+/**
+ * Tick all botEnabled accounts whose owner is approved (or admin).
+ * Rejected/pending owners are skipped so approval gate applies to trading too.
+ */
+export async function runAllBots(opts: RunAllBotsOpts = {}) {
   const { undeployIdleAccounts } = await import("./cost-optimize");
   const { ensureCloudLive } = await import("./metaapi");
-  // Opportunistic cleanup when any bot tick runs (Hobby cron is once/day)
-  try {
-    await undeployIdleAccounts(24);
-  } catch {
-    /* ignore */
+  const budgetMs = opts.budgetMs ?? 52_000;
+  const started = Date.now();
+
+  if (!opts.skipIdleUndeploy) {
+    try {
+      await undeployIdleAccounts(24);
+    } catch {
+      /* ignore */
+    }
   }
 
   const accounts = await prisma.brokerAccount.findMany({
@@ -1160,14 +1175,28 @@ export async function runAllBots() {
       botEnabled: true,
       metaApiAccountId: { not: null },
       status: { in: ["connected", "undeployed"] },
+      user: {
+        OR: [{ role: "admin" }, { approvalStatus: "approved" }],
+      },
     },
+    // Round-robin fairness: oldest tick lock / oldest update first
+    orderBy: [{ tickLockedAt: "asc" }, { updatedAt: "asc" }],
     select: { id: true, status: true, metaApiAccountId: true },
   });
-  const results = [];
+  const results: Array<Record<string, unknown>> = [];
+  let deferred = 0;
   for (const a of accounts) {
+    const elapsed = Date.now() - started;
+    if (elapsed > budgetMs) {
+      deferred += 1;
+      results.push({ id: a.id, skipped: true, reason: "budget" });
+      continue;
+    }
     try {
       if (a.status === "undeployed" && a.metaApiAccountId) {
-        const live = await ensureCloudLive(String(a.metaApiAccountId), 45000);
+        // Cap redeploy wait so one cold account cannot starve the fleet
+        const remaining = Math.max(3_000, Math.min(12_000, budgetMs - elapsed - 2_000));
+        const live = await ensureCloudLive(String(a.metaApiAccountId), remaining);
         if (!live.ok) {
           results.push({
             id: a.id,
@@ -1193,6 +1222,9 @@ export async function runAllBots() {
         error: e instanceof Error ? e.message : "tick error",
       });
     }
+  }
+  if (deferred > 0) {
+    results.push({ deferred, reason: "time_budget", budgetMs });
   }
   return results;
 }

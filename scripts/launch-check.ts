@@ -41,10 +41,15 @@ async function main() {
       (a.status === "connected" || a.status === "undeployed"),
   );
 
+  const pendingUsers = await prisma.user.count({ where: { approvalStatus: "pending" } });
+  const rejectedUsers = await prisma.user.count({ where: { approvalStatus: "rejected" } });
+
   console.log(
     JSON.stringify(
       {
         users,
+        pendingUsers,
+        rejectedUsers,
         accounts: accounts.length,
         tickableAccounts: tickable.length,
         tickableLogins: tickable.map((a) => a.login),
