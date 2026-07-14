@@ -6,7 +6,9 @@ import { LOGIC_OPTIONS } from "@/lib/strategies";
 import {
   MT5_REF_MID,
   calcDca1000Defense,
+  estimateTpMoneyForLevels,
   mt5TpMoneyTarget,
+  roiToPricePct,
 } from "@/lib/dca1000";
 
 type LevelRow = { lots: number; profit: number; drop: number };
@@ -118,6 +120,27 @@ export default function StrategyLogicPage() {
     if (!payload) return;
     setBusy(true);
     setMsg("");
+    const startLotsRaw =
+      editable === "levels"
+        ? Number(payload.levels?.[0]?.lots ?? payload.startLots ?? 0.01)
+        : Number(payload.startLots ?? 0.01);
+    const tpRaw = Number(payload.takeProfitPct ?? payload.levels?.[0]?.profit ?? 20);
+    const slRaw = Number(payload.stopLossPct ?? 225);
+    if (!(startLotsRaw > 0) || startLotsRaw > 100) {
+      setBusy(false);
+      setMsg("계약수(로트)는 0.01~100 사이여야 합니다.");
+      return;
+    }
+    if (!(tpRaw >= 1) || tpRaw > 500) {
+      setBusy(false);
+      setMsg("익절 ROI%는 1~500 사이여야 합니다.");
+      return;
+    }
+    if (!(slRaw >= 0) || slRaw > 1000) {
+      setBusy(false);
+      setMsg("손절 ROI%는 0~1000 사이여야 합니다.");
+      return;
+    }
     const body =
       editable === "bulk"
         ? {
@@ -125,9 +148,9 @@ export default function StrategyLogicPage() {
             payload: {
               mode: "bulk" as const,
               leverageBase: 20,
-              startLots: Number(payload.startLots ?? 0.01),
-              takeProfitPct: Number(payload.takeProfitPct ?? 20),
-              stopLossPct: Number(payload.stopLossPct ?? 225),
+              startLots: Math.max(0.01, Math.round(startLotsRaw * 100) / 100),
+              takeProfitPct: tpRaw,
+              stopLossPct: slRaw,
             },
           }
         : {
@@ -135,12 +158,13 @@ export default function StrategyLogicPage() {
             payload: {
               mode: "levels" as const,
               leverageBase: 20,
-              startLots: Number(payload.levels?.[0]?.lots ?? 0.01),
-              takeProfitPct: Number(payload.takeProfitPct ?? payload.levels?.[0]?.profit ?? 20),
-              stopLossPct: Number(payload.stopLossPct ?? 225),
+              startLots: Math.max(0.01, Math.round(startLotsRaw * 100) / 100),
+              takeProfitPct: tpRaw,
+              stopLossPct: slRaw,
+              // 바스켓 익절은 SymbolBot 단일 ROI — 회차별 profit도 동일 값으로 맞춤
               levels: (payload.levels || []).map((r, i) => ({
                 lots: Number(r.lots),
-                profit: Number(r.profit),
+                profit: tpRaw,
                 drop: i === 0 ? 0 : Number(r.drop),
               })),
             },
@@ -288,6 +312,7 @@ export default function StrategyLogicPage() {
                 type="number"
                 step="1"
                 min="1"
+                max="500"
                 value={payload.takeProfitPct ?? 20}
                 onChange={(e) =>
                   setPayload((p) => ({ ...p!, takeProfitPct: Number(e.target.value) }))
@@ -301,6 +326,7 @@ export default function StrategyLogicPage() {
                 type="number"
                 step="1"
                 min="0"
+                max="1000"
                 value={payload.stopLossPct ?? 225}
                 onChange={(e) =>
                   setPayload((p) => ({ ...p!, stopLossPct: Number(e.target.value) }))
@@ -308,14 +334,26 @@ export default function StrategyLogicPage() {
               />
             </label>
           </div>
+          <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
+            익절·물타기: 손익÷MT5사용증거금×100 ≥ ROI% (계좌 1:500). 손절: 전략표 ROI÷20 차트% (
+            {fmt(roiToPricePct(Number(payload.stopLossPct ?? 225)))}%). 다음 틱부터 엔진에 반영됩니다.
+          </p>
           <div className="m-calc-box">
             <div className="m-calc-row">
               <span>1회차 예상 익절금</span>
               <strong>${fmt(tpMoneyL0)}</strong>
             </div>
             <div className="m-calc-row">
-              <span>예상 손절금 (표 기준)</span>
+              <span>예상 손절금 (MT5·전체 회차)</span>
               <strong>${fmt(defense.estimatedSlAmount)}</strong>
+            </div>
+            <div className="m-calc-row">
+              <span>차트 방어폭 (평균)</span>
+              <strong>{fmt(defense.roiDefensePct)} %</strong>
+            </div>
+            <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+              <span>표 기준 손절금 (참고)</span>
+              <strong>${fmt(defense.tableMarginSlAmount)}</strong>
             </div>
           </div>
         </section>
@@ -359,10 +397,12 @@ export default function StrategyLogicPage() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem" }}>
             <label>
-              <span className="sa-label">기본 익절 ROI % (미리보기)</span>
+              <span className="sa-label">바스켓 익절 ROI %</span>
               <input
                 className="sa-input"
                 type="number"
+                min="1"
+                max="500"
                 value={payload.takeProfitPct ?? 20}
                 onChange={(e) =>
                   setPayload((p) => ({ ...p!, takeProfitPct: Number(e.target.value) }))
@@ -374,6 +414,8 @@ export default function StrategyLogicPage() {
               <input
                 className="sa-input"
                 type="number"
+                min="0"
+                max="1000"
                 value={payload.stopLossPct ?? 225}
                 onChange={(e) =>
                   setPayload((p) => ({ ...p!, stopLossPct: Number(e.target.value) }))
@@ -381,6 +423,11 @@ export default function StrategyLogicPage() {
               />
             </label>
           </div>
+          <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
+            익절은 심볼 합산 증거금 ROI(1:500) 단일 기준입니다. 회차별 익절 ROI 칸은 미리보기용이며 저장 시
+            위 값으로 통일됩니다. 손절은 ROI÷20 차트% ({fmt(roiToPricePct(Number(payload.stopLossPct ?? 225)))}
+            %).
+          </p>
 
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
@@ -390,18 +437,26 @@ export default function StrategyLogicPage() {
                   <th style={{ padding: "0.35rem" }}>계약수</th>
                   <th style={{ padding: "0.35rem" }}>물타기 ROI%</th>
                   <th style={{ padding: "0.35rem" }}>익절 ROI%</th>
-                  <th style={{ padding: "0.35rem" }}>익절$</th>
+                  <th style={{ padding: "0.35rem" }}>누적 익절$</th>
                   <th style={{ padding: "0.35rem" }} />
                 </tr>
               </thead>
               <tbody>
                 {(payload.levels || []).map((row, idx) => {
-                  const money = mt5TpMoneyTarget({
+                  const levelsAsDca = (payload.levels || []).map((r, i) => ({
+                    size: Math.round(
+                      ((r.lots || 0.01) / (payload.levels![0]?.lots || 0.01)) * 10 * 100,
+                    ) / 100,
+                    profit: Number(payload.takeProfitPct ?? 20),
+                    drop: i === 0 ? 0 : r.drop,
+                  }));
+                  const cum = estimateTpMoneyForLevels({
                     symbol,
-                    lots: row.lots,
-                    avgPrice: mid,
-                    tpRoiPct: row.profit,
-                    brokerLeverage: 500,
+                    levels: levelsAsDca,
+                    filledThrough: idx,
+                    startLots: Number(payload.levels?.[0]?.lots ?? startLots),
+                    tpRoiPct: Number(payload.takeProfitPct ?? 20),
+                    refMid: mid,
                   });
                   return (
                     <tr key={idx} style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
@@ -429,18 +484,10 @@ export default function StrategyLogicPage() {
                           onChange={(e) => updateLevel(idx, { drop: Number(e.target.value) })}
                         />
                       </td>
-                      <td style={{ padding: "0.35rem" }}>
-                        <input
-                          className="sa-input"
-                          style={{ minWidth: "4.2rem", padding: "0.35rem" }}
-                          type="number"
-                          step="1"
-                          min="1"
-                          value={row.profit}
-                          onChange={(e) => updateLevel(idx, { profit: Number(e.target.value) })}
-                        />
+                      <td style={{ padding: "0.35rem", color: "var(--muted)" }}>
+                        {fmt(Number(payload.takeProfitPct ?? 20), 0)}
                       </td>
-                      <td style={{ padding: "0.35rem" }}>${fmt(money)}</td>
+                      <td style={{ padding: "0.35rem" }}>${fmt(cum.tpMoney)}</td>
                       <td style={{ padding: "0.35rem" }}>
                         <button
                           type="button"
@@ -469,8 +516,12 @@ export default function StrategyLogicPage() {
               <strong>${fmt(tpMoneyL0)}</strong>
             </div>
             <div className="m-calc-row">
-              <span>예상 손절금</span>
+              <span>예상 손절금 (MT5·전체 회차)</span>
               <strong>${fmt(defense.estimatedSlAmount)}</strong>
+            </div>
+            <div className="m-calc-row">
+              <span>차트 방어폭 (평균)</span>
+              <strong>{fmt(defense.roiDefensePct)} %</strong>
             </div>
           </div>
         </section>

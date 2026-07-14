@@ -69,8 +69,12 @@ function DefenseCard({
         <strong className="c-short">{fmtNum(defense.spotShortPct)} %</strong>
       </div>
       <div className="m-calc-row">
-        <span>예상 손절금 (전체 회차)</span>
-        <strong>{fmtNum(defense.estimatedSlAmount)}</strong>
+        <span>예상 손절금 (MT5·전체 회차)</span>
+        <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
+      </div>
+      <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+        <span>손절 차트% (ROI÷20)</span>
+        <strong>{fmtNum(defense.slTriggerPricePct)} %</strong>
       </div>
     </div>
   );
@@ -221,12 +225,30 @@ export default function BotPage() {
   async function saveEdit() {
     if (!edit) return;
     setBusy(true);
+    setMsg("");
     const logic = (draft.logic as string) || "dca_1000";
     const meta = tableLogicMeta(logic);
     const sl = Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
+    const tp = Number(draft.takeProfitPct ?? DEFAULT_TP_ROI);
+    const lots = Number(draft.startLots ?? 0.01);
     const mult = isMartinLogic(logic)
       ? Math.max(1.01, Number(draft.entryMultiplier ?? 2))
       : 1;
+    if (!(lots > 0) || lots > 100) {
+      setBusy(false);
+      setMsg("시작 로트는 0.01~100 사이여야 합니다.");
+      return;
+    }
+    if (!(tp >= 1) || tp > 500) {
+      setBusy(false);
+      setMsg("익절 ROI%는 1~500 사이여야 합니다.");
+      return;
+    }
+    if (!(sl >= 0) || sl > 1000) {
+      setBusy(false);
+      setMsg("손절 ROI%는 0~1000 사이여야 합니다.");
+      return;
+    }
     const res = await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -234,8 +256,8 @@ export default function BotPage() {
         symbol: edit,
         logic,
         direction: draft.direction,
-        startLots: draft.startLots,
-        takeProfitPct: draft.takeProfitPct,
+        startLots: Math.max(0.01, Math.round(lots * 100) / 100),
+        takeProfitPct: tp,
         stopLossPct: sl,
         stopLossEnabled: sl > 0 && draft.stopLossEnabled !== false,
         repeatEnabled: draft.repeatEnabled,
@@ -251,7 +273,7 @@ export default function BotPage() {
       return;
     }
     setEdit(null);
-    setMsg("전략 설정을 저장했습니다.");
+    setMsg("전략 설정을 저장했습니다. 다음 틱부터 엔진에 반영됩니다.");
     await load();
   }
 
@@ -433,7 +455,8 @@ export default function BotPage() {
                       </div>
                       <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: "0.35rem" }}>
                         Buy↓ {fmtNum(cardDef.spotLongPct)}% · Sell↑ {fmtNum(cardDef.spotShortPct)}% ·
-                        손절금 {fmtNum(cardDef.estimatedSlAmount)}
+                        손절 ${fmtNum(cardDef.estimatedSlAmount)} · 차트{" "}
+                        {fmtNum(cardDef.slTriggerPricePct)}%
                       </div>
                     </div>
                     <button
@@ -621,6 +644,7 @@ export default function BotPage() {
                             type="number"
                             step="1"
                             min="1"
+                            max="500"
                             value={draft.takeProfitPct ?? bot.takeProfitPct}
                             onChange={(e) =>
                               setDraft((d) => ({
@@ -637,6 +661,7 @@ export default function BotPage() {
                             type="number"
                             step="1"
                             min="0"
+                            max="1000"
                             value={draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI}
                             onChange={(e) =>
                               setDraft((d) => ({

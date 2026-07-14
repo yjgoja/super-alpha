@@ -140,13 +140,20 @@ const upsertSchema = z.object({
   entryCount: z.number().int().min(1).max(2000).optional(),
   entryMultiplier: z.number().positive().max(10).optional(),
   entryIntervalPct: z.number().positive().max(50).optional(),
-  takeProfitPct: z.number().positive().max(500).optional(),
+  takeProfitPct: z.number().min(1).max(500).optional(),
   startLots: z.number().positive().max(100).optional(),
   repeatEnabled: z.boolean().optional(),
   stopLossPct: z.number().min(0).max(1000).optional(),
   stopLossEnabled: z.boolean().optional(),
   stopOnSl: z.boolean().optional(),
 });
+
+function zodErrorKo(err: z.ZodError) {
+  const first = err.issues[0];
+  if (!first) return "입력값이 올바르지 않습니다.";
+  const path = first.path.length ? `${first.path.join(".")}: ` : "";
+  return `${path}${first.message}`;
+}
 
 export async function PUT(req: Request) {
   const gate = await requireApprovedUser();
@@ -156,7 +163,11 @@ export async function PUT(req: Request) {
   const account = await getAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
-  const body = upsertSchema.parse(await req.json());
+  const parsed = upsertSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: zodErrorKo(parsed.error) }, { status: 400 });
+  }
+  const body = parsed.data;
   const logic =
     body.logic && isLogicId(body.logic) ? body.logic : undefined;
   const resolvedLogic = logic ?? "dca_1000";

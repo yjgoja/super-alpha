@@ -21,7 +21,7 @@ async function getAccount(userId: string) {
 
 const levelSchema = z.object({
   lots: z.number().positive().max(100),
-  profit: z.number().min(0).max(500),
+  profit: z.number().min(1).max(500),
   drop: z.number().min(0).max(1000),
 });
 
@@ -34,12 +34,19 @@ const putSchema = z.object({
       mode: z.enum(["bulk", "levels"]),
       leverageBase: z.number().positive().max(100).optional(),
       startLots: z.number().positive().max(100).optional(),
-      takeProfitPct: z.number().min(0).max(500).optional(),
+      takeProfitPct: z.number().min(1).max(500).optional(),
       stopLossPct: z.number().min(0).max(1000).optional(),
       levels: z.array(levelSchema).max(60).optional(),
     })
     .optional(),
 });
+
+function zodErrorKo(err: z.ZodError) {
+  const first = err.issues[0];
+  if (!first) return "입력값이 올바르지 않습니다.";
+  const path = first.path.length ? `${first.path.join(".")}: ` : "";
+  return `${path}${first.message}`;
+}
 
 export async function GET(req: Request) {
   const gate = await requireApprovedUser();
@@ -106,7 +113,11 @@ export async function PUT(req: Request) {
   const account = await getAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
-  const body = putSchema.parse(await req.json());
+  const parsed = putSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: zodErrorKo(parsed.error) }, { status: 400 });
+  }
+  const body = parsed.data;
   const logicId = body.logicId;
   if (!isLogicId(logicId)) {
     return NextResponse.json({ error: "알 수 없는 로직입니다." }, { status: 400 });
@@ -140,9 +151,15 @@ export async function PUT(req: Request) {
     if (levels.length > 60) {
       return NextResponse.json({ error: "회차는 최대 60개입니다." }, { status: 400 });
     }
+    const tp =
+      body.payload.takeProfitPct != null && body.payload.takeProfitPct >= 1
+        ? body.payload.takeProfitPct
+        : levels[0]?.profit ?? 20;
+    payload.takeProfitPct = tp;
     payload.levels = levels.map((lv, i) => ({
       lots: Math.max(0.01, Math.round(lv.lots * 100) / 100),
-      profit: lv.profit,
+      // 엔진 바스켓 익절은 단일 ROI — 회차별 profit 통일
+      profit: tp,
       drop: i === 0 ? 0 : lv.drop,
     }));
     payload.startLots = payload.levels[0].lots;

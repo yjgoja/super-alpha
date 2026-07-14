@@ -477,13 +477,13 @@ export type Dca1000Defense = {
   /** Buy/Sell 차트 방어폭 평균 */
   roiDefensePct: number;
   /**
-   * 전체 회차 소진 후 손절 시 예상 손실(계좌).
-   * 엔진과 동일: 청산호가 기준 평단 대비 -SL_ROI/레버 도달 시 P&L.
+   * 전체 회차 소진 후 손절 시 예상 손실($, MT5 계좌).
+   * 엔진과 동일: 청산호가 기준 평단 손익% ≤ -(SL_ROI/20) 도달 시 현금 P&L.
    */
   estimatedSlAmount: number;
-  /** 표 마진×손절ROI */
+  /** 코인선물 표 마진×손절ROI (참고·레거시) */
   tableMarginSlAmount: number;
-  /** MT5 계약·로트 기준 현금 손절(전체 회차 채움, 참고) */
+  /** MT5 계약·로트 기준 현금 손절(전체 회차 채움) = estimatedSlAmount */
   mt5CashSlAmount: number;
   avgEntryLong: number;
   avgEntryShort: number;
@@ -561,13 +561,13 @@ export function calcDca1000Defense(opts?: {
 
   const roiDefensePct = (spotLongPct + spotShortPct) / 2;
 
-  // 표 마진 손절금 — 엔진 손절(청산호가 손익% = -SL_ROI/레버)과 동일한 ROI 정의
-  // Size는 레버 포함 수량 단위 → 마진=Size/레버, 손실=마진×(SL_ROI/100)×로트스케일
+  // 표 마진 손절금(레거시): Size/레버 × SL_ROI% × 로트스케일 — 코인선물 표 숫자
   const lotScale = startLots / DCA1000_REF_LOTS;
   const tableMarginSlAmount =
     (totalSize / Math.max(1, lev)) * (slRoi / 100) * lotScale;
 
-  // MT5 현금 손절(참고): 전체 회차를 실제 로트로 채웠을 때 청산호가 기준 P&L
+  // MT5 현금 손절 = 엔진 손절 트리거와 동일 조건의 예상 손실$
+  // (청산호가 평단 대비 -SL_ROI/레버 도달 시 Buy/Sell 평균)
   const sym = spreadInfo.symbol;
   const contract = MT5_CONTRACT_SIZE[sym] ?? MT5_CONTRACT_SIZE.EURUSD;
   const buySlMove = Math.max(0, avgAsk - buySlBid);
@@ -582,7 +582,7 @@ export function calcDca1000Defense(opts?: {
     spotLongPct: round2(spotLongPct),
     spotShortPct: round2(spotShortPct),
     roiDefensePct: round2(roiDefensePct),
-    estimatedSlAmount: round2(tableMarginSlAmount),
+    estimatedSlAmount: round2(mt5CashSlAmount),
     tableMarginSlAmount: round2(tableMarginSlAmount),
     mt5CashSlAmount: round2(mt5CashSlAmount),
     avgEntryLong: round4(avgAsk / ask0),
