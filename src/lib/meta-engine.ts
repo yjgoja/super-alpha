@@ -8,12 +8,12 @@ import {
   mt5TpMoneyTarget,
   mt5UsedMargin,
   roiToPricePct,
+  shouldTriggerTakeProfit,
   spreadPct,
   triggerDropRoi,
   MT5_BROKER_LEVERAGE_DEFAULT,
 } from "./dca1000";
 import {
-  getTableLevels,
   isTableLogic,
   lotsForLogicLevel,
 } from "./table-logics";
@@ -146,6 +146,10 @@ async function detectAndStopOnExternalClose(
   return true;
 }
 
+/**
+ * 익절: 심볼 전 포지션 일괄 청산 → DB 바스켓 종료 → (옵션) 시작로트 즉시 재진입.
+ * 청산 실패 시 바스켓을 닫지 않아 다음 틱에서 재시도한다.
+ */
 async function closeBasketTp(opts: {
   accountId: string;
   metaId: string;
@@ -158,6 +162,12 @@ async function closeBasketTp(opts: {
   ask: number;
   logic: string;
   repeatEnabled: boolean;
+  /** 익절 후 재시작 로트 (보통 L0) */
+  reentryLots: number;
+  tpRoi: number;
+  tpMoney: number;
+  pnlSum: number;
+  floatingRoi: number;
 }) {
   const {
     accountId,
@@ -166,14 +176,28 @@ async function closeBasketTp(opts: {
     direction,
     basket,
     legs,
-    ourPositions,
     bid,
     ask,
     logic,
     repeatEnabled,
+    reentryLots,
+    tpRoi,
+    tpMoney,
+    pnlSum,
+    floatingRoi,
   } = opts;
-  await closePositionsBySymbol(metaId, symbol);
-  const pnlSum = ourPositions.reduce((s, p) => s + p.profit, 0);
+
+  const closeRes = await closePositionsBySymbol(metaId, symbol);
+  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+    return {
+      closed: false as const,
+      reentered: false as const,
+      error:
+        ("message" in closeRes && closeRes.message) ||
+        `${symbol} 익절 청산 실패(잔여 ${"remaining" in closeRes ? closeRes.remaining : "?"})`,
+    };
+  }
+
   await prisma.basket.update({
     where: { id: basket.id },
     data: {
@@ -192,7 +216,7 @@ async function closeBasketTp(opts: {
       price: direction === "BUY" ? bid : ask,
       pnl: pnlSum,
       kind: "TP",
-      note: logic,
+      note: `${logic}|roi=${floatingRoi.toFixed(1)}>=${tpRoi}|pnl=${pnlSum.toFixed(2)}/tp$${tpMoney}|legs=${opts.ourPositions.length || legs.length}`,
     },
   });
   await prisma.brokerAccount.update({
@@ -202,12 +226,56 @@ async function closeBasketTp(opts: {
       cycleCount: { increment: 1 },
     },
   });
+
   if (!repeatEnabled) {
     await prisma.symbolBot.updateMany({
       where: { accountId, symbol },
       data: { enabled: false },
     });
+    return { closed: true as const, reentered: false as const };
   }
+
+  // 같은 틱에서 시작 포지션 재진입 (다음 틱 의존 시 엔진 공백으로 재시작 누락 가능)
+  const lots = Math.max(0.01, Math.round(reentryLots * 100) / 100);
+  const order = await placeMarketOrder({
+    metaApiAccountId: metaId,
+    symbol,
+    direction,
+    lots,
+    comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
+  });
+  if (!order.ok) {
+    return {
+      closed: true as const,
+      reentered: false as const,
+      error: order.message || "익절 후 재진입 주문 실패",
+    };
+  }
+  const fillPrice = mt5EntryQuote(direction, bid, ask);
+  await prisma.basket.create({
+    data: {
+      accountId,
+      symbol,
+      direction,
+      filledLevel: 0,
+      firstEntryPrice: fillPrice,
+      status: "open",
+      legs: { create: [{ level: 0, lots, price: fillPrice }] },
+    },
+  });
+  await prisma.fill.create({
+    data: {
+      accountId,
+      symbol,
+      side: direction,
+      lots,
+      price: fillPrice,
+      kind: "ENTRY",
+      level: 0,
+      note: `${logic}|reentry_after_tp`,
+    },
+  });
+  return { closed: true as const, reentered: true as const };
 }
 
 /** 표 기반 DCA (1000차 / 마틴게일 / 두바이부르노) + MT5 스프레드 */
@@ -392,6 +460,11 @@ async function runSymbolTableDca(
     ask: price.ask,
   });
   const floatingRoi = mt5FloatingRoiPct(tpPnl.pnl, usedMargin);
+  const tpDecision = shouldTriggerTakeProfit({
+    pnl: tpPnl.pnl,
+    usedMargin,
+    tpRoiPct: tpRoi,
+  });
   // 물타기: 손실 ROI%(손익/증거금) 또는 가격역행×계좌레버 — 표 drop ROI와 비교
   const adverseRoiPrice = mt5DcaAdverseRoi(
     direction,
@@ -402,6 +475,58 @@ async function runSymbolTableDca(
   );
   const lossRoi = Math.max(0, -floatingRoi);
   const adverseRoi = Math.max(lossRoi, adverseRoiPrice);
+
+  // 익절 우선: 심볼 합산 ROI/목표$ → 전량 청산 → 재진입 (물타기·손절보다 먼저)
+  if (tpDecision.hit) {
+    const tpClose = await closeBasketTp({
+      accountId,
+      metaId,
+      symbol,
+      direction,
+      basket,
+      legs,
+      ourPositions,
+      bid: price.bid,
+      ask: price.ask,
+      logic,
+      repeatEnabled: cfg.repeatEnabled,
+      reentryLots: levelLots(0),
+      tpRoi: tpDecision.tpRoi,
+      tpMoney: tpDecision.tpMoney,
+      pnlSum: tpPnl.pnl,
+      floatingRoi: tpDecision.floatingRoi,
+    });
+    if (!tpClose.closed) {
+      return {
+        ok: false as const,
+        error: tpClose.error || "익절 청산 실패",
+        action: "tp_close_failed",
+        symbol,
+        tpRoi: tpDecision.tpRoi,
+        tpMoney: tpDecision.tpMoney,
+        floatingPnl: tpPnl.pnl,
+        floatingRoi: tpDecision.floatingRoi,
+        spreadPct: spr,
+      };
+    }
+    return {
+      ok: true as const,
+      action: "tp",
+      symbol,
+      tpRoi: tpDecision.tpRoi,
+      tpMoney: tpDecision.tpMoney,
+      floatingPnl: tpPnl.pnl,
+      floatingRoi: tpDecision.floatingRoi,
+      apiProfit: tpPnl.apiProfit,
+      quotePnl: tpPnl.quotePnl,
+      spreadCost: tpPnl.spreadCost,
+      profit,
+      profitRoi: profit * 20,
+      reentered: tpClose.reentered,
+      reentryError: tpClose.error,
+      spreadPct: spr,
+    };
+  }
 
   // 손절: ROI → 가격% (금액 손절은 별도; 기존과 동일)
   const slPricePct =
@@ -447,37 +572,6 @@ async function runSymbolTableDca(
       profit,
       profitRoi: profit * 20,
       floatingPnl,
-      spreadPct: spr,
-    };
-  }
-
-  // 익절: ROI%(손익/증거금) 또는 동등한 목표$
-  if (tpRoi > 0 && (floatingRoi >= tpRoi || tpPnl.pnl >= tpMoney)) {
-    await closeBasketTp({
-      accountId,
-      metaId,
-      symbol,
-      direction,
-      basket,
-      legs,
-      ourPositions,
-      bid: price.bid,
-      ask: price.ask,
-      logic,
-      repeatEnabled: cfg.repeatEnabled,
-    });
-    return {
-      ok: true as const,
-      action: "tp",
-      symbol,
-      tpRoi,
-      tpMoney,
-      floatingPnl: tpPnl.pnl,
-      apiProfit: tpPnl.apiProfit,
-      quotePnl: tpPnl.quotePnl,
-      spreadCost: tpPnl.spreadCost,
-      profit,
-      profitRoi: profit * 20,
       spreadPct: spr,
     };
   }
@@ -700,15 +794,6 @@ async function runSymbolDca(
     avgPrice: avg,
     brokerLeverage: brokerLev,
   });
-  const tpMoney = mt5TpMoneyTarget({
-    symbol,
-    lots: lotsForTp,
-    avgPrice: avg,
-    tpRoiPct: tpRoi,
-    brokerLeverage: brokerLev,
-    bid: price.bid,
-    ask: price.ask,
-  });
   const pnlLegs =
     ourPositions.length > 0
       ? ourPositions.map((p) => ({ lots: p.lots, price: p.price }))
@@ -722,6 +807,11 @@ async function runSymbolDca(
     ask: price.ask,
   });
   const floatingRoi = mt5FloatingRoiPct(tpPnl.pnl, usedMargin);
+  const tpDecision = shouldTriggerTakeProfit({
+    pnl: tpPnl.pnl,
+    usedMargin,
+    tpRoiPct: tpRoi,
+  });
   const adverseRoiPrice = mt5DcaAdverseRoi(
     direction,
     basket.firstEntryPrice,
@@ -732,44 +822,42 @@ async function runSymbolDca(
   const lossRoi = Math.max(0, -floatingRoi);
   const adverseRoi = Math.max(lossRoi, adverseRoiPrice);
 
-  if (tpRoi > 0 && (floatingRoi >= tpRoi || (tpMoney > 0 && tpPnl.pnl >= tpMoney))) {
-    await closePositionsBySymbol(metaId, symbol);
-    const pnlSum = tpPnl.pnl;
-    await prisma.basket.update({
-      where: { id: basket.id },
-      data: {
-        status: "closed",
-        realizedPnl: pnlSum,
-        lastExitAt: new Date(),
-        unrealizedPnl: 0,
-      },
+  if (tpDecision.hit) {
+    const tpClose = await closeBasketTp({
+      accountId,
+      metaId,
+      symbol,
+      direction,
+      basket,
+      legs,
+      ourPositions,
+      bid: price.bid,
+      ask: price.ask,
+      logic,
+      repeatEnabled: cfg.repeatEnabled,
+      reentryLots: lotsAtLevel(cfg.startLots, cfg.entryMultiplier, 0, logic),
+      tpRoi: tpDecision.tpRoi,
+      tpMoney: tpDecision.tpMoney,
+      pnlSum: tpPnl.pnl,
+      floatingRoi: tpDecision.floatingRoi,
     });
-    await prisma.fill.create({
-      data: {
-        accountId,
+    if (!tpClose.closed) {
+      return {
+        ok: false as const,
+        error: tpClose.error || "익절 청산 실패",
+        action: "tp_close_failed",
         symbol,
-        side: direction === "BUY" ? "SELL" : "BUY",
-        lots: legs.reduce((s, l) => s + l.lots, 0),
-        price: direction === "BUY" ? price.bid : price.ask,
-        pnl: pnlSum,
-        kind: "TP",
-        note: logic,
-      },
-    });
-    await prisma.brokerAccount.update({
-      where: { id: accountId },
-      data: {
-        tpCount: { increment: 1 },
-        cycleCount: { increment: 1 },
-      },
-    });
-    if (!cfg.repeatEnabled) {
-      await prisma.symbolBot.updateMany({
-        where: { accountId, symbol },
-        data: { enabled: false },
-      });
+      };
     }
-    return { ok: true as const, action: "tp", symbol };
+    return {
+      ok: true as const,
+      action: "tp",
+      symbol,
+      reentered: tpClose.reentered,
+      tpRoi: tpDecision.tpRoi,
+      tpMoney: tpDecision.tpMoney,
+      floatingPnl: tpPnl.pnl,
+    };
   }
 
   if (cfg.stopLossEnabled && nextLevel >= maxLevels) {

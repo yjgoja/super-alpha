@@ -761,14 +761,67 @@ export async function closePosition(metaApiAccountId: string, positionId: string
   return { ok: true as const };
 }
 
+/**
+ * 심볼 전체 청산. MetaAPI POSITIONS_CLOSE_SYMBOL 우선(대량 포지션 안전),
+ * 남은 건 POSITION_CLOSE_ID 폴백. 잔여 포지션이 있으면 ok:false.
+ */
 export async function closePositionsBySymbol(metaApiAccountId: string, symbol: string) {
   const snap = await fetchSnapshot(metaApiAccountId);
   if (!snap.ok) return snap;
   const targets = snap.positions.filter((x) => symbolsMatch(x.symbol, symbol));
-  for (const p of targets) {
+  if (targets.length === 0) {
+    return { ok: true as const, closed: 0, remaining: 0 };
+  }
+
+  const brokerSym = await resolveBrokerSymbol(metaApiAccountId, symbol);
+  const base = clientBase();
+  // 한 심볼 일괄 청산 — 수백 포지션을 하나씩 닫으면 틱 타임아웃/부분청산 위험
+  const bulk = await api(base, "POST", `/users/current/accounts/${metaApiAccountId}/trade`, {
+    actionType: "POSITIONS_CLOSE_SYMBOL",
+    symbol: brokerSym,
+  });
+  // 브로커 심볼명이 포지션과 다를 수 있음(XAUUSD vs GOLD) — 포지션에 찍힌 이름으로도 시도
+  const posSymbols = [...new Set(targets.map((t) => t.symbol).filter(Boolean))];
+  for (const ps of posSymbols) {
+    if (ps === brokerSym) continue;
+    await api(base, "POST", `/users/current/accounts/${metaApiAccountId}/trade`, {
+      actionType: "POSITIONS_CLOSE_SYMBOL",
+      symbol: ps,
+    });
+  }
+  if (bulk.status >= 400 && posSymbols.length === 0) {
+    // fall through to per-id
+  }
+
+  let after = await fetchSnapshot(metaApiAccountId);
+  let remaining = after.ok
+    ? after.positions.filter((x) => symbolsMatch(x.symbol, symbol))
+    : targets;
+
+  // 잔여분 개별 청산
+  for (const p of remaining) {
     if (p.id) await closePosition(metaApiAccountId, p.id);
   }
-  return { ok: true as const, closed: targets.length };
+
+  after = await fetchSnapshot(metaApiAccountId);
+  if (!after.ok) {
+    return {
+      ok: false as const,
+      message: after.message || "청산 후 잔여 확인 실패",
+      closed: targets.length,
+      remaining: -1,
+    };
+  }
+  remaining = after.positions.filter((x) => symbolsMatch(x.symbol, symbol));
+  if (remaining.length > 0) {
+    return {
+      ok: false as const,
+      message: `${symbol} 청산 후 ${remaining.length}건 잔여`,
+      closed: targets.length - remaining.length,
+      remaining: remaining.length,
+    };
+  }
+  return { ok: true as const, closed: targets.length, remaining: 0 };
 }
 
 export async function closeAllPositions(metaApiAccountId: string) {

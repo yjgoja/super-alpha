@@ -235,6 +235,30 @@ export function mt5FloatingRoiPct(pnl: number, usedMargin: number) {
 }
 
 /**
+ * 심볼 바스켓(합산) 익절 판정.
+ * UI 익절값은 ROI% — 목표$ = 사용증거금 × ROI%/100.
+ * 포지션별이 아니라 합산 pnl / 합산 증거금으로 비교한다.
+ */
+export function shouldTriggerTakeProfit(opts: {
+  /** 심볼 합산 미실현 손익($) */
+  pnl: number;
+  usedMargin: number;
+  tpRoiPct: number;
+}) {
+  const tpRoi = Math.max(0, opts.tpRoiPct);
+  const floatingRoi = mt5FloatingRoiPct(opts.pnl, opts.usedMargin);
+  const tpMoney =
+    opts.usedMargin > 0
+      ? Math.round(opts.usedMargin * (tpRoi / 100) * 100) / 100
+      : 0;
+  const hit =
+    tpRoi > 0 &&
+    opts.usedMargin > 0 &&
+    (floatingRoi >= tpRoi || opts.pnl >= tpMoney);
+  return { hit, floatingRoi, tpMoney, tpRoi };
+}
+
+/**
  * 익절 목표 금액($) = 사용증거금 × (ROI% / 100)
  * 예: XAU 0.01로트 @4080, 레버 500, ROI20
  *     명목 4080 → 증거금 8.16 → 익절 $1.63
