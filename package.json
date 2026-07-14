@@ -11,8 +11,10 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
-    "engine": "tsx --env-file=.env scripts/tick-loop.ts",
-    "engine:http": "tsx --env-file=.env scripts/tick-http.ts"
+    "engine": "tsx --env-file=.env scripts/tick-direct.ts",
+    "engine:http": "tsx --env-file=.env scripts/tick-loop.ts",
+    "engine:direct": "tsx --env-file=.env scripts/tick-direct.ts",
+    "seed:admin": "tsx --env-file=.env scripts/seed-admin.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

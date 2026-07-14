@@ -14,5 +14,5 @@ Get-Content .env | ForEach-Object {
 }
 
 $env:ENGINE_INTERVAL_MS = "2000"
-Write-Host "Super Alpha realtime engine starting..."
-npx tsx scripts/tick-loop.ts
+Write-Host "Super Alpha DIRECT realtime engine starting (2s)..."
+npx tsx scripts/tick-direct.ts
