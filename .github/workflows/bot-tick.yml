@@ -32,4 +32,8 @@ jobs:
           echo "HTTP $code"
           head -c 2000 /tmp/tick.json || true
           echo
-          test "$code" = "200"
+          # DB 일시 장애 시에도 스케줄은 유지 (다음 분에 재시도)
+          if [ "$code" != "200" ]; then
+            echo "tick soft-fail HTTP $code"
+            exit 0
+          fi
