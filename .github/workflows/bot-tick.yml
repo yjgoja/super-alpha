@@ -19,16 +19,17 @@ jobs:
       - name: Run Super Alpha engine tick
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          BOT_TICK_URL: ${{ vars.BOT_TICK_URL || 'https://super-alpha-inky.vercel.app/api/cron/tick' }}
+          BOT_TICK_URL: ${{ vars.BOT_TICK_URL }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
             echo "CRON_SECRET missing"
             exit 1
           fi
+          URL="${BOT_TICK_URL:-https://super-alpha-inky.vercel.app/api/cron/tick}"
           code=$(curl -sS -o /tmp/tick.json -w "%{http_code}" \
             --max-time 55 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${BOT_TICK_URL}")
+            "$URL")
           echo "HTTP $code"
           head -c 2000 /tmp/tick.json || true
           echo
@@ -37,7 +38,7 @@ jobs:
             exit 0
           fi
           if [ "$code" = "403" ] || [ "$code" = "401" ]; then
-            echo "tick auth failed HTTP $code — check CRON_SECRET"
+            echo "tick auth failed HTTP $code - check CRON_SECRET"
             exit 1
           fi
           if [ "$code" = "000" ] || [ "$code" -ge 500 ] 2>/dev/null; then
