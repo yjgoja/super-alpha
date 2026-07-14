@@ -1,0 +1,35 @@
+name: Bot Tick
+
+# Vercel Hobby cron = 1/day. This keeps DCA/TP running without opening the web app.
+# GitHub schedule can drift a bit; still far better than daily-only.
+on:
+  schedule:
+    - cron: "* * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: bot-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Run Super Alpha engine tick
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BOT_TICK_URL: ${{ vars.BOT_TICK_URL || 'https://super-alpha-inky.vercel.app/api/cron/tick' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET missing"
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/tick.json -w "%{http_code}" \
+            --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BOT_TICK_URL}")
+          echo "HTTP $code"
+          head -c 2000 /tmp/tick.json || true
+          echo
+          test "$code" = "200"
