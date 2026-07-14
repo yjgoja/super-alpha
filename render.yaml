@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: super-alpha-engine
+    runtime: docker
+    dockerfilePath: ./Dockerfile.engine
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: METAAPI_TOKEN
+        sync: false
+      - key: ENGINE_INTERVAL_MS
+        value: "5000"
