@@ -54,11 +54,11 @@ function LoginForm() {
             <label className="sa-label">이메일</label>
             <input
               className="sa-input"
-              type="email"
+              type="text" autoComplete="username"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@email.com"
+              placeholder="master 또는 you@email.com"
             />
           </div>
           <div>

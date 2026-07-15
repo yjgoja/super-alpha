@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { prisma } from "./db";
 import { SESSION_COOKIE, verifySessionToken } from "./auth";
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "yjgoja@gmail.com")
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "master")
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);

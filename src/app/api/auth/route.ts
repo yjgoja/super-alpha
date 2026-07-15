@@ -10,12 +10,18 @@ import { autoApproveUsers, isAdminEmail } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
+const loginIdSchema = z
+  .string()
+  .trim()
+  .min(2)
+  .max(120)
+  .refine(
+    (v) => z.string().email().safeParse(v).success || /^[a-zA-Z0-9._-]+$/.test(v),
+    { message: "이메일 또는 아이디를 입력하세요." },
+  );
+
 const schema = z.object({
-  email: z
-    .string()
-    .trim()
-    .email("올바른 이메일을 입력하세요.")
-    .max(120),
+  email: loginIdSchema,
   password: z
     .string()
     .min(8, "비밀번호는 8자 이상이어야 합니다.")
