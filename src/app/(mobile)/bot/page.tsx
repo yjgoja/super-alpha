@@ -5,12 +5,10 @@ import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
   DCA1000_DEFAULT_SL_ROI,
   MT5_REF_MID,
-  calcDca1000Defense,
   mt5TpMoneyTarget,
   roiToPricePct,
 } from "@/lib/dca1000";
-import { getTableLevels, isMartinLogic, martinMaxLevels, previewMartinLots, tableLogicMeta } from "@/lib/table-logics";
-import type { Dca1000Level } from "@/lib/dca1000";
+import { isMartinLogic, martinMaxLevels, previewMartinLots, tableLogicMeta } from "@/lib/table-logics";
 import { brokerGateRedirect } from "@/lib/post-login";
 
 /** 표 기본 익절 ROI% (코인선물 profit 컬럼) */
@@ -50,7 +48,6 @@ function fmtNum(n: number, d = 2) {
 
 export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
-  const [logicLevels, setLogicLevels] = useState<Record<string, Dca1000Level[]>>({});
   const [groups, setGroups] = useState<Group[]>([...SYMBOL_GROUPS]);
   const [botEnabled, setBotEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -61,12 +58,6 @@ export default function BotPage() {
   const [ready, setReady] = useState(false);
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
-
-  function levelsFor(logic: string, mult: number): Dca1000Level[] {
-    const saved = logicLevels[logic];
-    if (saved && saved.length > 0) return saved;
-    return getTableLevels(logic, mult);
-  }
 
   const martinPreview = useMemo(() => {
     const logic = (draft.logic as string) || "";
@@ -119,7 +110,6 @@ export default function BotPage() {
       return;
     }
     setBots(botsData.bots || []);
-    if (botsData.logicLevels) setLogicLevels(botsData.logicLevels);
     if (botsData.options?.groups) setGroups(botsData.options.groups);
     setBotEnabled(!!statsData.account.botEnabled);
     setReady(true);
@@ -354,22 +344,6 @@ export default function BotPage() {
 
           <div style={{ display: "grid", gap: "0.7rem" }}>
             {bots.map((bot) => {
-              const cardDef = calcDca1000Defense({
-                stopLossRoiPct:
-                  bot.stopLossEnabled && bot.stopLossPct > 0
-                    ? bot.stopLossPct
-                    : DCA1000_DEFAULT_SL_ROI,
-                startLots: bot.startLots,
-                levels: levelsFor(
-                  bot.logic || "dca_1000",
-                  isMartinLogic(bot.logic || "")
-                    ? bot.entryMultiplier > 1
-                      ? bot.entryMultiplier
-                      : 2
-                    : 1,
-                ),
-                symbol: bot.symbol,
-              });
               const live = botEnabled && bot.enabled;
               return (
                 <article key={bot.id} className="m-card">
@@ -393,11 +367,6 @@ export default function BotPage() {
                               bot.entryMultiplier > 1 ? bot.entryMultiplier : 2
                             }`
                           : `${bot.startLots} lot`}
-                      </div>
-                      <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: "0.35rem" }}>
-                        Buy↓ {fmtNum(cardDef.spotLongPct)}% · Sell↑ {fmtNum(cardDef.spotShortPct)}% ·
-                        손절 ${fmtNum(cardDef.estimatedSlAmount)} · 차트{" "}
-                        {fmtNum(cardDef.slTriggerPricePct)}%
                       </div>
                     </div>
                     <button
