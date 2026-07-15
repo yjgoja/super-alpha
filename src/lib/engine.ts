@@ -6,10 +6,11 @@ import {
   lotsForLevel,
   scaledDeviation,
 } from "./dca";
+import { dayKeySeoul } from "./day-key";
 import { getPrices, refreshPrices } from "./prices";
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return dayKeySeoul();
 }
 
 async function ensureDaily(accountId: string, equity: number) {

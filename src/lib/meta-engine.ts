@@ -26,6 +26,7 @@ import {
   resolveBrokerSymbol,
   symbolsMatch,
 } from "./metaapi";
+import { dayKeySeoul, seoulDayStartUtc } from "./day-key";
 import { prisma } from "./db";
 
 function lotsAtLevel(
@@ -1113,11 +1114,11 @@ async function runDcaTickInner(accountId: string) {
     });
   }
 
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKeySeoul();
   const dayFills = await prisma.fill.findMany({
     where: {
       accountId: account.id,
-      createdAt: { gte: new Date(`${day}T00:00:00.000Z`) },
+      createdAt: { gte: seoulDayStartUtc(day) },
     },
   });
   const dayPnl = dayFills.reduce((s, f) => s + (f.pnl || 0), 0);

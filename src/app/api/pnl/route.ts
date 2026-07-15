@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/access";
+import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-
-function dayKey(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
 
 export async function GET() {
   const gate = await requireApprovedUser();
@@ -26,8 +23,8 @@ export async function GET() {
     });
   }
 
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 14);
+  const today = dayKeySeoul();
+  const since = seoulDayStartUtc(addSeoulDays(today, -14));
 
   const fills = await prisma.fill.findMany({
     where: { accountId: account.id, createdAt: { gte: since } },
@@ -37,19 +34,17 @@ export async function GET() {
 
   const byDay = new Map<string, { pnl: number; trades: number }>();
   for (const f of fills) {
-    const k = dayKey(f.createdAt);
+    const k = dayKeySeoul(f.createdAt);
     const cur = byDay.get(k) || { pnl: 0, trades: 0 };
     cur.pnl += f.pnl || 0;
     cur.trades += 1;
     byDay.set(k, cur);
   }
 
-  // last 5 calendar days with activity or trailing 5 days
+  // last 5 Seoul calendar days with activity or trailing 5 days
   const days: Array<{ date: string; pnl: number; trades: number }> = [];
   for (let i = 4; i >= 0; i--) {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() - i);
-    const k = dayKey(d);
+    const k = addSeoulDays(today, -i);
     const v = byDay.get(k) || { pnl: 0, trades: 0 };
     days.push({ date: k, pnl: Math.round(v.pnl * 100) / 100, trades: v.trades });
   }

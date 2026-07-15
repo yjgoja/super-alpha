@@ -1,5 +1,6 @@
 import { gateErrorKo } from "@/lib/ko-errors";
 import { requireAdmin } from "@/lib/access";
+import { dayKeySeoul, seoulDayStartUtc } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import {
   fmtUsd,
@@ -36,7 +37,7 @@ export async function GET() {
     }),
     prisma.fill.count({
       where: {
-        createdAt: { gte: new Date(new Date().toISOString().slice(0, 10)) },
+        createdAt: { gte: seoulDayStartUtc(dayKeySeoul()) },
       },
     }),
     prisma.basket.count({ where: { status: "open" } }),

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/access";
+import { dayKeySeoul } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshot, syncMt5Account } from "@/lib/metaapi";
@@ -127,7 +128,9 @@ export async function GET(req: NextRequest) {
   const start =
     account.startingBalance > 0 ? account.startingBalance : account.balance || 1;
   const totalReturnPct = ((account.equity - start) / start) * 100;
-  const today = account.dailyStats[0] ?? null;
+  const todayKey = dayKeySeoul();
+  const today =
+    account.dailyStats.find((d) => d.date === todayKey) ?? null;
   const syncAgeSec = account.lastSyncAt
     ? Math.max(0, Math.floor((Date.now() - account.lastSyncAt.getTime()) / 1000))
     : null;

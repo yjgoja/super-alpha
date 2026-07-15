@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyPassword } from "@/lib/auth";
+import { dayKeySeoul } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -42,7 +43,7 @@ const schema = z.object({
 });
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return dayKeySeoul();
 }
 
 export async function POST(req: Request) {
