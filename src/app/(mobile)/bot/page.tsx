@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
-  DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
   MT5_REF_MID,
   calcDca1000Defense,
@@ -49,38 +48,6 @@ function fmtNum(n: number, d = 2) {
   });
 }
 
-function DefenseCard({
-  defense,
-}: {
-  defense: ReturnType<typeof calcDca1000Defense>;
-}) {
-  return (
-    <div className="m-calc-box">
-      <div className="m-calc-title">계산결과</div>
-      <div className="m-calc-row">
-        <span>차트 방어폭 (평균)</span>
-        <strong className="c-roi">{fmtNum(defense.roiDefensePct)} %</strong>
-      </div>
-      <div className="m-calc-row">
-        <span>Buy 손절 (차트↓)</span>
-        <strong className="c-long">{fmtNum(defense.spotLongPct)} %</strong>
-      </div>
-      <div className="m-calc-row">
-        <span>Sell 손절 (차트↑)</span>
-        <strong className="c-short">{fmtNum(defense.spotShortPct)} %</strong>
-      </div>
-      <div className="m-calc-row">
-        <span>예상 손절금 (MT5·전체 회차)</span>
-        <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
-      </div>
-      <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-        <span>손절 차트% (ROI÷20)</span>
-        <strong>{fmtNum(defense.slTriggerPricePct)} %</strong>
-      </div>
-    </div>
-  );
-}
-
 export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [logicLevels, setLogicLevels] = useState<Record<string, Dca1000Level[]>>({});
@@ -100,30 +67,6 @@ export default function BotPage() {
     if (saved && saved.length > 0) return saved;
     return getTableLevels(logic, mult);
   }
-
-  const defense = useMemo(() => {
-    if (!edit) return DCA1000_DEFAULT_DEFENSE;
-    const logic = (draft.logic as string) || "dca_1000";
-    const sl =
-      draft.stopLossEnabled === false
-        ? 0
-        : Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
-    const mult = Number(draft.entryMultiplier ?? (isMartinLogic(logic) ? 2 : 1));
-    return calcDca1000Defense({
-      stopLossRoiPct: sl > 0 ? sl : DCA1000_DEFAULT_SL_ROI,
-      startLots: Number(draft.startLots ?? 0.01),
-      levels: levelsFor(logic, mult),
-      symbol: edit,
-    });
-  }, [
-    edit,
-    draft.logic,
-    draft.stopLossPct,
-    draft.stopLossEnabled,
-    draft.startLots,
-    draft.entryMultiplier,
-    logicLevels,
-  ]);
 
   const martinPreview = useMemo(() => {
     const logic = (draft.logic as string) || "";
@@ -394,13 +337,6 @@ export default function BotPage() {
           <p style={{ margin: "0.75rem 0 0", fontSize: "0.85rem", color: "var(--gold)" }}>{msg}</p>
         )}
       </section>
-
-      {!edit && (
-        <section className="m-card" style={{ marginBottom: "0.85rem" }}>
-          <div style={{ fontWeight: 650, marginBottom: "0.55rem" }}>1000차 기본 방어폭</div>
-          <DefenseCard defense={DCA1000_DEFAULT_DEFENSE} />
-        </section>
-      )}
 
       {!ready ? (
         <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>불러오는 중…</p>
@@ -697,8 +633,6 @@ export default function BotPage() {
                         )}
                         %.
                       </p>
-
-                      <DefenseCard defense={defense} />
 
                       <div className="m-toggle-list">
                         <button
