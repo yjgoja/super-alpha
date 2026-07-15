@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
+import { resolvePostLoginPath } from "@/lib/post-login";
 
 function LoginForm() {
   const router = useRouter();
@@ -29,11 +30,13 @@ function LoginForm() {
       setError(data.error || "실패");
       return;
     }
-    if (data.approvalStatus && data.approvalStatus !== "approved") {
-      router.push("/pending");
-      return;
-    }
-    router.push("/connect");
+    router.push(
+      resolvePostLoginPath({
+        role: data.role || "user",
+        approvalStatus: data.approvalStatus || "pending",
+        hasBrokerAccount: !!data.hasBrokerAccount,
+      }),
+    );
   }
 
   return (

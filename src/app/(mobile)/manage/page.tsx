@@ -18,7 +18,7 @@ export default function ManagePage() {
       }
       const data = await res.json();
       if (!data.account) {
-        window.location.href = "/connect";
+        window.location.href = data.role === "admin" ? "/admin" : "/connect";
         return;
       }
       setLogin(data.account.login);

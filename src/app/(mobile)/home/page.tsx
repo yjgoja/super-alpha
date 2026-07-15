@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { brokerGateRedirect } from "@/lib/post-login";
 
 type DayRow = { date: string; pnl: number; trades: number };
 type CumRow = { date: string; pnl: number; dayPnl: number; trades: number };
@@ -39,8 +40,12 @@ export default function HomePage() {
         return;
       }
       const stats = await statsRes.json().catch(() => ({}));
-      if (!stats.account?.metaApiAccountId) {
-        window.location.href = "/connect";
+      const gate = brokerGateRedirect({
+        role: stats.role,
+        metaApiAccountId: stats.account?.metaApiAccountId,
+      });
+      if (gate) {
+        window.location.href = gate;
         return;
       }
       const pnl = await pnlRes.json().catch(() => ({}));

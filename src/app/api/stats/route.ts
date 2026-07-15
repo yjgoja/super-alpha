@@ -80,7 +80,12 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  if (!account) return NextResponse.json({ account: null });
+  if (!account) {
+    return NextResponse.json({
+      role: gate.user.role,
+      account: null,
+    });
+  }
 
   const start =
     account.startingBalance > 0 ? account.startingBalance : account.balance || 1;
@@ -91,6 +96,7 @@ export async function GET() {
     : null;
 
   return NextResponse.json({
+    role: gate.user.role,
     account: {
       id: account.id,
       login: account.login,

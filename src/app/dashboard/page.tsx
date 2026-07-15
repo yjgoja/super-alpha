@@ -85,6 +85,7 @@ function Spark({ points }: { points: number[] }) {
 
 export default function DashboardPage() {
   const [account, setAccount] = useState<AccountPayload | null>(null);
+  const [role, setRole] = useState<string>("user");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -96,6 +97,11 @@ export default function DashboardPage() {
       return;
     }
     const data = await res.json();
+    if (data.role === "admin" && !data.account) {
+      window.location.href = "/admin";
+      return;
+    }
+    setRole(data.role || "user");
     setAccount(data.account);
     setLoading(false);
   }, []);
@@ -156,9 +162,15 @@ export default function DashboardPage() {
     return (
       <main className="sa-shell py-20">
         <p>연결된 계좌가 없습니다.</p>
-        <Link href="/connect" className="sa-btn sa-btn-primary mt-4 inline-flex">
-          계좌 연결하기
-        </Link>
+        {role === "admin" ? (
+          <Link href="/admin" className="sa-btn sa-btn-primary mt-4 inline-flex">
+            관리자 대시보드
+          </Link>
+        ) : (
+          <Link href="/connect" className="sa-btn sa-btn-primary mt-4 inline-flex">
+            계좌 연결하기
+          </Link>
+        )}
       </main>
     );
   }

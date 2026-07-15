@@ -12,6 +12,7 @@ import {
 } from "@/lib/dca1000";
 import { getTableLevels, isMartinLogic, martinMaxLevels, previewMartinLots, tableLogicMeta } from "@/lib/table-logics";
 import type { Dca1000Level } from "@/lib/dca1000";
+import { brokerGateRedirect } from "@/lib/post-login";
 
 /** 표 기본 익절 ROI% (코인선물 profit 컬럼) */
 const DEFAULT_TP_ROI = 20;
@@ -166,8 +167,12 @@ export default function BotPage() {
     }
     const botsData = await botsRes.json();
     const statsData = await statsRes.json();
-    if (!statsData.account?.metaApiAccountId) {
-      window.location.href = "/connect";
+    const gate = brokerGateRedirect({
+      role: statsData.role,
+      metaApiAccountId: statsData.account?.metaApiAccountId,
+    });
+    if (gate) {
+      window.location.href = gate;
       return;
     }
     setBots(botsData.bots || []);

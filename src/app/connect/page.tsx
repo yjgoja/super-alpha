@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { FIXED_MT5_SERVER } from "@/lib/dca";
 
 export default function ConnectPage() {
@@ -12,6 +12,31 @@ export default function ConnectPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/me");
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      const me = await res.json().catch(() => ({}));
+      if (me.role === "admin") {
+        router.replace("/admin");
+        return;
+      }
+      if (me.approvalStatus && me.approvalStatus !== "approved") {
+        router.replace("/pending");
+        return;
+      }
+      if (me.account?.metaApiAccountId) {
+        router.replace("/home");
+        return;
+      }
+      setChecking(false);
+    })();
+  }, [router]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -29,7 +54,15 @@ export default function ConnectPage() {
       return;
     }
     setDone(true);
-    setTimeout(() => router.push("/dashboard"), 1200);
+    setTimeout(() => router.push("/home"), 1200);
+  }
+
+  if (checking) {
+    return (
+      <main className="sa-shell flex min-h-screen items-center justify-center py-10">
+        <p className="text-sm text-[var(--muted)]">확인 중…</p>
+      </main>
+    );
   }
 
   return (

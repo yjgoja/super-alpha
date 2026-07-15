@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { brokerGateRedirect } from "@/lib/post-login";
 
 type Position = {
   id?: string;
@@ -54,8 +55,12 @@ export default function MarketPage() {
       return;
     }
     const data = await res.json();
-    if (!data.account?.metaApiAccountId) {
-      window.location.href = "/connect";
+    const gate = brokerGateRedirect({
+      role: data.role,
+      metaApiAccountId: data.account?.metaApiAccountId,
+    });
+    if (gate) {
+      window.location.href = gate;
       return;
     }
     setAccount((prev) => ({

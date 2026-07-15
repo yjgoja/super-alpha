@@ -69,7 +69,9 @@ export async function POST(req: Request) {
         NextResponse.json({
           ok: true,
           userId: user.id,
+          role: user.role,
           approvalStatus: user.approvalStatus,
+          hasBrokerAccount: false,
         }),
         token,
       );
@@ -83,7 +85,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { _count: { select: { accounts: true } } },
+    });
     if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
       return NextResponse.json(
         { error: "이메일 또는 비밀번호가 올바르지 않습니다." },
@@ -101,7 +106,9 @@ export async function POST(req: Request) {
       NextResponse.json({
         ok: true,
         userId: user.id,
+        role: user.role,
         approvalStatus: user.approvalStatus,
+        hasBrokerAccount: user._count.accounts > 0,
       }),
       token,
     );
