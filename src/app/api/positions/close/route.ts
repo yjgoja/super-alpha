@@ -92,7 +92,7 @@ export async function POST(req: Request) {
           toRecord = before.positions.filter((p) => !p.id || !remIds.has(p.id));
         }
         for (const p of toRecord) {
-          await prisma.fills.create({
+          await prisma.fill.create({
             data: {
               accountId: account.id,
               symbol: p.symbol,
@@ -168,7 +168,7 @@ export async function POST(req: Request) {
       }
     }
 
-    await prisma.fills.create({
+    await prisma.fill.create({
       data: {
         accountId: account.id,
         symbol: pos.symbol,
