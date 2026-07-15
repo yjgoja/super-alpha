@@ -41,7 +41,7 @@ export async function GET() {
     byDay.set(k, cur);
   }
 
-  // last 5 Seoul calendar days with activity or trailing 5 days
+  // Always exactly the last 5 Seoul calendar days (zeros when no fills)
   const days: Array<{ date: string; pnl: number; trades: number }> = [];
   for (let i = 4; i >= 0; i--) {
     const k = addSeoulDays(today, -i);
@@ -49,21 +49,8 @@ export async function GET() {
     days.push({ date: k, pnl: Math.round(v.pnl * 100) / 100, trades: v.trades });
   }
 
-  // Prefer last 5 days that have trades if available
-  const active = [...byDay.entries()]
-    .map(([date, v]) => ({
-      date,
-      pnl: Math.round(v.pnl * 100) / 100,
-      trades: v.trades,
-    }))
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5)
-    .reverse();
-
-  const period = active.length > 0 ? active : days;
-
   let running = 0;
-  const cumulative = period.map((d) => {
+  const cumulative = days.map((d) => {
     running += d.pnl;
     return {
       date: d.date,
@@ -77,7 +64,7 @@ export async function GET() {
   const totalTrades = fills.length;
 
   return NextResponse.json({
-    days: period,
+    days,
     cumulative,
     totalPnl: Math.round(allPnl * 100) / 100,
     totalTrades,
