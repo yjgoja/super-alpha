@@ -67,16 +67,32 @@ export async function POST(req: Request) {
     if (body.all) {
       const before = await fetchSnapshot(metaId);
       const result = await closeAllPositions(metaId);
-      if (!result.ok) {
+      // MetaErr(스냅샷 실패) vs 부분 청산 실패 구분
+      if (!result.ok && !("closed" in result)) {
         return NextResponse.json({ error: result.message }, { status: 400 });
       }
-      await prisma.basket.updateMany({
-        where: { accountId: account.id, status: "open" },
-        data: { status: "closed", lastExitAt: new Date(), unrealizedPnl: 0 },
-      });
-      if (before.ok) {
-        for (const p of before.positions) {
-          await prisma.fill.create({
+
+      const closed = "closed" in result ? result.closed : 0;
+      const remaining = result.ok ? 0 : "remaining" in result ? result.remaining : -1;
+
+      if (remaining === 0) {
+        await prisma.basket.updateMany({
+          where: { accountId: account.id, status: "open" },
+          data: { status: "closed", lastExitAt: new Date(), unrealizedPnl: 0 },
+        });
+      }
+
+      if (before.ok && closed > 0) {
+        let toRecord = before.positions;
+        if (remaining > 0) {
+          const after = await fetchSnapshot(metaId);
+          const remIds = new Set(
+            after.ok ? after.positions.map((p) => p.id).filter(Boolean) : [],
+          );
+          toRecord = before.positions.filter((p) => !p.id || !remIds.has(p.id));
+        }
+        for (const p of toRecord) {
+          await prisma.fills.create({
             data: {
               accountId: account.id,
               symbol: p.symbol,
@@ -90,12 +106,29 @@ export async function POST(req: Request) {
           });
         }
       }
+
       await stopBotAfterManualClose(account.id);
+
+      if (!result.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            closed,
+            remaining,
+            botEnabled: false,
+            error: result.message,
+            message: result.message,
+          },
+          { status: 400 },
+        );
+      }
+
       return NextResponse.json({
         ok: true,
-        closed: result.closed,
+        closed,
+        remaining: 0,
         botEnabled: false,
-        message: `전체 ${result.closed}건 청산 · 자동매매 중지됨`,
+        message: `전체 ${closed}건 청산 · 자동매매 중지됨`,
       });
     }
 
@@ -135,7 +168,7 @@ export async function POST(req: Request) {
       }
     }
 
-    await prisma.fill.create({
+    await prisma.fills.create({
       data: {
         accountId: account.id,
         symbol: pos.symbol,

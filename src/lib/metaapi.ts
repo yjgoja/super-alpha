@@ -866,16 +866,60 @@ export async function closePositionsBySymbol(metaApiAccountId: string, symbol: s
   return { ok: true as const, closed: targets.length, remaining: 0 };
 }
 
+/**
+ * 계좌 전체 청산. 심볼별 POSITIONS_CLOSE_SYMBOL을 병렬 호출(MT5 Close All과 동일하게 일괄),
+ * 잔여가 있으면 심볼 재시도 + POSITION_CLOSE_ID 병렬 폴백 1회.
+ */
 export async function closeAllPositions(metaApiAccountId: string) {
   const snap = await fetchSnapshot(metaApiAccountId);
   if (!snap.ok) return snap;
-  const results: Array<{ id: string; ok: boolean; message?: string }> = [];
-  for (const p of snap.positions) {
-    if (!p.id) continue;
-    const r = await closePosition(metaApiAccountId, p.id);
-    results.push({ id: p.id, ok: r.ok, message: r.ok ? undefined : r.message });
+
+  const beforeCount = snap.positions.length;
+  if (beforeCount === 0) {
+    return { ok: true as const, closed: 0, remaining: 0, symbols: 0 };
   }
-  return { ok: true as const, results, closed: results.filter((r) => r.ok).length };
+
+  const base = clientBase();
+  const closeBySymbols = async (symbols: string[]) => {
+    await Promise.all(
+      symbols.map((symbol) =>
+        api(base, "POST", `/users/current/accounts/${metaApiAccountId}/trade`, {
+          actionType: "POSITIONS_CLOSE_SYMBOL",
+          symbol,
+        }),
+      ),
+    );
+  };
+
+  const symbols = [...new Set(snap.positions.map((p) => p.symbol).filter(Boolean))];
+  await closeBySymbols(symbols);
+  await sleep(400);
+
+  let after = await fetchSnapshot(metaApiAccountId);
+  let remaining = after.ok ? after.positions : snap.positions;
+
+  if (remaining.length > 0) {
+    const retrySymbols = [...new Set(remaining.map((p) => p.symbol).filter(Boolean))];
+    await closeBySymbols(retrySymbols);
+    await Promise.all(
+      remaining.filter((p) => p.id).map((p) => closePosition(metaApiAccountId, p.id)),
+    );
+    await sleep(300);
+    after = await fetchSnapshot(metaApiAccountId);
+    remaining = after.ok ? after.positions : remaining;
+  }
+
+  const closed = Math.max(0, beforeCount - remaining.length);
+  if (remaining.length > 0) {
+    return {
+      ok: false as const,
+      message: `전체 청산 후 ${remaining.length}건 잔여 (${closed}건 청산됨)`,
+      closed,
+      remaining: remaining.length,
+      symbols: symbols.length,
+    };
+  }
+  return { ok: true as const, closed, remaining: 0, symbols: symbols.length };
 }
 
 export async function verifyMt5Credentials(input: {

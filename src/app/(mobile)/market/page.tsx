@@ -148,7 +148,7 @@ export default function MarketPage() {
     if (!n) return;
     if (!window.confirm(`열린 포지션 ${n}건을 모두 시장가로 청산할까요?`)) return;
     setBusyId("__all__");
-    setMsg("");
+    setMsg(`${n}건 일괄 청산 중…`);
     try {
       const res = await fetch("/api/positions/close", {
         method: "POST",
@@ -156,13 +156,21 @@ export default function MarketPage() {
         body: JSON.stringify({ all: true }),
       });
       const data = await res.json().catch(() => ({}));
+      if (data.botEnabled === false) {
+        setAccount((a) => (a ? { ...a, botEnabled: false } : a));
+      }
       if (!res.ok) {
-        setMsg(data.error || "전체 청산 실패");
-      } else {
-        setMsg(data.message || "전체 청산 완료");
-        if (data.botEnabled === false) {
-          setAccount((a) => (a ? { ...a, botEnabled: false } : a));
+        const closed = typeof data.closed === "number" ? data.closed : null;
+        const remaining = typeof data.remaining === "number" ? data.remaining : null;
+        if (closed != null && remaining != null) {
+          setMsg(data.message || `${closed}건 청산 · ${remaining}건 잔여`);
+        } else {
+          setMsg(data.error || data.message || "전체 청산 실패");
         }
+        await loadLive();
+      } else {
+        const closed = typeof data.closed === "number" ? data.closed : n;
+        setMsg(data.message || `${closed}건 청산 완료`);
         await loadLive();
       }
     } finally {
@@ -323,7 +331,7 @@ export default function MarketPage() {
                 disabled={!!busyId}
                 onClick={closeAll}
               >
-                {busyId === "__all__" ? "청산중…" : "전체 청산"}
+                {busyId === "__all__" ? "일괄 청산중…" : "전체 청산"}
               </button>
             )}
           </div>
