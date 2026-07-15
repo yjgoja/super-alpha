@@ -591,6 +591,7 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
   const bases = [clientBase(), "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai"];
   let info: unknown = null;
   let positionsRaw: unknown[] = [];
+  let positionsErr: string | null = null;
 
   for (const base of bases) {
     const infoRes = await api(
@@ -601,7 +602,16 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
     if (infoRes.status < 400) {
       info = infoRes.data;
       const posRes = await api(base, "GET", `/users/current/accounts/${metaApiAccountId}/positions`);
-      positionsRaw = Array.isArray(posRes.data) ? posRes.data : [];
+      if (posRes.status >= 400 || !Array.isArray(posRes.data)) {
+        const msg =
+          (posRes.data as { message?: string } | null)?.message ||
+          `포지션 조회 실패 (${posRes.status})`;
+        positionsErr = toKoreanError(msg, "열린 포지션을 가져오지 못했습니다.");
+        positionsRaw = [];
+      } else {
+        positionsRaw = posRes.data;
+        positionsErr = null;
+      }
       break;
     }
   }
@@ -611,6 +621,14 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
       ok: false,
       code: "UNKNOWN",
       message: "계좌 정보를 가져오지 못했습니다. 클라우드가 켜져 있는지 확인하세요.",
+    };
+  }
+
+  if (positionsErr) {
+    return {
+      ok: false,
+      code: "POSITIONS_FETCH",
+      message: positionsErr,
     };
   }
 

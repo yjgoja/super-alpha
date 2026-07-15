@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { syncMt5Account } from "@/lib/metaapi";
+import { fetchSnapshot, syncMt5Account } from "@/lib/metaapi";
 import { runDcaTick } from "@/lib/meta-engine";
 
 export const maxDuration = 60;
@@ -62,11 +62,17 @@ export async function POST() {
   });
 }
 
-export async function GET() {
+/**
+ * Fast path: DB only. Pass ?live=1 for MetaAPI snapshot (positions + equity).
+ * Bot OFF여도 연결된 계좌의 열린 포지션을 표시한다.
+ */
+export async function GET(req: NextRequest) {
   const gate = await requireApprovedUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
+
+  const wantLive = req.nextUrl.searchParams.get("live") === "1";
 
   const account = await prisma.brokerAccount.findFirst({
     where: { userId: gate.user.id },
@@ -85,6 +91,37 @@ export async function GET() {
       role: gate.user.role,
       account: null,
     });
+  }
+
+  type LivePos = Extract<Awaited<ReturnType<typeof fetchSnapshot>>, { ok: true }>["positions"];
+  let livePositions: LivePos = [];
+  let syncError: string | null = null;
+
+  if (wantLive) {
+    if (!account.metaApiAccountId) {
+      syncError = "MetaAPI에 연결된 실계좌가 없습니다.";
+    } else {
+      const snap = await fetchSnapshot(String(account.metaApiAccountId));
+      if (snap.ok) {
+        await prisma.brokerAccount.update({
+          where: { id: account.id },
+          data: {
+            balance: snap.balance,
+            equity: snap.equity,
+            lastSyncAt: new Date(),
+            statusMessage: account.botEnabled
+              ? "클라우드 연결 · 봇 실행 중"
+              : "클라우드 연결 · 포지션 동기화",
+          },
+        });
+        account.balance = snap.balance;
+        account.equity = snap.equity;
+        account.lastSyncAt = new Date();
+        livePositions = snap.positions;
+      } else {
+        syncError = snap.message;
+      }
+    }
   }
 
   const start =
@@ -122,6 +159,8 @@ export async function GET() {
       fills: account.fills,
       snapshots: account.snapshots.reverse(),
       dailyStats: account.dailyStats,
+      livePositions: wantLive ? livePositions : undefined,
+      syncError: wantLive ? syncError : undefined,
     },
   });
 }

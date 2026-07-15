@@ -72,10 +72,26 @@ export default function MarketPage() {
   }, []);
 
   const loadLive = useCallback(async () => {
-    const res = await fetch("/api/stats?live=1");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.account) setAccount(data.account);
+    try {
+      const res = await fetch("/api/stats?live=1");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAccount((prev) =>
+          prev
+            ? {
+                ...prev,
+                syncError: data.error || "포지션 동기화에 실패했습니다.",
+              }
+            : prev,
+        );
+        return;
+      }
+      if (data.account) setAccount(data.account);
+    } catch {
+      setAccount((prev) =>
+        prev ? { ...prev, syncError: "포지션 동기화 중 네트워크 오류가 발생했습니다." } : prev,
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -317,9 +333,17 @@ export default function MarketPage() {
           <p style={{ margin: "0.65rem 0 0", fontSize: "0.82rem", color: "var(--gold)" }}>{msg}</p>
         )}
 
+        {account.syncError && (
+          <p style={{ margin: "0.65rem 0 0", fontSize: "0.82rem", color: "var(--danger)" }}>
+            {account.syncError}
+          </p>
+        )}
+
         {positions.length === 0 ? (
           <p style={{ color: "var(--muted)", fontSize: "0.88rem", margin: "1rem 0 0.25rem" }}>
-            열린 포지션이 없습니다.
+            {account.syncError
+              ? "실시간 포지션을 불러오지 못했습니다. 잠시 후 다시 시도하세요."
+              : "열린 포지션이 없습니다."}
           </p>
         ) : (
           <div style={{ marginTop: "0.75rem", display: "grid", gap: "0.55rem" }}>
