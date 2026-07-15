@@ -3,6 +3,9 @@ import { requireApprovedUser } from "@/lib/access";
 import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
+import { padDailyPnl, withCumulative } from "@/lib/pnl-period";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const gate = await requireApprovedUser();
@@ -15,12 +18,15 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
   if (!account) {
-    return NextResponse.json({
-      days: [],
-      cumulative: [],
-      totalPnl: 0,
-      totalTrades: 0,
-    });
+    return NextResponse.json(
+      {
+        days: [],
+        cumulative: [],
+        totalPnl: 0,
+        totalTrades: 0,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const today = dayKeySeoul();
@@ -42,36 +48,31 @@ export async function GET() {
   }
 
   // Always exactly the last 5 Seoul calendar days (zeros when no fills)
-  const days: Array<{ date: string; pnl: number; trades: number }> = [];
-  for (let i = 4; i >= 0; i--) {
-    const k = addSeoulDays(today, -i);
-    const v = byDay.get(k) || { pnl: 0, trades: 0 };
-    days.push({ date: k, pnl: Math.round(v.pnl * 100) / 100, trades: v.trades });
-  }
-
-  let running = 0;
-  const cumulative = days.map((d) => {
-    running += d.pnl;
-    return {
-      date: d.date,
-      pnl: Math.round(running * 100) / 100,
-      dayPnl: d.pnl,
-      trades: d.trades,
-    };
-  });
+  const days = padDailyPnl(
+    [...byDay.entries()].map(([date, v]) => ({
+      date,
+      pnl: v.pnl,
+      trades: v.trades,
+    })),
+    today,
+  );
+  const cumulative = withCumulative(days);
 
   const allPnl = fills.reduce((s, f) => s + (f.pnl || 0), 0);
   const totalTrades = fills.length;
 
-  return NextResponse.json({
-    days,
-    cumulative,
-    totalPnl: Math.round(allPnl * 100) / 100,
-    totalTrades,
-    account: {
-      login: account.login,
-      equity: account.equity,
-      balance: account.balance,
+  return NextResponse.json(
+    {
+      days,
+      cumulative,
+      totalPnl: Math.round(allPnl * 100) / 100,
+      totalTrades,
+      account: {
+        login: account.login,
+        equity: account.equity,
+        balance: account.balance,
+      },
     },
-  });
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

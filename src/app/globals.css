@@ -605,6 +605,12 @@ a {
   background: linear-gradient(180deg, #ff8a96, #e25566);
 }
 
+/* Zero-PnL days stay visible as muted stubs (never drop from chart) */
+.m-chart-bar.is-zero {
+  background: rgba(174, 184, 198, 0.45);
+  min-height: 6px;
+}
+
 .m-chart-label {
   font-size: 0.58rem;
   color: #8b97a8;

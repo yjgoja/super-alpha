@@ -2,9 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { brokerGateRedirect } from "@/lib/post-login";
-
-type DayRow = { date: string; pnl: number; trades: number };
-type CumRow = { date: string; pnl: number; dayPnl: number; trades: number };
+import { padDailyPnl, withCumulative, type DayPnl } from "@/lib/pnl-period";
 
 function fmt(n: number) {
   return n.toLocaleString("en-US", {
@@ -16,20 +14,20 @@ function fmt(n: number) {
 /** SuperMeta-style Home: Trading PNL chart + period table */
 export default function HomePage() {
   const [mode, setMode] = useState<"daily" | "cum">("daily");
-  const [days, setDays] = useState<DayRow[]>([]);
-  const [cumulative, setCumulative] = useState<CumRow[]>([]);
+  const [days, setDays] = useState<DayPnl[]>([]);
   const [totalPnl, setTotalPnl] = useState(0);
   const [totalTrades, setTotalTrades] = useState(0);
   const [equity, setEquity] = useState(0);
   const [dailyPnl, setDailyPnl] = useState(0);
   const [tip, setTip] = useState<{ date: string; pnl: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasAccount, setHasAccount] = useState(true);
 
   useEffect(() => {
     (async () => {
       const [pnlRes, statsRes] = await Promise.all([
-        fetch("/api/pnl"),
-        fetch("/api/stats"),
+        fetch("/api/pnl", { cache: "no-store" }),
+        fetch("/api/stats", { cache: "no-store" }),
       ]);
       if (pnlRes.status === 401 || statsRes.status === 401) {
         window.location.href = "/login";
@@ -49,8 +47,14 @@ export default function HomePage() {
         return;
       }
       const pnl = await pnlRes.json().catch(() => ({}));
-      setDays(pnl.days || []);
-      setCumulative(pnl.cumulative || []);
+      const rawDays: DayPnl[] = Array.isArray(pnl.days) ? pnl.days : [];
+      // Client pad: always 5 consecutive KST days even if API regresses / caches old payload
+      const padded =
+        rawDays.length === 0 && !pnl.account
+          ? []
+          : padDailyPnl(rawDays);
+      setHasAccount(Boolean(pnl.account) || rawDays.length > 0);
+      setDays(padded);
       setTotalPnl(pnl.totalPnl || 0);
       setTotalTrades(pnl.totalTrades || 0);
       setEquity(stats.account?.equity || 0);
@@ -58,6 +62,8 @@ export default function HomePage() {
       setLoading(false);
     })();
   }, []);
+
+  const cumulative = useMemo(() => withCumulative(days), [days]);
 
   const chart = useMemo(() => {
     if (mode === "daily") {
@@ -83,6 +89,8 @@ export default function HomePage() {
   function fmtAxis(n: number) {
     return n.toFixed(1);
   }
+
+  const showEmpty = !loading && (!hasAccount || days.length === 0);
 
   return (
     <>
@@ -149,7 +157,7 @@ export default function HomePage() {
           <p style={{ color: "var(--muted)", textAlign: "center", padding: "3rem 0" }}>
             불러오는 중…
           </p>
-        ) : chart.length === 0 || chart.every((c) => c.value === 0 && c.trades === 0) ? (
+        ) : showEmpty ? (
           <p
             style={{
               color: "var(--muted)",
@@ -188,7 +196,8 @@ export default function HomePage() {
                 </div>
                 <div className="m-chart">
                   {chart.map((c) => {
-                    const h = Math.max(4, (Math.abs(c.value) / yMax) * 132);
+                    const isZero = c.value === 0;
+                    const h = isZero ? 6 : Math.max(8, (Math.abs(c.value) / yMax) * 132);
                     return (
                       <button
                         key={c.date}
@@ -204,8 +213,9 @@ export default function HomePage() {
                         onClick={() => setTip({ date: c.date, pnl: c.value })}
                       >
                         <div
-                          className={`m-chart-bar${c.value < 0 ? " is-neg" : ""}`}
+                          className={`m-chart-bar${c.value < 0 ? " is-neg" : ""}${isZero ? " is-zero" : ""}`}
                           style={{ height: h }}
+                          title={`${c.date}: ${c.value}`}
                         />
                         <span className="m-chart-label">{c.date.slice(5)}</span>
                       </button>
