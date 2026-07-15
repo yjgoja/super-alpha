@@ -17,7 +17,7 @@ const loginIdSchema = z
   .max(120)
   .refine(
     (v) => z.string().email().safeParse(v).success || /^[a-zA-Z0-9._-]+$/.test(v),
-    { message: "이메일 또는 아이디를 입력하세요." },
+    { message: "이메일을 입력하세요." },
   );
 
 const schema = z.object({
