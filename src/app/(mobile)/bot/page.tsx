@@ -3,12 +3,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
+  DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
   MT5_REF_MID,
+  calcDca1000Defense,
   mt5TpMoneyTarget,
   roiToPricePct,
 } from "@/lib/dca1000";
-import { isMartinLogic, martinMaxLevels, previewMartinLots, tableLogicMeta } from "@/lib/table-logics";
+import type { Dca1000Level } from "@/lib/dca1000";
+import {
+  getTableLevels,
+  isMartinLogic,
+  martinMaxLevels,
+  previewMartinLots,
+  tableLogicMeta,
+} from "@/lib/table-logics";
 import { brokerGateRedirect } from "@/lib/post-login";
 
 /** 표 기본 익절 ROI% (코인선물 profit 컬럼) */
@@ -46,8 +55,41 @@ function fmtNum(n: number, d = 2) {
   });
 }
 
+function DefenseCard({
+  defense,
+}: {
+  defense: ReturnType<typeof calcDca1000Defense>;
+}) {
+  return (
+    <div className="m-calc-box">
+      <div className="m-calc-title">계산결과</div>
+      <div className="m-calc-row">
+        <span>차트 방어폭 (평균)</span>
+        <strong className="c-roi">{fmtNum(defense.roiDefensePct)} %</strong>
+      </div>
+      <div className="m-calc-row">
+        <span>Buy 손절 (차트↓)</span>
+        <strong className="c-long">{fmtNum(defense.spotLongPct)} %</strong>
+      </div>
+      <div className="m-calc-row">
+        <span>Sell 손절 (차트↑)</span>
+        <strong className="c-short">{fmtNum(defense.spotShortPct)} %</strong>
+      </div>
+      <div className="m-calc-row">
+        <span>예상 손절금 (MT5·전체 회차)</span>
+        <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
+      </div>
+      <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+        <span>손절 차트% (ROI÷20)</span>
+        <strong>{fmtNum(defense.slTriggerPricePct)} %</strong>
+      </div>
+    </div>
+  );
+}
+
 export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
+  const [logicLevels, setLogicLevels] = useState<Record<string, Dca1000Level[]>>({});
   const [groups, setGroups] = useState<Group[]>([...SYMBOL_GROUPS]);
   const [botEnabled, setBotEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,6 +100,32 @@ export default function BotPage() {
   const [ready, setReady] = useState(false);
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
+
+  const defense = useMemo(() => {
+    if (!edit) return DCA1000_DEFAULT_DEFENSE;
+    const logic = (draft.logic as string) || "dca_1000";
+    const sl =
+      draft.stopLossEnabled === false
+        ? 0
+        : Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
+    const mult = Number(draft.entryMultiplier ?? (isMartinLogic(logic) ? 2 : 1));
+    const saved = logicLevels[logic];
+    const levels = saved && saved.length > 0 ? saved : getTableLevels(logic, mult);
+    return calcDca1000Defense({
+      stopLossRoiPct: sl > 0 ? sl : DCA1000_DEFAULT_SL_ROI,
+      startLots: Number(draft.startLots ?? 0.01),
+      levels,
+      symbol: edit,
+    });
+  }, [
+    edit,
+    draft.logic,
+    draft.stopLossPct,
+    draft.stopLossEnabled,
+    draft.startLots,
+    draft.entryMultiplier,
+    logicLevels,
+  ]);
 
   const martinPreview = useMemo(() => {
     const logic = (draft.logic as string) || "";
@@ -110,6 +178,7 @@ export default function BotPage() {
       return;
     }
     setBots(botsData.bots || []);
+    if (botsData.logicLevels) setLogicLevels(botsData.logicLevels);
     if (botsData.options?.groups) setGroups(botsData.options.groups);
     setBotEnabled(!!statsData.account.botEnabled);
     setReady(true);
@@ -602,6 +671,8 @@ export default function BotPage() {
                         )}
                         %.
                       </p>
+
+                      <DefenseCard defense={defense} />
 
                       <div className="m-toggle-list">
                         <button
