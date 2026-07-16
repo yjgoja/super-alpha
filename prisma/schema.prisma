@@ -67,7 +67,7 @@ model StrategyLogic {
   id        String   @id @default(cuid())
   accountId String
   account   BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  /// dca_1000 | dubai_bruno_313 | martin_9..12 | custom
+  /// dubai_bruno_313 | martin_9..12 | custom
   logicId   String
   name      String?
   /// { mode, leverageBase, startLots?, takeProfitPct?, stopLossPct?, takeProfitUsd?, stopLossUsd?, levels?: [{lots,profit,drop}] }
@@ -86,7 +86,7 @@ model SymbolBot {
   account          BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   symbol           String
   enabled          Boolean @default(true)
-  logic            String  @default("dca_1000")
+  logic            String  @default("dubai_bruno_313")
   direction        String  @default("BUY")
   entryCount       Int     @default(10)
   entryMultiplier  Float   @default(2)

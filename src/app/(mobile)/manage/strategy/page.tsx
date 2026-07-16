@@ -16,7 +16,7 @@ import {
 type LevelRow = { lots: number; profit: number; drop: number };
 
 function isBulkLogic(logic: string) {
-  return logic === "dca_1000" || logic === "dubai_bruno_313";
+  return logic === "dubai_bruno_313";
 }
 
 function isLevelsEditableLogic(logic: string) {
@@ -306,7 +306,7 @@ export default function StrategyLogicPage() {
         <section className="m-card" style={{ display: "grid", gap: "0.75rem", marginBottom: "0.75rem" }}>
           <div style={{ fontWeight: 650 }}>일괄 설정 (전체 회차 동일)</div>
           <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            1000차·두바이는 회차 칸을 펼치지 않습니다. 계약수·익절·손절만 한 번에 적용하고, 물타기(drop)
+            두바이부르노는 회차 칸을 펼치지 않습니다. 계약수·익절·손절만 한 번에 적용하고, 물타기(drop)
             표는 기본 프리셋을 유지합니다.
           </p>
           <label>

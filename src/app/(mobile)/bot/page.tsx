@@ -105,7 +105,7 @@ export default function BotPage() {
 
   const defense = useMemo(() => {
     if (!edit) return DCA1000_DEFAULT_DEFENSE;
-    const logic = (draft.logic as string) || "dca_1000";
+    const logic = (draft.logic as string) || "dubai_bruno_313";
     const sl =
       draft.stopLossEnabled === false
         ? 0
@@ -224,7 +224,7 @@ export default function BotPage() {
     if (!edit) return;
     setBusy(true);
     setMsg("");
-    const logic = (draft.logic as string) || "dca_1000";
+    const logic = (draft.logic as string) || "dubai_bruno_313";
     const meta = tableLogicMeta(logic);
     const lots = Number(draft.startLots ?? 0.01);
     const tpUsd = Number(draft.takeProfitUsd ?? 0);
@@ -289,14 +289,14 @@ export default function BotPage() {
       return;
     }
     setBusy(true);
-    const meta = tableLogicMeta("dca_1000");
+    const meta = tableLogicMeta("dubai_bruno_313");
     await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         symbol: addSymbol,
         enabled: false,
-        logic: "dca_1000",
+        logic: "dubai_bruno_313",
         entryCount: meta.count,
         entryMultiplier: 1,
         startLots: 0.01,
@@ -326,7 +326,7 @@ export default function BotPage() {
 
   function openEdit(bot: Bot) {
     setEdit(bot.symbol);
-    const logic = bot.logic || "dca_1000";
+    const logic = bot.logic || "dubai_bruno_313";
     const meta = tableLogicMeta(logic);
     const savedMult = Number(bot.entryMultiplier || 0);
     const tpPct = bot.takeProfitPct > 5 ? bot.takeProfitPct : meta.firstTpRoi || DEFAULT_TP_ROI;
@@ -561,7 +561,7 @@ export default function BotPage() {
                         <span className="sa-label">로직</span>
                         <select
                           className="sa-select"
-                          value={(draft.logic as string) || bot.logic || "dca_1000"}
+                          value={(draft.logic as string) || bot.logic || "dubai_bruno_313"}
                           onChange={(e) => {
                             const logic = e.target.value;
                             const meta = tableLogicMeta(logic);

@@ -81,7 +81,7 @@ console.log("- 익절 $: 사용증거금 × (tpRoi/100)");
 console.log("- 물타기: max(손실ROI, 가격역행%×레버) ≥ 표 drop ROI");
 console.log("- 손절: 가격역행% ≥ 손절ROI÷20  (표/코인 레버20 환산)");
 console.log("- 틱당 물타기 최대: 8회차");
-console.log("- 기본 전략표: dca_1000 (L0..L998, drop 누적 ROI)");
+console.log("- 기본 전략표: dubai_bruno_313 (L0..L998, drop 누적 ROI)");
 console.log("- 기본 익절 ROI: " + TP_ROI + "% / 기본 손절 ROI: " + DCA1000_DEFAULT_SL_ROI + "%");
 console.log("");
 
@@ -197,7 +197,7 @@ const eurM = mt5UsedMargin({
 });
 
 console.log("============================================================");
-console.log(" 물타기 구간표 (1000차 기본표 · 1로트 · 레버500)");
+console.log(" 물타기 구간표 (두바이부르노 기본표 · 1로트 · 레버500)");
 console.log(" drop ROI 도달 시 해당 회차 진입 (누적 첫진입 기준)");
 console.log("============================================================");
 console.log(

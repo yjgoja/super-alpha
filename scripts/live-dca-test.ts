@@ -71,7 +71,7 @@ async function main() {
         accountId: account.id,
         symbol,
         enabled: true,
-        logic: "dca_1000",
+        logic: "dubai_bruno_313",
         direction: "BUY",
         entryCount: 999,
         entryMultiplier: 1,
@@ -85,7 +85,7 @@ async function main() {
       },
       update: {
         enabled: true,
-        logic: "dca_1000",
+        logic: "dubai_bruno_313",
         direction: "BUY",
         startLots: 1,
         takeProfitPct: 20,

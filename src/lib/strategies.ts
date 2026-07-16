@@ -78,11 +78,6 @@ export const SYMBOL_OPTIONS = SYMBOL_GROUPS.flatMap((g) => [...g.symbols]);
 
 export const LOGIC_OPTIONS = [
   {
-    id: "dca_1000",
-    name: "1000차 DCA",
-    desc: "익절/손절/물타기 = 바스켓 손익$ (시작로트 증거금×ROI% 환산)",
-  },
-  {
     id: "martin_9",
     name: "마틴게일 9차",
     desc: "단계별 로트 증가 · 익절/손절/물타기 = 손익$",
@@ -121,8 +116,18 @@ export const LOGIC_IDS = LOGIC_OPTIONS.map((l) => l.id) as [
   ...LogicId[],
 ];
 
+/** 삭제된 프리셋 → 동일 표의 두바이부르노 */
+export const LEGACY_LOGIC_ALIASES: Record<string, LogicId> = {
+  dca_1000: "dubai_bruno_313",
+};
+
+export function normalizeLogicId(logic: string): string {
+  return LEGACY_LOGIC_ALIASES[logic] ?? logic;
+}
+
 export function logicLabel(id: string) {
-  return LOGIC_OPTIONS.find((l) => l.id === id)?.name || id;
+  const normalized = normalizeLogicId(id);
+  return LOGIC_OPTIONS.find((l) => l.id === normalized)?.name || id;
 }
 
 export function isLogicId(id: string): id is LogicId {

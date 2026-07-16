@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { normalizeLogicId } from "./strategies";
 import {
   applyBulkPayload,
   defaultEntryMultiplier,
@@ -17,11 +18,12 @@ export async function resolveStrategyForAccount(
   logic: string,
   opts?: { entryMultiplier?: number; startLots?: number },
 ): Promise<ResolvedStrategy> {
+  const logicId = normalizeLogicId(logic);
   const row = await prisma.strategyLogic.findUnique({
-    where: { accountId_logicId: { accountId, logicId: logic } },
+    where: { accountId_logicId: { accountId, logicId } },
   });
   const payload = (row?.payload || null) as StrategyPayload | null;
-  const lev = payload?.leverageBase ?? getTableLeverage(logic);
+  const lev = payload?.leverageBase ?? getTableLeverage(logicId);
   const startLots = Math.max(0.01, payload?.startLots ?? opts?.startLots ?? 0.01);
 
   if (payload?.mode === "levels" && payload.levels && payload.levels.length > 0) {
@@ -39,8 +41,8 @@ export async function resolveStrategyForAccount(
     };
   }
 
-  if (payload?.mode === "bulk" || (payload && isBulkLogic(logic))) {
-    const levels = applyBulkPayload(logic, {
+  if (payload?.mode === "bulk" || (payload && isBulkLogic(logicId))) {
+    const levels = applyBulkPayload(logicId, {
       mode: "bulk",
       startLots: payload.startLots ?? startLots,
       takeProfitPct: payload.takeProfitPct,
@@ -62,13 +64,13 @@ export async function resolveStrategyForAccount(
     };
   }
 
-  const levels = getTableLevels(logic, opts?.entryMultiplier).map((lv, i) => ({
+  const levels = getTableLevels(logicId, opts?.entryMultiplier).map((lv, i) => ({
     ...lv,
     lots: lotsForLogicLevel(
-      logic,
+      logicId,
       i,
       startLots,
-      opts?.entryMultiplier ?? defaultEntryMultiplier(logic),
+      opts?.entryMultiplier ?? defaultEntryMultiplier(logicId),
       lv.size,
     ),
   }));

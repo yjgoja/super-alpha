@@ -1,10 +1,10 @@
-import dca1000Json from "./presets/dca1000-levels.json";
 import martin9Json from "./presets/martin9-levels.json";
 import martin10Json from "./presets/martin10-levels.json";
 import martin11Json from "./presets/martin11-levels.json";
 import martin12Json from "./presets/martin12-levels.json";
 import dubai313Json from "./presets/dubai313-levels.json";
 import type { Dca1000Level } from "./dca1000";
+import { normalizeLogicId } from "./strategies";
 
 type LevelsFile = { leverageBase?: number; levels: Dca1000Level[] };
 
@@ -47,7 +47,6 @@ function buildLevels(file: LevelsFile): Dca1000Level[] {
 }
 
 export const TABLE_LOGIC_IDS = [
-  "dca_1000",
   "martin_9",
   "martin_10",
   "martin_11",
@@ -58,8 +57,9 @@ export const TABLE_LOGIC_IDS = [
 
 export type TableLogicId = (typeof TABLE_LOGIC_IDS)[number];
 
+const DEFAULT_TABLE_LOGIC: Exclude<TableLogicId, "custom"> = "dubai_bruno_313";
+
 const TABLE_FILES: Record<Exclude<TableLogicId, "custom">, LevelsFile> = {
-  dca_1000: dca1000Json as LevelsFile,
   martin_9: martin9Json as LevelsFile,
   martin_10: martin10Json as LevelsFile,
   martin_11: martin11Json as LevelsFile,
@@ -70,11 +70,12 @@ const TABLE_FILES: Record<Exclude<TableLogicId, "custom">, LevelsFile> = {
 const LEVELS_CACHE: Partial<Record<string, Dca1000Level[]>> = {};
 
 export function isTableLogic(logic: string): logic is TableLogicId {
-  return (TABLE_LOGIC_IDS as readonly string[]).includes(logic);
+  const id = normalizeLogicId(logic);
+  return (TABLE_LOGIC_IDS as readonly string[]).includes(id);
 }
 
 export function isBulkLogic(logic: string) {
-  return logic === "dca_1000" || logic === "dubai_bruno_313";
+  return normalizeLogicId(logic) === "dubai_bruno_313";
 }
 
 export function isMartinLogic(logic: string) {
@@ -139,14 +140,16 @@ export function previewMartinLots(startLots: number, multiplier: number, count: 
 }
 
 function presetFileLevels(logic: string): Dca1000Level[] {
-  if (logic === "custom") {
+  const normalized = normalizeLogicId(logic);
+  if (normalized === "custom") {
     return Array.from({ length: 9 }, (_, i) => ({
       size: Math.round(10 * Math.pow(2, i) * 100) / 100,
       profit: 20,
       drop: i === 0 ? 0 : 10 * i,
     }));
   }
-  const id = isTableLogic(logic) && logic !== "custom" ? logic : "dca_1000";
+  const id =
+    isTableLogic(normalized) && normalized !== "custom" ? normalized : DEFAULT_TABLE_LOGIC;
   if (!LEVELS_CACHE[id]) {
     LEVELS_CACHE[id] = buildLevels(TABLE_FILES[id as Exclude<TableLogicId, "custom">]);
   }
@@ -217,8 +220,10 @@ export function applyBulkPayload(
 }
 
 export function getTableLeverage(logic: string): number {
-  if (logic === "custom") return 20;
-  const id = isTableLogic(logic) && logic !== "custom" ? logic : "dca_1000";
+  const normalized = normalizeLogicId(logic);
+  if (normalized === "custom") return 20;
+  const id =
+    isTableLogic(normalized) && normalized !== "custom" ? normalized : DEFAULT_TABLE_LOGIC;
   return TABLE_FILES[id].leverageBase || 20;
 }
 

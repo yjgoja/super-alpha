@@ -9,7 +9,6 @@ const START = 0.01;
 const DEPTHS = [0, 4, 9, 19, 49, 99]; // 0-based filledThrough
 
 const labels: Record<string, string> = {
-  dca_1000: "1000차 DCA",
   martin_9: "마틴9",
   martin_10: "마틴10",
   martin_11: "마틴11",

@@ -18,6 +18,7 @@ import {
   isTableLogic,
   lotsForLogicLevel,
 } from "./table-logics";
+import { normalizeLogicId } from "./strategies";
 import { resolveStrategyForAccount } from "./strategy-resolve";
 import {
   closePositionsBySymbol,
@@ -284,7 +285,7 @@ async function closeBasketTp(opts: {
   return { closed: true as const, reentered: true as const };
 }
 
-/** 표 기반 DCA (1000차 / 마틴게일 / 두바이부르노) + MT5 스프레드 */
+/** 표 기반 DCA (마틴게일 / 두바이부르노) + MT5 스프레드 */
 async function runSymbolTableDca(
   accountId: string,
   metaId: string,
@@ -294,7 +295,7 @@ async function runSymbolTableDca(
 ) {
   const symbol = cfg.symbol;
   const direction = (cfg.direction === "SELL" ? "SELL" : "BUY") as "BUY" | "SELL";
-  const logic = isTableLogic(cfg.logic) ? cfg.logic : "dca_1000";
+  const logic = isTableLogic(cfg.logic) ? normalizeLogicId(cfg.logic) : "dubai_bruno_313";
   const resolved = await resolveStrategyForAccount(accountId, logic, {
     entryMultiplier: cfg.entryMultiplier,
     startLots: cfg.startLots,
@@ -704,9 +705,9 @@ async function runSymbolDca(
   baskets: BasketRow[],
   positions: PosRow[],
 ) {
-  const logic = cfg.logic || "dca_1000";
+  const logic = normalizeLogicId(cfg.logic || "dubai_bruno_313");
   if (isTableLogic(logic)) {
-    return runSymbolTableDca(accountId, metaId, cfg, baskets, positions);
+    return runSymbolTableDca(accountId, metaId, { ...cfg, logic }, baskets, positions);
   }
 
   const symbol = cfg.symbol;
@@ -1130,7 +1131,7 @@ async function runDcaTickInner(accountId: string) {
     bots = [
       {
         symbol: c.symbol || "EURUSD",
-        logic: "dca_1000",
+        logic: "dubai_bruno_313",
         direction: c.direction || "BUY",
         entryCount: c.entryCount,
         entryMultiplier: c.entryMultiplier,

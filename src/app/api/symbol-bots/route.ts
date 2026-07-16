@@ -4,7 +4,14 @@ import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { resolveTpSlUsd } from "@/lib/dca1000";
-import { LOGIC_IDS, LOGIC_OPTIONS, SYMBOL_GROUPS, SYMBOL_OPTIONS, isLogicId } from "@/lib/strategies";
+import {
+  LOGIC_IDS,
+  LOGIC_OPTIONS,
+  SYMBOL_GROUPS,
+  SYMBOL_OPTIONS,
+  isLogicId,
+  normalizeLogicId,
+} from "@/lib/strategies";
 import {
   defaultEntryMultiplier,
   getTableLevels,
@@ -39,22 +46,40 @@ export async function GET() {
     orderBy: { symbol: "asc" },
   });
 
-  // Migrate unknown legacy logics → dca_1000
+  // Migrate removed/unknown logics → dubai_bruno_313
   const outdated = bots.filter((b) => !isLogicId(b.logic));
   if (outdated.length > 0) {
-    await prisma.symbolBot.updateMany({
-      where: {
-        accountId: account.id,
-        logic: { notIn: [...LOGIC_IDS] },
-      },
-      data: {
-        logic: "dca_1000",
-        entryCount: 999,
-        entryMultiplier: 1,
-        stopLossPct: 225,
-        stopLossEnabled: true,
-      },
+    for (const b of outdated) {
+      const nextLogic = normalizeLogicId(b.logic);
+      const logic = isLogicId(nextLogic) ? nextLogic : "dubai_bruno_313";
+      await prisma.symbolBot.update({
+        where: { id: b.id },
+        data: {
+          logic,
+          ...(logic === "dubai_bruno_313"
+            ? { entryCount: 999, entryMultiplier: 1, stopLossPct: 225, stopLossEnabled: true }
+            : {}),
+        },
+      });
+    }
+    const legacyOverride = await prisma.strategyLogic.findUnique({
+      where: { accountId_logicId: { accountId: account.id, logicId: "dca_1000" } },
     });
+    if (legacyOverride) {
+      const dubaiExists = await prisma.strategyLogic.findUnique({
+        where: {
+          accountId_logicId: { accountId: account.id, logicId: "dubai_bruno_313" },
+        },
+      });
+      if (dubaiExists) {
+        await prisma.strategyLogic.delete({ where: { id: legacyOverride.id } });
+      } else {
+        await prisma.strategyLogic.update({
+          where: { id: legacyOverride.id },
+          data: { logicId: "dubai_bruno_313" },
+        });
+      }
+    }
     bots = await prisma.symbolBot.findMany({
       where: { accountId: account.id },
       orderBy: { symbol: "asc" },
@@ -147,7 +172,7 @@ export async function GET() {
           accountId: account.id,
           symbol: "EURUSD",
           enabled: true,
-          logic: "dca_1000",
+          logic: "dubai_bruno_313",
           entryCount: 999,
           entryMultiplier: 1,
           takeProfitPct: 20,
@@ -162,7 +187,7 @@ export async function GET() {
           accountId: account.id,
           symbol: "XAUUSD",
           enabled: false,
-          logic: "dca_1000",
+          logic: "dubai_bruno_313",
           entryCount: 999,
           entryMultiplier: 1,
           takeProfitPct: 20,
@@ -241,7 +266,7 @@ export async function PUT(req: Request) {
   const body = parsed.data;
   const logic =
     body.logic && isLogicId(body.logic) ? body.logic : undefined;
-  const resolvedLogic = logic ?? "dca_1000";
+  const resolvedLogic = logic ?? "dubai_bruno_313";
   const meta = tableLogicMeta(resolvedLogic);
   const levels = getTableLevels(resolvedLogic);
   const defaultMult = defaultEntryMultiplier(resolvedLogic);
