@@ -4,7 +4,8 @@ import { useEffect } from "react";
 
 /**
  * While the app is open and bot is ON, soft-sync equity and run a user-scoped tick.
- * Complements GHA (~1/min) and local engine (~2s); does not replace always-on workers.
+ * Optional supplement only — GHA bot-tick loop (~1/min) and local engine (~2s) own trading.
+ * Closing the browser must NOT stop TP/DCA; those paths are server-side.
  * Does NOT rebuild baskets (that used to desync DCA levels).
  */
 export function BotHeartbeat() {

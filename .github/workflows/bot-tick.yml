@@ -1,22 +1,26 @@
 name: Bot Tick
 
-# Vercel Hobby cron = 1/day. This keeps DCA/TP running without opening the web app.
-# GitHub schedule can drift a bit; still far better than daily-only.
+# Vercel Hobby cron ≈ 1/day — not usable as the trading engine.
+# Public-repo GHA `schedule: * * * * *` is heavily throttled (often ~hourly),
+# so one run stays alive and ticks ~every 60s. Browser is NOT required.
 on:
   schedule:
-    - cron: "* * * * *"
+    # Refresh the long runner; GitHub may still coalesce these.
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: bot-tick
-  cancel-in-progress: false
+  # New schedule cancels the previous loop and starts a fresh one (no stack-up).
+  cancel-in-progress: true
 
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # Cover gaps between throttled schedule fires (observed ~1–2.5h).
+    timeout-minutes: 180
     steps:
-      - name: Run Super Alpha engine tick
+      - name: Run Super Alpha engine tick loop
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           BOT_TICK_URL: ${{ vars.BOT_TICK_URL }}
@@ -26,24 +30,45 @@ jobs:
             exit 1
           fi
           URL="${BOT_TICK_URL:-https://super-alpha-inky.vercel.app/api/cron/tick}"
-          code=$(curl -sS -o /tmp/tick.json -w "%{http_code}" \
-            --max-time 55 \
-            -H "Authorization: Bearer ${CRON_SECRET}" \
-            "$URL")
-          echo "HTTP $code"
-          head -c 2000 /tmp/tick.json || true
-          echo
-          # Soft-fail only for transient 5xx; auth/config errors must fail the job
-          if [ "$code" = "200" ]; then
-            exit 0
-          fi
-          if [ "$code" = "403" ] || [ "$code" = "401" ]; then
-            echo "tick auth failed HTTP $code - check CRON_SECRET"
-            exit 1
-          fi
-          if [ "$code" = "000" ] || [ "$code" -ge 500 ] 2>/dev/null; then
-            echo "tick soft-fail HTTP $code (retry next minute)"
-            exit 0
-          fi
-          echo "tick failed HTTP $code"
-          exit 1
+          # Stay up ~170 min; next successful schedule restarts via concurrency.
+          END=$((SECONDS + 170 * 60))
+          n=0
+          auth_fails=0
+          while [ "$SECONDS" -lt "$END" ]; do
+            n=$((n + 1))
+            t0=$SECONDS
+            set +e
+            code=$(curl -sS -o /tmp/tick.json -w "%{http_code}" \
+              --max-time 55 \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              "$URL")
+            curl_ec=$?
+            set -e
+            if [ -z "$code" ]; then code="000"; fi
+            echo "[$n] HTTP $code curl_ec=$curl_ec $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            head -c 800 /tmp/tick.json 2>/dev/null || true
+            echo
+
+            if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              auth_fails=$((auth_fails + 1))
+              if [ "$auth_fails" -ge 3 ]; then
+                echo "tick auth failed HTTP $code — check CRON_SECRET"
+                exit 1
+              fi
+            else
+              auth_fails=0
+            fi
+
+            # Soft-skip transient errors; keep looping.
+            if [ "$code" != "200" ]; then
+              echo "tick soft-fail HTTP $code (continue loop)"
+            fi
+
+            # Aim for ~60s between tick starts.
+            elapsed=$((SECONDS - t0))
+            sleep_for=$((60 - elapsed))
+            if [ "$sleep_for" -lt 5 ]; then sleep_for=5; fi
+            if [ "$SECONDS" -ge "$END" ]; then break; fi
+            sleep "$sleep_for"
+          done
+          echo "loop finished after $n ticks"

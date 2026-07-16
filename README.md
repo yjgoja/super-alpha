@@ -30,16 +30,24 @@ GitHub + Vercel. Production 환경변수:
 
 배포 후: `npx prisma migrate deploy` (또는 Vercel build에 포함).
 
-### 다회원 틱 (중요)
+### 다회원 틱 (중요) — 웹 브라우저 불필요
 
-- **로컬** `npm run engine` / `engine:direct` ≈ 2초: 전 회원 실시간 틱
-- **GitHub Actions** `.github/workflows/bot-tick.yml` ≈ 1분: PC 없이도 **승인된** 전 회원 `botEnabled` 계좌 틱
-- Vercel Hobby cron은 사실상 하루 1회라 매매 엔진으로 쓰지 않음
-- 앱 오픈 시 `BotHeartbeat`는 해당 유저만 보조 틱 (전체 대체 불가)
+매매(TP/DCA/SL)는 **서버 사이드** MetaAPI입니다. 사이트 탭을 닫아도 봇은 멈춘 게 아닙니다.
 
-**실시간 갭:** GHA/Vercel 경로는 ~1분 간격. 초 단위 TP/SL/DCA가 필요하면 로컬·Fly·Railway 등 always-on 워커를 유지하세요. PC 없이도 1분 틱으로 다회원 운영은 가능합니다.
+| 경로 | 간격 | 역할 |
+|------|------|------|
+| **로컬** `npm run engine` / `engine:direct` | ≈ 2초 | PC 상시 켜짐 → 최저 지연 |
+| **GitHub Actions** `bot-tick.yml` | ≈ 1분 (루프) | PC 없이도 **승인된** `botEnabled` 전 회원 틱 |
+| **앱 오픈 시** `BotHeartbeat` | ≈ 10초 | 해당 로그인 유저만 **보조** (대체 불가) |
+| Vercel Hobby cron | ≈ 하루 1회 | 매매 엔진으로 쓰지 않음 |
 
-스케일: 한 요청에서 순차 틱 + ~52s 예산. 계좌가 많으면 다음 분에 round-robin으로 이어집니다. MetaAPI 429는 자동 재시도합니다.
+**왜 웹 끄면 느려 보였나:** 예전에 GHA `schedule: * * * * *`가 공개 저장소에서 ~1시간마다만 실제 실행됐고, 브라우저 Heartbeat(10초)가 사실상 빠른 틱을 담당했습니다. 지금은 GHA 한 번이 뜨면 **~170분 동안 60초마다** `/api/cron/tick`을 호출해 브라우저 없이도 분 단위로 유지합니다.
+
+**초 단위 TP/SL/DCA**가 필요하면 PC에서 `npm run engine:direct`를 켜 두세요 (≈2초).
+
+스케일: 한 HTTP 틱에서 순차 처리 + ~52s 예산. 계좌가 많으면 다음 틱에서 round-robin. MetaAPI 429는 자동 재시도.
+
+**확인:** GitHub → Actions → `Bot Tick` 초록 실행 + 로그에 `HTTP 200` / `"action":"hold"|"dca"|"tp"`. 또는 `Authorization: Bearer $CRON_SECRET`으로 `GET /api/cron/tick`.
 
 ### 가입 · 승인
 
