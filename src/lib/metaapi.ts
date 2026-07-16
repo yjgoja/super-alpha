@@ -49,6 +49,8 @@ export type MetaSnap = {
     lots: number;
     price: number;
     profit: number;
+    /** MetaAPI/브로커 포지션 사용증거금 (있으면 바스켓 ROI 분모 우선) */
+    margin?: number;
     magic?: number;
   }>;
 };
@@ -575,6 +577,7 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
     const type = String(x.type || x.positionType || "");
     const direction: "BUY" | "SELL" =
       type.toLowerCase().includes("sell") || type === "POSITION_TYPE_SELL" ? "SELL" : "BUY";
+    const marginRaw = Number(x.margin ?? x.usedMargin ?? 0);
     return {
       id: String(x.id || x.positionId || ""),
       symbol: String(x.symbol || ""),
@@ -582,6 +585,7 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
       lots: Number(x.volume || x.lots || 0),
       price: Number(x.openPrice || x.price || 0),
       profit: Number(x.profit || 0) + Number(x.swap || 0) + Number(x.commission || 0),
+      margin: Number.isFinite(marginRaw) && marginRaw > 0 ? marginRaw : undefined,
       magic: x.magic != null ? Number(x.magic) : undefined,
     };
   });

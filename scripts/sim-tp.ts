@@ -1,6 +1,6 @@
 /**
- * Simulate symbol-basket take-profit with live-scaling USD (no live orders).
- * Proves: basket PnL ≥ live TP$ (margin×%) closes all; TP grows with lots.
+ * Simulate symbol-basket take-profit with live-scaling margin ROI (no live orders).
+ * Proves: BasketROI ≥ TP% (pnl ≥ margin×%) closes all; TP grows with lots.
  *
  * Run: npx tsx scripts/sim-tp.ts
  */

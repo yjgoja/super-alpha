@@ -4,8 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LOGIC_OPTIONS } from "@/lib/strategies";
 import {
-  DCA1000_LEVERAGE_BASE,
-  MT5_BROKER_LEVERAGE_DEFAULT,
   MT5_REF_MID,
   calcDca1000Defense,
   resolveTpSlUsd,
@@ -369,12 +367,10 @@ export default function StrategyLogicPage() {
                 value={usdTargets.stopLossUsd}
                 onChange={(e) => {
                   const slUsd = Number(e.target.value);
-                  const notional = usdTargets.marginUsd * MT5_BROKER_LEVERAGE_DEFAULT;
+                  const margin = usdTargets.marginUsd;
                   const pct =
-                    notional > 0 && slUsd > 0
-                      ? Math.round(
-                          (slUsd / notional) * DCA1000_LEVERAGE_BASE * 100 * 100,
-                        ) / 100
+                    margin > 0 && slUsd > 0
+                      ? Math.round((slUsd / margin) * 100 * 100) / 100
                       : Number(payload.stopLossPct ?? 225);
                   setPayload((p) => ({
                     ...p!,
@@ -386,8 +382,8 @@ export default function StrategyLogicPage() {
             </label>
           </div>
           <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            엔진: 바스켓 손익$가 회차·로트에 맞춰 커지는 익절$/손절$에 도달하면 청산. 시작회차 미리보기
-            (심볼 {symbol}, 증거금 ${fmt(usdTargets.marginUsd)}). 전체 회차 시 손절은 아래 참고금.
+            엔진: 바스켓 마진 ROI(바이낸스식) — 익절·손절 모두 증거금×ROI%. 시작회차 미리보기 (심볼{" "}
+            {symbol}, 증거금 ${fmt(usdTargets.marginUsd)}). 전체 회차 시 손절은 아래 참고금.
           </p>
           <div className="m-calc-box">
             <div className="m-calc-row">
@@ -476,12 +472,10 @@ export default function StrategyLogicPage() {
                 value={usdTargets.stopLossUsd}
                 onChange={(e) => {
                   const slUsd = Number(e.target.value);
-                  const notional = usdTargets.marginUsd * MT5_BROKER_LEVERAGE_DEFAULT;
+                  const margin = usdTargets.marginUsd;
                   const pct =
-                    notional > 0 && slUsd > 0
-                      ? Math.round(
-                          (slUsd / notional) * DCA1000_LEVERAGE_BASE * 100 * 100,
-                        ) / 100
+                    margin > 0 && slUsd > 0
+                      ? Math.round((slUsd / margin) * 100 * 100) / 100
                       : Number(payload.stopLossPct ?? 225);
                   setPayload((p) => ({
                     ...p!,
@@ -493,7 +487,8 @@ export default function StrategyLogicPage() {
             </label>
           </div>
           <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            익절$/손절$는 바스켓 로트가 늘수록 커집니다. 물타기 필요$ = 회차 로트 증거금 × dropROI%.
+            익절$/손절$ = 바스켓 증거금×ROI%(회차↑면 증가). 물타기 필요$ = 회차 로트 증거금 ×
+            dropROI%.
           </p>
 
           <div style={{ overflowX: "auto" }}>

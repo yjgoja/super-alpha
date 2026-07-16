@@ -6,10 +6,10 @@ export type Dca1000Level = {
   drop: number;
 };
 
-/** 코인선물 전략표 레버 (손절 차트% 환산용; 익절·물타기는 MT5 계좌 레버 사용) */
+/** 코인선물 전략표 레버 (물타기 drop ROI→가격% 참고·레거시 환산용) */
 export const DCA1000_LEVERAGE_BASE = (levelsJson as { leverageBase: number }).leverageBase || 20;
 
-/** Zero Markets 등 MT5 계좌 레버 — 익절·물타기 ROI = 손익/사용증거금 */
+/** Zero Markets 등 MT5 계좌 레버 — 익절·손절·물타기 ROI = 손익/사용증거금 */
 export const MT5_BROKER_LEVERAGE_DEFAULT = 500;
 
 /** Extracted rows = levels 1..N (물타기). Level 0 is implicit market entry. */
@@ -241,8 +241,9 @@ export function roiPctToUsd(marginUsd: number, roiPct: number) {
 }
 
 /**
- * 차트% 방어 손절 현금($) = 명목 × (SL_ROI / 표레버 / 100).
- * SL_ROI 225 · 표레버 20 → 가격 11.25% 역행 시 손실$. 로트·평단과 함께 커짐.
+ * @deprecated 예전 차트% 방어 손절$. 엔진은 더 이상 사용하지 않음.
+ * 현재 SL = 바스켓 증거금 × (SL_ROI/100) — `roiPctToUsd` / `liveBasketTpSlUsd`.
+ * 차트% = 명목 × (SL_ROI / 표레버 / 100). SL_ROI 225 · 표레버 20 → 가격 11.25%.
  */
 export function chartDefenseSlUsd(opts: {
   symbol: string;
@@ -259,6 +260,29 @@ export function chartDefenseSlUsd(opts: {
   if (!(lots > 0) || !(avg > 0) || !(slRoi > 0)) return 0;
   const notional = lots * contractSizeForSymbol(opts.symbol) * avg;
   return Math.round(notional * (slRoi / tableLev / 100) * 100) / 100;
+}
+
+/**
+ * 바스켓 사용증거금($). 브로커(MetaAPI) margin 합이 있으면 우선, 없으면
+ * Lot × ContractSize × MarketPrice ÷ Leverage.
+ */
+export function basketMarginUsd(opts: {
+  symbol: string;
+  lots: number;
+  avgPrice: number;
+  brokerLeverage?: number;
+  /** MetaAPI 포지션 margin 합 (있으면 우선) */
+  brokerMarginSum?: number | null;
+}) {
+  if (opts.brokerMarginSum != null && opts.brokerMarginSum > 0) {
+    return opts.brokerMarginSum;
+  }
+  return mt5UsedMargin({
+    symbol: opts.symbol,
+    lots: opts.lots,
+    avgPrice: opts.avgPrice,
+    brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
+  });
 }
 
 /** 시작로트 기준 사용증거금($) — L0 미리보기·에디터 분모 */
@@ -288,8 +312,7 @@ export function startLotsMarginUsd(opts: {
 
 /**
  * L0(시작로트) 기준 익절$/손절$ 미리보기 — 엔진 트리거가 아님(라이브는 liveBasketTpSlUsd).
- * - 익절: 시작로트 증거금 × TP%
- * - 손절: 시작로트 명목 × (SL%/표레버) — 차트 방어금
+ * 바이낸스 선물식: 익절·손절 모두 시작로트 증거금 × ROI%.
  * useFixedUsd=true 일 때만 저장 오버라이드$ 사용.
  */
 export function resolveTpSlUsd(opts: {
@@ -328,12 +351,7 @@ export function resolveTpSlUsd(opts: {
       ? opts.stopLossPct
       : DCA1000_DEFAULT_SL_ROI;
   const derivedTp = roiPctToUsd(marginUsd, tpRoi);
-  const derivedSl = chartDefenseSlUsd({
-    symbol: opts.symbol,
-    lots,
-    avgPrice: mid,
-    stopLossPct: slRoi,
-  });
+  const derivedSl = roiPctToUsd(marginUsd, slRoi);
   const useFixed = opts.useFixedUsd === true;
   const takeProfitUsd =
     useFixed && opts.takeProfitUsd != null && opts.takeProfitUsd > 0
@@ -355,9 +373,10 @@ export function resolveTpSlUsd(opts: {
 }
 
 /**
- * 라이브 바스켓 익절$/손절$ — 회차·로트에 따라 커짐.
- * - TP = 현재 사용증거금 × (takeProfitPct/100)
- * - SL = 현재 명목 × (stopLossPct/표레버/100)  (= 차트% 방어 현금)
+ * 라이브 바스켓 익절$/손절$ — 회차·로트에 따라 커짐 (바이낸스 마진 ROI).
+ * - TP$ = BasketMargin × (takeProfitPct/100)
+ * - SL$ = BasketMargin × (stopLossPct/100)
+ * BasketMargin = 브로커 margin 합 우선, 없으면 Lot×Contract×Price÷Leverage.
  * useFixedUsd=true 이고 오버라이드$ > 0 이면 고정$ (레거시·수동 고정).
  */
 export function liveBasketTpSlUsd(opts: {
@@ -367,6 +386,8 @@ export function liveBasketTpSlUsd(opts: {
   takeProfitPct: number;
   stopLossPct: number;
   brokerLeverage?: number;
+  /** MetaAPI 포지션 margin 합 — 있으면 ROI 분모로 우선 */
+  brokerMarginSum?: number | null;
   takeProfitUsdOverride?: number | null;
   stopLossUsdOverride?: number | null;
   /** true면 저장된 고정$ 사용 (기본 false = 회차 스케일) */
@@ -376,19 +397,15 @@ export function liveBasketTpSlUsd(opts: {
   const slRoi = opts.stopLossPct > 0 ? opts.stopLossPct : DCA1000_DEFAULT_SL_ROI;
   const lots = Math.max(0, opts.lots);
   const avg = Math.max(0, opts.avgPrice);
-  const marginUsd = mt5UsedMargin({
+  const marginUsd = basketMarginUsd({
     symbol: opts.symbol,
     lots,
     avgPrice: avg,
     brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
+    brokerMarginSum: opts.brokerMarginSum,
   });
   const liveTp = roiPctToUsd(marginUsd, tpRoi);
-  const liveSl = chartDefenseSlUsd({
-    symbol: opts.symbol,
-    lots,
-    avgPrice: avg,
-    stopLossPct: slRoi,
-  });
+  const liveSl = roiPctToUsd(marginUsd, slRoi);
   const useFixed = opts.useFixedUsd === true;
   const takeProfitUsd =
     useFixed && opts.takeProfitUsdOverride != null && opts.takeProfitUsdOverride > 0
@@ -409,41 +426,60 @@ export function liveBasketTpSlUsd(opts: {
 }
 
 /**
- * 심볼 바스켓(합산) 익절 판정 — 라이브/전달된 목표$.
- * 바스켓 미실현 손익($) ≥ takeProfitUsd → 전량 청산.
- * takeProfitUsd가 0이고 usedMargin·tpRoiPct가 있으면 라이브 환산.
+ * 심볼 바스켓(합산) 익절 판정 — 바이낸스 마진 ROI.
+ * BasketROI = pnl/usedMargin×100 ≥ tpRoiPct → 전량 청산.
+ * (동치) pnl ≥ takeProfitUsd (= margin×TP%/100).
  */
 export function shouldTriggerTakeProfit(opts: {
-  /** 심볼 합산 미실현 손익($) */
+  /** 심볼 합산 미실현 손익($) = BasketProfit */
   pnl: number;
   /** 익절 목표($). 라이브 바스켓 기준값 전달 */
   takeProfitUsd: number;
-  /** 표시·폴백용 현재 사용증거금 */
+  /** BasketMargin — ROI 분모 */
   usedMargin?: number;
   tpRoiPct?: number;
   /** @deprecated ROI 경로 — takeProfitUsd 없을 때만 사용 */
   tpRoiPctLegacy?: number;
 }) {
-  let tpMoney = Math.max(0, opts.takeProfitUsd);
-  if (!(tpMoney > 0) && opts.usedMargin != null && (opts.tpRoiPct ?? opts.tpRoiPctLegacy)) {
-    tpMoney = roiPctToUsd(
-      opts.usedMargin,
-      opts.tpRoiPct ?? opts.tpRoiPctLegacy ?? 0,
-    );
-  }
-  const floatingRoi = mt5FloatingRoiPct(opts.pnl, opts.usedMargin ?? 0);
+  const margin = Math.max(0, opts.usedMargin ?? 0);
   const tpRoi = opts.tpRoiPct ?? opts.tpRoiPctLegacy ?? 0;
-  const hit = tpMoney > 0 && opts.pnl >= tpMoney;
-  return { hit, floatingRoi, tpMoney, tpRoi };
+  let tpMoney = Math.max(0, opts.takeProfitUsd);
+  if (!(tpMoney > 0) && margin > 0 && tpRoi > 0) {
+    tpMoney = roiPctToUsd(margin, tpRoi);
+  }
+  const floatingRoi = mt5FloatingRoiPct(opts.pnl, margin);
+  // 마진 ROI와 $ 목표 동치 (반올림 오차 흡수: 둘 중 하나면 히트)
+  const hitRoi = margin > 0 && tpRoi > 0 && floatingRoi >= tpRoi;
+  const hitUsd = tpMoney > 0 && opts.pnl >= tpMoney;
+  return { hit: hitRoi || hitUsd, floatingRoi, tpMoney, tpRoi };
 }
 
-/** 바스켓 미실현 손익($) ≤ -stopLossUsd → 전량 손절 */
+/**
+ * 바스켓 손절 — 바이낸스 마진 ROI.
+ * BasketROI ≤ -stopLossRoiPct → 전량 손절.
+ * (동치) pnl ≤ -stopLossUsd (= margin×SL%/100).
+ */
 export function shouldTriggerStopLossUsd(opts: {
   pnl: number;
   stopLossUsd: number;
+  usedMargin?: number;
+  stopLossRoiPct?: number;
 }) {
-  const sl = Math.max(0, opts.stopLossUsd);
-  return { hit: sl > 0 && opts.pnl <= -sl, stopLossUsd: sl };
+  const margin = Math.max(0, opts.usedMargin ?? 0);
+  const slRoi = Math.max(0, opts.stopLossRoiPct ?? 0);
+  let sl = Math.max(0, opts.stopLossUsd);
+  if (!(sl > 0) && margin > 0 && slRoi > 0) {
+    sl = roiPctToUsd(margin, slRoi);
+  }
+  const floatingRoi = mt5FloatingRoiPct(opts.pnl, margin);
+  const hitRoi = margin > 0 && slRoi > 0 && floatingRoi <= -slRoi;
+  const hitUsd = sl > 0 && opts.pnl <= -sl;
+  return {
+    hit: hitRoi || hitUsd,
+    stopLossUsd: sl,
+    floatingRoi,
+    stopLossRoiPct: slRoi,
+  };
 }
 
 /**
@@ -717,13 +753,13 @@ export type Dca1000Defense = {
   /** Buy/Sell 차트 방어폭 평균 */
   roiDefensePct: number;
   /**
-   * 전체 회차 소진 후 손절 시 예상 손실($, MT5 계좌).
-   * 엔진과 동일: 청산호가 기준 평단 손익% ≤ -(SL_ROI/20) 도달 시 현금 P&L.
+   * 전체 회차 소진 후 손절 시 예상 손실($).
+   * 엔진과 동일: 바스켓 증거금 × (SL_ROI/100).
    */
   estimatedSlAmount: number;
   /** 코인선물 표 마진×손절ROI (참고·레거시) */
   tableMarginSlAmount: number;
-  /** MT5 계약·로트 기준 현금 손절(전체 회차 채움) = estimatedSlAmount */
+  /** MT5 바스켓 마진 ROI 손절$ (전체 회차 채움) = estimatedSlAmount */
   mt5CashSlAmount: number;
   avgEntryLong: number;
   avgEntryShort: number;
@@ -732,17 +768,15 @@ export type Dca1000Defense = {
   spreadPoints: number;
   refMid: number;
   symbol: string;
-  /** 손절 트리거 가격% (청산호가 기준, = SL_ROI/레버) */
+  /** 참고: 마진 ROI를 가격%로 환산 (SL_ROI/브로커레버). 엔진은 ROI로 판정 */
   slTriggerPricePct: number;
 };
 
 /**
- * MT5 호가 모델로 전체 회차 소진 → 손절 시점 시뮬레이션.
- *
- * BUY: Ask 진입/물타기, Bid 손절평가. 차트% = 미드 이동.
- * SELL: Bid 진입/물타기, Ask 손절평가.
- * 물타기 간격 = 표 dropROI/레버 (동일 호가 역행, 엔진과 동일).
- * 손절 = 청산호가 대비 평단 손익% <= -(SL_ROI/레버).
+ * 전체 회차 소진 후 손절 참고 시뮬레이션.
+ * 엔진 손절 = 바스켓 마진 ROI (BasketProfit/BasketMargin ≤ -SL_ROI%).
+ * estimatedSlAmount = 전체 회차 바스켓 증거금 × (SL_ROI/100).
+ * spot*Pct 는 참고용 차트 환산(표 레버)이며 엔진 트리거가 아님.
  */
 export function calcDca1000Defense(opts?: {
   stopLossRoiPct?: number;
@@ -752,8 +786,10 @@ export function calcDca1000Defense(opts?: {
   symbol?: string;
   spreadAbs?: number;
   refMid?: number;
+  brokerLeverage?: number;
 }): Dca1000Defense {
   const lev = opts?.leverage ?? DCA1000_LEVERAGE_BASE;
+  const brokerLev = Math.max(1, opts?.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT);
   const slRoi = Math.max(0, opts?.stopLossRoiPct ?? DCA1000_DEFAULT_SL_ROI);
   const startLots = Math.max(0.01, opts?.startLots ?? DCA1000_REF_LOTS);
   const levels = opts?.levels ?? DCA1000_LEVELS;
@@ -764,19 +800,22 @@ export function calcDca1000Defense(opts?: {
   const ask0 = mid0 + half;
   const bid0 = mid0 - half;
   const sprPct = mid0 > 0 ? (sprAbs / mid0) * 100 : 0;
-  const slFactor = slRoi / (Math.max(1, lev) * 100);
-  const slTriggerPricePct = (slRoi / Math.max(1, lev));
+  // 참고: 마진ROI를 브로커레버 차트%로 환산 (엔진 트리거 아님)
+  const slFactor = slRoi / (brokerLev * 100);
+  const slTriggerPricePct = slRoi / brokerLev;
 
   let totalSize = 0;
   let sumAsk = 0;
   let sumBid = 0;
   let totalLots = 0;
+  let sumLotAsk = 0;
+  let sumLotBid = 0;
 
   for (let i = 0; i < levels.length; i++) {
     const lv = levels[i];
     const drop = i === 0 ? 0 : lv.drop;
+    // 물타기 체결가 경로: 표 drop ROI → 표레버 가격% (참고 시뮬)
     const adverse = drop / Math.max(1, lev) / 100;
-    // 동일 호가 경로 (엔진 mt5DcaAdversePct와 동일)
     const ask = ask0 * (1 - adverse);
     const bid = bid0 * (1 + adverse);
     const lots = lotsFromSize(lv.size, startLots);
@@ -784,35 +823,41 @@ export function calcDca1000Defense(opts?: {
     sumAsk += lv.size * ask;
     sumBid += lv.size * bid;
     totalLots += lots;
+    sumLotAsk += lots * ask;
+    sumLotBid += lots * bid;
   }
 
   const avgAsk = totalSize > 0 ? sumAsk / totalSize : ask0;
   const avgBid = totalSize > 0 ? sumBid / totalSize : bid0;
+  const avgLotAsk = totalLots > 0 ? sumLotAsk / totalLots : ask0;
+  const avgLotBid = totalLots > 0 ? sumLotBid / totalLots : bid0;
+  const basketAvg = (avgLotAsk + avgLotBid) / 2;
 
-  // BUY SL: Bid_sl = avgAsk * (1 - slFactor), mid = Bid + half
+  // BUY/SELL 차트 참고폭 (마진ROI → 브로커레버 가격%)
   const buySlBid = avgAsk * (1 - slFactor);
   const buySlMid = buySlBid + half;
   const spotLongPct = mid0 > 0 ? Math.max(0, ((mid0 - buySlMid) / mid0) * 100) : 0;
 
-  // SELL SL: Ask_sl = avgBid * (1 + slFactor), mid = Ask - half
   const sellSlAsk = avgBid * (1 + slFactor);
   const sellSlMid = sellSlAsk - half;
   const spotShortPct = mid0 > 0 ? Math.max(0, ((sellSlMid - mid0) / mid0) * 100) : 0;
 
   const roiDefensePct = (spotLongPct + spotShortPct) / 2;
 
-  // 표 마진 손절금(레거시): Size/레버 × SL_ROI% × 로트스케일 — 코인선물 표 숫자
+  // 표 마진 손절금(레거시): Size/표레버 × SL_ROI% × 로트스케일
   const lotScale = startLots / DCA1000_REF_LOTS;
   const tableMarginSlAmount =
     (totalSize / Math.max(1, lev)) * (slRoi / 100) * lotScale;
 
-  // MT5 현금 손절 = 엔진 손절 트리거와 동일 조건의 예상 손실$
-  // (청산호가 평단 대비 -SL_ROI/레버 도달 시 Buy/Sell 평균)
+  // 엔진과 동일: 전체 바스켓 증거금 × SL_ROI%
   const sym = spreadInfo.symbol;
-  const contract = MT5_CONTRACT_SIZE[sym] ?? MT5_CONTRACT_SIZE.EURUSD;
-  const buySlMove = Math.max(0, avgAsk - buySlBid);
-  const sellSlMove = Math.max(0, sellSlAsk - avgBid);
-  const mt5CashSlAmount = ((buySlMove + sellSlMove) / 2) * contract * totalLots;
+  const basketMargin = mt5UsedMargin({
+    symbol: sym,
+    lots: totalLots,
+    avgPrice: basketAvg > 0 ? basketAvg : mid0,
+    brokerLeverage: brokerLev,
+  });
+  const mt5CashSlAmount = roiPctToUsd(basketMargin, slRoi);
 
   return {
     stopLossRoiPct: slRoi,

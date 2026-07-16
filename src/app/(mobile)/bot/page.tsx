@@ -5,8 +5,6 @@ import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
   DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
-  DCA1000_LEVERAGE_BASE,
-  MT5_BROKER_LEVERAGE_DEFAULT,
   calcDca1000Defense,
   resolveTpSlUsd,
 } from "@/lib/dca1000";
@@ -82,8 +80,8 @@ function DefenseCard({
         <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
       </div>
       <p style={{ margin: "0.35rem 0 0", fontSize: "0.68rem", color: "var(--muted)", lineHeight: 1.4 }}>
-        물타기 회차가 늘수록 익절$·손절$도 바스켓 로트에 맞춰 커집니다. 위 손절은 L0 기준, 아래는 전체
-        회차 소진 시 MT5 현금 손절 참고값입니다.
+        익절·손절 모두 바스켓 증거금×ROI%(바이낸스식). 회차·로트가 늘수록 커집니다. 위는 L0 기준,
+        아래는 전체 회차 소진 시 마진 ROI 손절 참고값입니다.
       </p>
     </div>
   );
@@ -731,14 +729,11 @@ export default function BotPage() {
                             value={usdPreview?.stopLossUsd ?? draft.stopLossUsd ?? bot.stopLossUsd ?? ""}
                             onChange={(e) => {
                               const slUsd = Number(e.target.value);
-                              // 차트방어: slUsd = notional × (pct/표레버/100)
+                              // 마진 ROI: slUsd = margin × (pct/100)
                               const margin = usdPreview?.marginUsd ?? 0;
-                              const notional = margin * MT5_BROKER_LEVERAGE_DEFAULT;
                               const pct =
-                                notional > 0 && slUsd > 0
-                                  ? Math.round(
-                                      (slUsd / notional) * DCA1000_LEVERAGE_BASE * 100 * 100,
-                                    ) / 100
+                                margin > 0 && slUsd > 0
+                                  ? Math.round((slUsd / margin) * 100 * 100) / 100
                                   : Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
                               setDraft((d) => ({
                                 ...d,
@@ -751,12 +746,16 @@ export default function BotPage() {
                         </label>
                       </div>
                       <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                        엔진은 <strong style={{ color: "var(--ink)" }}>회차·로트에 따라 익절$/손절$가 커집니다</strong>
-                        . 시작회차 기준 ≈ 익절 +${fmtNum(usdPreview?.takeProfitUsd ?? 0)} / 손절 −$
-                        {fmtNum(usdPreview?.stopLossUsd ?? 0)} (익절=증거금×
-                        {fmtNum(Number(draft.takeProfitPct ?? DEFAULT_TP_ROI), 0)}% · 손절=명목×차트
-                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI) / 20, 2)}%). 전체
-                        회차 시 손절은 아래 참고금.
+                        엔진은{" "}
+                        <strong style={{ color: "var(--ink)" }}>
+                          바스켓 마진 ROI(바이낸스식)
+                        </strong>
+                        로 익절·손절합니다. 시작회차 기준 ≈ 익절 +$
+                        {fmtNum(usdPreview?.takeProfitUsd ?? 0)} / 손절 −$
+                        {fmtNum(usdPreview?.stopLossUsd ?? 0)} (증거금×익절
+                        {fmtNum(Number(draft.takeProfitPct ?? DEFAULT_TP_ROI), 0)}% · 증거금×손절
+                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI), 0)}%). 회차↑면
+                        목표$도 증가.
                       </p>
 
                       <DefenseCard

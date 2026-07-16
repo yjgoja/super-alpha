@@ -106,6 +106,7 @@ type PosRow = {
   lots: number;
   price: number;
   profit: number;
+  margin?: number;
 };
 
 function positionsForSymbol(positions: PosRow[], symbol: string) {
@@ -446,7 +447,12 @@ async function runSymbolTableDca(
   );
   const lotsForTp = posVol > 0 ? posVol : legs.reduce((s, l) => s + l.lots, 0);
   const midRef = avg > 0 ? avg : (price.bid + price.ask) / 2;
-  // 회차 스케일: 현재 바스켓 증거금·명목 기준 라이브 익절$/손절$ (시작로트 고정$ 폐기)
+  // 브로커 포지션 margin 합 우선 → 없으면 Lot×Contract×Price÷Leverage
+  const brokerMarginSum = ourPositions.reduce(
+    (s, p) => s + (typeof p.margin === "number" && p.margin > 0 ? p.margin : 0),
+    0,
+  );
+  // 회차 스케일: 바스켓 마진 ROI 기준 라이브 익절$/손절$ (바이낸스식)
   const liveUsd = liveBasketTpSlUsd({
     symbol,
     lots: lotsForTp,
@@ -454,6 +460,7 @@ async function runSymbolTableDca(
     takeProfitPct: tpRoiFallback,
     stopLossPct: slRoiFallback,
     brokerLeverage: brokerLev,
+    brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
   });
   const usedMargin = liveUsd.marginUsd;
   const pnlLegs =
@@ -482,7 +489,7 @@ async function runSymbolTableDca(
     brokerLeverage: brokerLev,
   };
 
-  // 익절 우선: 바스켓 합산$ ≥ 라이브 익절$ (회차·로트 반영) → 전량 청산 → 재진입
+  // 익절 우선: BasketROI ≥ TP% → 바스켓 전량 청산 → 재진입
   if (tpDecision.hit) {
     const tpClose = await closeBasketTp({
       accountId,
@@ -533,10 +540,12 @@ async function runSymbolTableDca(
     };
   }
 
-  // 손절: 바스켓 합산$ ≤ -라이브 손절$ (차트% 방어금, 로트 스케일)
+  // 손절: BasketROI ≤ -SL% (마진 ROI, 바이낸스식) → 바스켓 전량 청산
   const slDecision = shouldTriggerStopLossUsd({
     pnl: tpPnl.pnl,
     stopLossUsd: cfg.stopLossEnabled ? liveUsd.stopLossUsd : 0,
+    usedMargin: cfg.stopLossEnabled ? usedMargin : 0,
+    stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
     await closePositionsBySymbol(metaId, symbol);
@@ -559,7 +568,7 @@ async function runSymbolTableDca(
         price: direction === "BUY" ? price.bid : price.ask,
         pnl: pnlSum,
         kind: "SL",
-        note: `${logic}|pnl=${pnlSum.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
+        note: `${logic}|roi=${floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${pnlSum.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
       },
     });
     await prisma.brokerAccount.update({
@@ -578,6 +587,7 @@ async function runSymbolTableDca(
       symbol,
       profit,
       floatingPnl: pnlSum,
+      floatingRoi,
       stopLossUsd: slDecision.stopLossUsd,
       spreadPct: spr,
     };
@@ -820,6 +830,10 @@ async function runSymbolDca(
   const brokerLev = Math.max(1, cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT);
   const lotsForTp = posVol > 0 ? posVol : legs.reduce((s, l) => s + l.lots, 0);
   const midRef = avg > 0 ? avg : (price.bid + price.ask) / 2;
+  const brokerMarginSum = ourPositions.reduce(
+    (s, p) => s + (typeof p.margin === "number" && p.margin > 0 ? p.margin : 0),
+    0,
+  );
   const liveUsd = liveBasketTpSlUsd({
     symbol,
     lots: lotsForTp,
@@ -827,6 +841,7 @@ async function runSymbolDca(
     takeProfitPct: cfg.takeProfitPct > 0 ? cfg.takeProfitPct : 20,
     stopLossPct: cfg.stopLossPct > 0 ? cfg.stopLossPct : 225,
     brokerLeverage: brokerLev,
+    brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
   });
   const usedMargin = liveUsd.marginUsd;
   const pnlLegs =
@@ -884,12 +899,15 @@ async function runSymbolDca(
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
       floatingPnl: tpPnl.pnl,
+      floatingRoi,
     };
   }
 
   const slDecision = shouldTriggerStopLossUsd({
     pnl: tpPnl.pnl,
     stopLossUsd: cfg.stopLossEnabled ? liveUsd.stopLossUsd : 0,
+    usedMargin: cfg.stopLossEnabled ? usedMargin : 0,
+    stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
     await closePositionsBySymbol(metaId, symbol);
@@ -915,7 +933,7 @@ async function runSymbolDca(
         price: direction === "BUY" ? price.bid : price.ask,
         pnl: tpPnl.pnl,
         kind: "SL",
-        note: `${logic}|pnl=${tpPnl.pnl.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
+        note: `${logic}|roi=${floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${tpPnl.pnl.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
       },
     });
     if (cfg.stopOnSl) {
@@ -930,6 +948,7 @@ async function runSymbolDca(
       symbol,
       stopLossUsd: slDecision.stopLossUsd,
       floatingPnl: tpPnl.pnl,
+      floatingRoi,
     };
   }
 

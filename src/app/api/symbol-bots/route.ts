@@ -115,8 +115,8 @@ export async function GET() {
     });
   }
 
-  // 라이브 스케일: L0 미리보기$ = pct 파생 (익절=마진×% · 손절=차트방어).
-  // 예전 고정$ (마진×SL% ≈ 수달러) 또는 미기입이면 재계산.
+  // 라이브 스케일: L0 미리보기$ = pct 파생 (익절·손절 모두 마진×ROI%, 바이낸스식).
+  // 미기입·구 차트방어$(마진ROI보다 훨씬 큼)이면 재계산.
   const needUsdMigrate = bots.filter((b) => {
     const m = resolveTpSlUsd({
       symbol: b.symbol,
@@ -125,8 +125,8 @@ export async function GET() {
       stopLossPct: b.stopLossPct >= 10 ? b.stopLossPct : 225,
     });
     if (!(b.takeProfitUsd > 0) || !(b.stopLossUsd > 0)) return true;
-    // 구 버그: SL이 차트방어의 절반 미만이면 마진×ROI 오염
-    return b.stopLossUsd < m.stopLossUsd * 0.5;
+    // 구 차트방어$: 마진×SL% 대비 2배 이상이면 재계산
+    return b.stopLossUsd > m.stopLossUsd * 2;
   });
   if (needUsdMigrate.length > 0) {
     for (const b of needUsdMigrate) {
