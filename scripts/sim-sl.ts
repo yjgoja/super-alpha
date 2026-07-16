@@ -1,8 +1,9 @@
 /**
- * Offline SL trigger in fixed USD + stopOnSl / repeatEnabled policy.
+ * Offline SL trigger: chart-defense $ scales with lots + stopOnSl policy.
  * Run: npx tsx scripts/sim-sl.ts
  */
 import {
+  liveBasketTpSlUsd,
   resolveTpSlUsd,
   shouldTriggerStopLossUsd,
   DCA1000_DEFAULT_SL_ROI,
@@ -31,8 +32,8 @@ const xau = resolveTpSlUsd({
   stopLossPct: DCA1000_DEFAULT_SL_ROI,
 });
 
-assert("EUR SL$ = margin×225%", eur.stopLossUsd > 0, eur);
-assert("XAU SL$ = margin×225%", Math.abs(xau.stopLossUsd - 18.36) < 0.05, xau);
+assert("EUR L0 SL$ = chart defense (> margin×225%)", eur.stopLossUsd > 50, eur);
+assert("XAU L0 SL$ ≈ 459", Math.abs(xau.stopLossUsd - 459) < 1, xau);
 
 const hit = shouldTriggerStopLossUsd({
   pnl: -eur.stopLossUsd,
@@ -45,9 +46,20 @@ const miss = shouldTriggerStopLossUsd({
 assert("SL hits at -stopLossUsd", hit.hit === true, hit);
 assert("SL misses just above", miss.hit === false, miss);
 
-// Basket: large adverse $ hits fixed SL even if chart% small
-const deep = shouldTriggerStopLossUsd({ pnl: -100, stopLossUsd: xau.stopLossUsd });
-assert("deep loss hits XAU SL$", deep.hit === true, deep);
+// Deep basket: SL grows — small L0 loss must NOT fire deep SL
+const deepLive = liveBasketTpSlUsd({
+  symbol: "XAUUSD",
+  lots: 1.0,
+  avgPrice: 4080,
+  takeProfitPct: 20,
+  stopLossPct: 225,
+});
+assert("1.0 lot XAU SL$ ≈ 45900", Math.abs(deepLive.stopLossUsd - 45900) < 50, deepLive);
+const shallowLoss = shouldTriggerStopLossUsd({
+  pnl: -xau.stopLossUsd, // only L0-sized loss
+  stopLossUsd: deepLive.stopLossUsd,
+});
+assert("L0-sized loss does NOT hit deep SL", shallowLoss.hit === false, shallowLoss);
 
 function afterSl(stopOnSl: boolean) {
   return { botEnabled: !stopOnSl, reentrySameTick: false };
@@ -68,4 +80,4 @@ if (failed > 0) {
   console.error(`\nSIM SL FAILED: ${failed}`);
   process.exit(1);
 }
-console.log("\nSIM SL ALL PASSED — fixed USD SL + stopOnSl/repeat policy");
+console.log("\nSIM SL ALL PASSED — chart-defense SL scales with lots");

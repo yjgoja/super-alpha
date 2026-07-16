@@ -1,5 +1,6 @@
 /**
- * Print Korean table: logic → 익절$ / 손절$ (defaults startLots=0.01)
+ * Print Korean table: logic → L0 익절$/손절$ (defaults startLots=0.01)
+ * 익절 = 증거금×TP% · 손절 = 명목×(SL%/표레버) — 회차 늘면 라이브로 커짐
  * Run: npx tsx scripts/tp-sl-usd-table.ts
  */
 import { resolveTpSlUsd } from "../src/lib/dca1000";
@@ -8,7 +9,7 @@ import { defaultEditorPayload, tableLogicMeta } from "../src/lib/table-logics";
 
 const symbols = ["EURUSD", "XAUUSD"] as const;
 
-console.log("\n## 로직별 익절$/손절$ (startLots=0.01, 레버 1:500, 구 ROI 익절20%/손절225%)\n");
+console.log("\n## 로직별 시작회차 익절$/손절$ (startLots=0.01, 레버 1:500)\n");
 
 for (const sym of symbols) {
   console.log(`### ${sym}`);
@@ -30,6 +31,6 @@ for (const sym of symbols) {
   console.log("");
 }
 
-console.log("공식: 익절$ = startLots증거금 × (takeProfitPct/100)");
-console.log("      손절$ = startLots증거금 × (stopLossPct/100)");
-console.log("      증거금 = lots × contractSize × mid / 500");
+console.log("공식: 익절$ = 현재증거금 × (takeProfitPct/100)  ← 회차↑면 증가");
+console.log("      손절$ = 현재명목 × (stopLossPct/20/100)   ← 차트 방어, 회차↑면 증가");
+console.log("      L0 미리보기 증거금 = lots × contractSize × mid / 500");

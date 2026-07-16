@@ -90,17 +90,18 @@ export async function GET() {
     });
   }
 
-  // ROI% → 고정 익절$/손절$ (startLots 증거금 × ROI%/100)
-  // 손절$가 시작증거금의 1% 미만이면 구값 오염으로 재계산
+  // 라이브 스케일: L0 미리보기$ = pct 파생 (익절=마진×% · 손절=차트방어).
+  // 예전 고정$ (마진×SL% ≈ 수달러) 또는 미기입이면 재계산.
   const needUsdMigrate = bots.filter((b) => {
-    if (!(b.takeProfitUsd > 0) || !(b.stopLossUsd > 0)) return true;
     const m = resolveTpSlUsd({
       symbol: b.symbol,
       startLots: b.startLots,
       takeProfitPct: b.takeProfitPct > 0 ? b.takeProfitPct : 20,
       stopLossPct: b.stopLossPct >= 10 ? b.stopLossPct : 225,
     });
-    return b.stopLossUsd < m.marginUsd * 0.01;
+    if (!(b.takeProfitUsd > 0) || !(b.stopLossUsd > 0)) return true;
+    // 구 버그: SL이 차트방어의 절반 미만이면 마진×ROI 오염
+    return b.stopLossUsd < m.stopLossUsd * 0.5;
   });
   if (needUsdMigrate.length > 0) {
     for (const b of needUsdMigrate) {
@@ -108,7 +109,6 @@ export async function GET() {
       const usd = resolveTpSlUsd({
         symbol: b.symbol,
         startLots: b.startLots,
-        takeProfitUsd: b.takeProfitUsd > 0 ? b.takeProfitUsd : undefined,
         takeProfitPct: b.takeProfitPct > 0 ? b.takeProfitPct : 20,
         stopLossPct: slPct,
       });

@@ -5,6 +5,8 @@ import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
   DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
+  DCA1000_LEVERAGE_BASE,
+  MT5_BROKER_LEVERAGE_DEFAULT,
   calcDca1000Defense,
   resolveTpSlUsd,
 } from "@/lib/dca1000";
@@ -68,17 +70,21 @@ function DefenseCard({
     <div className="m-calc-box">
       <div className="m-calc-title">계산결과</div>
       <div className="m-calc-row">
-        <span>익절 (고정$)</span>
+        <span>현재(시작회차) 익절$</span>
         <strong style={{ color: "var(--ok, #0a7)" }}>+${fmtNum(takeProfitUsd)}</strong>
       </div>
       <div className="m-calc-row">
-        <span>손절 (고정$)</span>
+        <span>현재(시작회차) 손절$</span>
         <strong style={{ color: "var(--danger)" }}>-${fmtNum(stopLossUsd)}</strong>
       </div>
       <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-        <span>전체 회차 소진 시 참고 손절금</span>
+        <span>전체 회차 채웠을 때 예상 손절금</span>
         <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
       </div>
+      <p style={{ margin: "0.35rem 0 0", fontSize: "0.68rem", color: "var(--muted)", lineHeight: 1.4 }}>
+        물타기 회차가 늘수록 익절$·손절$도 바스켓 로트에 맞춰 커집니다. 위 손절은 L0 기준, 아래는 전체
+        회차 소진 시 MT5 현금 손절 참고값입니다.
+      </p>
     </div>
   );
 }
@@ -134,22 +140,14 @@ export default function BotPage() {
 
   const usdPreview = useMemo(() => {
     if (!edit) return null;
+    // L0 미리보기: pct 파생 (저장 고정$ 무시 — 엔진도 회차 라이브 스케일)
     return resolveTpSlUsd({
       symbol: edit,
       startLots: Number(draft.startLots ?? 0.01),
-      takeProfitUsd: draft.takeProfitUsd,
-      stopLossUsd: draft.stopLossUsd,
       takeProfitPct: Number(draft.takeProfitPct ?? DEFAULT_TP_ROI),
       stopLossPct: Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
     });
-  }, [
-    edit,
-    draft.startLots,
-    draft.takeProfitUsd,
-    draft.stopLossUsd,
-    draft.takeProfitPct,
-    draft.stopLossPct,
-  ]);
+  }, [edit, draft.startLots, draft.takeProfitPct, draft.stopLossPct]);
 
   const load = useCallback(async () => {
     const [botsRes, statsRes] = await Promise.all([
@@ -252,8 +250,6 @@ export default function BotPage() {
     const derived = resolveTpSlUsd({
       symbol: edit,
       startLots: lots,
-      takeProfitUsd: tpUsd,
-      stopLossUsd: slUsd,
       takeProfitPct: Number(draft.takeProfitPct ?? DEFAULT_TP_ROI),
       stopLossPct: Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
     });
@@ -498,20 +494,19 @@ export default function BotPage() {
                           const u = resolveTpSlUsd({
                             symbol: bot.symbol,
                             startLots: bot.startLots,
-                            takeProfitUsd: bot.takeProfitUsd,
-                            stopLossUsd: bot.stopLossUsd,
                             takeProfitPct: bot.takeProfitPct || DEFAULT_TP_ROI,
                             stopLossPct: bot.stopLossPct || DCA1000_DEFAULT_SL_ROI,
                           });
                           return (
                             <>
                               <span style={{ color: "var(--ok, #0a7)" }}>
-                                익절 +${fmtNum(u.takeProfitUsd)}
+                                시작회차 익절 +${fmtNum(u.takeProfitUsd)}
                               </span>
                               {" · "}
                               <span style={{ color: "var(--danger)" }}>
                                 손절 -${fmtNum(u.stopLossUsd)}
                               </span>
+                              <span style={{ color: "var(--muted)" }}> (회차↑면 증가)</span>
                             </>
                           );
                         })()}
@@ -704,49 +699,64 @@ export default function BotPage() {
 
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem" }}>
                         <label>
-                          <span className="sa-label">익절 $</span>
+                          <span className="sa-label">시작회차 익절 $</span>
                           <input
                             className="sa-input"
                             type="number"
                             step="0.01"
                             min="0.01"
-                            value={draft.takeProfitUsd ?? bot.takeProfitUsd ?? ""}
-                            onChange={(e) =>
+                            value={usdPreview?.takeProfitUsd ?? draft.takeProfitUsd ?? bot.takeProfitUsd ?? ""}
+                            onChange={(e) => {
+                              const tpUsd = Number(e.target.value);
+                              const margin = usdPreview?.marginUsd ?? 0;
+                              const pct =
+                                margin > 0 && tpUsd > 0
+                                  ? Math.round((tpUsd / margin) * 100 * 100) / 100
+                                  : Number(draft.takeProfitPct ?? DEFAULT_TP_ROI);
                               setDraft((d) => ({
                                 ...d,
-                                takeProfitUsd: Number(e.target.value),
-                              }))
-                            }
+                                takeProfitUsd: tpUsd,
+                                takeProfitPct: pct,
+                              }));
+                            }}
                           />
                         </label>
                         <label>
-                          <span className="sa-label">손절 $</span>
+                          <span className="sa-label">시작회차 손절 $</span>
                           <input
                             className="sa-input"
                             type="number"
                             step="0.01"
                             min="0"
-                            value={draft.stopLossUsd ?? bot.stopLossUsd ?? ""}
-                            onChange={(e) =>
+                            value={usdPreview?.stopLossUsd ?? draft.stopLossUsd ?? bot.stopLossUsd ?? ""}
+                            onChange={(e) => {
+                              const slUsd = Number(e.target.value);
+                              // 차트방어: slUsd = notional × (pct/표레버/100)
+                              const margin = usdPreview?.marginUsd ?? 0;
+                              const notional = margin * MT5_BROKER_LEVERAGE_DEFAULT;
+                              const pct =
+                                notional > 0 && slUsd > 0
+                                  ? Math.round(
+                                      (slUsd / notional) * DCA1000_LEVERAGE_BASE * 100 * 100,
+                                    ) / 100
+                                  : Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
                               setDraft((d) => ({
                                 ...d,
-                                stopLossUsd: Number(e.target.value),
-                                stopLossEnabled: Number(e.target.value) > 0,
-                              }))
-                            }
+                                stopLossUsd: slUsd,
+                                stopLossPct: pct,
+                                stopLossEnabled: slUsd > 0,
+                              }));
+                            }}
                           />
                         </label>
                       </div>
                       <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                        바스켓 미실현 손익$ 기준:{" "}
-                        <strong style={{ color: "var(--ink)" }}>
-                          익절 ≥ +${fmtNum(usdPreview?.takeProfitUsd ?? 0)} / 손절 ≤ -$
-                          {fmtNum(usdPreview?.stopLossUsd ?? 0)}
-                        </strong>
-                        . 기본값 = 시작로트 증거금(1:500) × 구 ROI%(익절{" "}
-                        {fmtNum(Number(draft.takeProfitPct ?? DEFAULT_TP_ROI), 0)}% · 손절{" "}
-                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI), 0)}%). 물타기도
-                        회차 로트 증거금 × dropROI% → $.
+                        엔진은 <strong style={{ color: "var(--ink)" }}>회차·로트에 따라 익절$/손절$가 커집니다</strong>
+                        . 시작회차 기준 ≈ 익절 +${fmtNum(usdPreview?.takeProfitUsd ?? 0)} / 손절 −$
+                        {fmtNum(usdPreview?.stopLossUsd ?? 0)} (익절=증거금×
+                        {fmtNum(Number(draft.takeProfitPct ?? DEFAULT_TP_ROI), 0)}% · 손절=명목×차트
+                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI) / 20, 2)}%). 전체
+                        회차 시 손절은 아래 참고금.
                       </p>
 
                       <DefenseCard

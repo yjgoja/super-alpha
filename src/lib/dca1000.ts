@@ -240,7 +240,28 @@ export function roiPctToUsd(marginUsd: number, roiPct: number) {
   return Math.round(marginUsd * (roiPct / 100) * 100) / 100;
 }
 
-/** 시작로트 기준 사용증거금($) — 익절/손절 고정$ 환산 분모 */
+/**
+ * 차트% 방어 손절 현금($) = 명목 × (SL_ROI / 표레버 / 100).
+ * SL_ROI 225 · 표레버 20 → 가격 11.25% 역행 시 손실$. 로트·평단과 함께 커짐.
+ */
+export function chartDefenseSlUsd(opts: {
+  symbol: string;
+  lots: number;
+  avgPrice: number;
+  stopLossPct: number;
+  /** 표 레버(기본 20). 브로커 레버와 다름 */
+  tableLeverage?: number;
+}) {
+  const lots = Math.max(0, opts.lots);
+  const avg = Math.max(0, opts.avgPrice);
+  const slRoi = Math.max(0, opts.stopLossPct);
+  const tableLev = Math.max(1, opts.tableLeverage ?? DCA1000_LEVERAGE_BASE);
+  if (!(lots > 0) || !(avg > 0) || !(slRoi > 0)) return 0;
+  const notional = lots * contractSizeForSymbol(opts.symbol) * avg;
+  return Math.round(notional * (slRoi / tableLev / 100) * 100) / 100;
+}
+
+/** 시작로트 기준 사용증거금($) — L0 미리보기·에디터 분모 */
 export function startLotsMarginUsd(opts: {
   symbol: string;
   startLots: number;
@@ -266,8 +287,10 @@ export function startLotsMarginUsd(opts: {
 }
 
 /**
- * 봇/로직 설정 → 고정 익절$/손절$.
- * 저장값이 있으면 그대로, 없으면 startLots 증거금 × (구 ROI%/100).
+ * L0(시작로트) 기준 익절$/손절$ 미리보기 — 엔진 트리거가 아님(라이브는 liveBasketTpSlUsd).
+ * - 익절: 시작로트 증거금 × TP%
+ * - 손절: 시작로트 명목 × (SL%/표레버) — 차트 방어금
+ * useFixedUsd=true 일 때만 저장 오버라이드$ 사용.
  */
 export function resolveTpSlUsd(opts: {
   symbol: string;
@@ -278,12 +301,25 @@ export function resolveTpSlUsd(opts: {
   stopLossPct?: number | null;
   brokerLeverage?: number;
   refMid?: number;
+  /** true면 저장 고정$ 우선 (레거시). 기본 false = pct 파생 */
+  useFixedUsd?: boolean;
 }) {
-  const marginUsd = startLotsMarginUsd({
+  const lots = Math.max(0.01, opts.startLots);
+  const raw = (opts.symbol || "EURUSD").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const key =
+    raw === "GOLD" || raw.startsWith("XAU")
+      ? "XAUUSD"
+      : raw.startsWith("XAG") || raw === "SILVER"
+        ? "XAGUSD"
+        : raw in MT5_REF_MID
+          ? raw
+          : "EURUSD";
+  const mid = opts.refMid ?? MT5_REF_MID[key] ?? MT5_REF_MID.EURUSD;
+  const marginUsd = mt5UsedMargin({
     symbol: opts.symbol,
-    startLots: opts.startLots,
-    brokerLeverage: opts.brokerLeverage,
-    refMid: opts.refMid,
+    lots,
+    avgPrice: mid,
+    brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
   });
   const tpRoi =
     opts.takeProfitPct != null && opts.takeProfitPct > 0 ? opts.takeProfitPct : 20;
@@ -291,33 +327,98 @@ export function resolveTpSlUsd(opts: {
     opts.stopLossPct != null && opts.stopLossPct > 0
       ? opts.stopLossPct
       : DCA1000_DEFAULT_SL_ROI;
+  const derivedTp = roiPctToUsd(marginUsd, tpRoi);
+  const derivedSl = chartDefenseSlUsd({
+    symbol: opts.symbol,
+    lots,
+    avgPrice: mid,
+    stopLossPct: slRoi,
+  });
+  const useFixed = opts.useFixedUsd === true;
   const takeProfitUsd =
-    opts.takeProfitUsd != null && opts.takeProfitUsd > 0
+    useFixed && opts.takeProfitUsd != null && opts.takeProfitUsd > 0
       ? Math.round(opts.takeProfitUsd * 100) / 100
-      : roiPctToUsd(marginUsd, tpRoi);
+      : derivedTp;
   const stopLossUsd =
-    opts.stopLossUsd != null && opts.stopLossUsd > 0
+    useFixed && opts.stopLossUsd != null && opts.stopLossUsd > 0
       ? Math.round(opts.stopLossUsd * 100) / 100
-      : roiPctToUsd(marginUsd, slRoi);
+      : derivedSl;
   return {
     marginUsd: Math.round(marginUsd * 100) / 100,
     takeProfitUsd,
     stopLossUsd,
     takeProfitPct: tpRoi,
     stopLossPct: slRoi,
+    derivedTakeProfitUsd: derivedTp,
+    derivedStopLossUsd: derivedSl,
   };
 }
 
 /**
- * 심볼 바스켓(합산) 익절 판정 — 고정 목표$ 기준.
+ * 라이브 바스켓 익절$/손절$ — 회차·로트에 따라 커짐.
+ * - TP = 현재 사용증거금 × (takeProfitPct/100)
+ * - SL = 현재 명목 × (stopLossPct/표레버/100)  (= 차트% 방어 현금)
+ * useFixedUsd=true 이고 오버라이드$ > 0 이면 고정$ (레거시·수동 고정).
+ */
+export function liveBasketTpSlUsd(opts: {
+  symbol: string;
+  lots: number;
+  avgPrice: number;
+  takeProfitPct: number;
+  stopLossPct: number;
+  brokerLeverage?: number;
+  takeProfitUsdOverride?: number | null;
+  stopLossUsdOverride?: number | null;
+  /** true면 저장된 고정$ 사용 (기본 false = 회차 스케일) */
+  useFixedUsd?: boolean;
+}) {
+  const tpRoi = opts.takeProfitPct > 0 ? opts.takeProfitPct : 20;
+  const slRoi = opts.stopLossPct > 0 ? opts.stopLossPct : DCA1000_DEFAULT_SL_ROI;
+  const lots = Math.max(0, opts.lots);
+  const avg = Math.max(0, opts.avgPrice);
+  const marginUsd = mt5UsedMargin({
+    symbol: opts.symbol,
+    lots,
+    avgPrice: avg,
+    brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
+  });
+  const liveTp = roiPctToUsd(marginUsd, tpRoi);
+  const liveSl = chartDefenseSlUsd({
+    symbol: opts.symbol,
+    lots,
+    avgPrice: avg,
+    stopLossPct: slRoi,
+  });
+  const useFixed = opts.useFixedUsd === true;
+  const takeProfitUsd =
+    useFixed && opts.takeProfitUsdOverride != null && opts.takeProfitUsdOverride > 0
+      ? Math.round(opts.takeProfitUsdOverride * 100) / 100
+      : liveTp;
+  const stopLossUsd =
+    useFixed && opts.stopLossUsdOverride != null && opts.stopLossUsdOverride > 0
+      ? Math.round(opts.stopLossUsdOverride * 100) / 100
+      : liveSl;
+  return {
+    marginUsd: Math.round(marginUsd * 100) / 100,
+    takeProfitUsd,
+    stopLossUsd,
+    takeProfitPct: tpRoi,
+    stopLossPct: slRoi,
+    live: !useFixed,
+  };
+}
+
+/**
+ * 심볼 바스켓(합산) 익절 판정 — 라이브/전달된 목표$.
  * 바스켓 미실현 손익($) ≥ takeProfitUsd → 전량 청산.
+ * takeProfitUsd가 0이고 usedMargin·tpRoiPct가 있으면 라이브 환산.
  */
 export function shouldTriggerTakeProfit(opts: {
   /** 심볼 합산 미실현 손익($) */
   pnl: number;
-  /** 고정 익절 목표($). startLots 증거금 × ROI% 로 환산된 값 */
+  /** 익절 목표($). 라이브 바스켓 기준값 전달 */
   takeProfitUsd: number;
-  /** 표시용 (선택) */
+  /** 표시·폴백용 현재 사용증거금 */
   usedMargin?: number;
   tpRoiPct?: number;
   /** @deprecated ROI 경로 — takeProfitUsd 없을 때만 사용 */
