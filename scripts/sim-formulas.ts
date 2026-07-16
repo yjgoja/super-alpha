@@ -6,15 +6,13 @@
 import {
   calcDca1000Defense,
   DCA1000_DEFAULT_SL_ROI,
-  DCA1000_LEVELS,
   liveBasketTpSlUsd,
   MT5_BROKER_LEVERAGE_DEFAULT,
   resolveTpSlUsd,
-  shouldTriggerDcaUsd,
+  shouldTriggerDcaRoi,
   shouldTriggerStopLossUsd,
   shouldTriggerTakeProfit,
   startLotsMarginUsd,
-  triggerDropUsd,
 } from "../src/lib/dca1000";
 
 let failed = 0;
@@ -71,24 +69,12 @@ const live10 = liveBasketTpSlUsd({
 assert("10× lots → TP ≈ 16.3", Math.abs(live10.takeProfitUsd - 16.32) < 0.1, live10);
 assert("10× lots → SL ≈ 183.6", Math.abs(live10.stopLossUsd - 183.6) < 0.5, live10);
 
-// 3) DCA dropUsd L1 = startLots margin × 10%
-const drop1 = triggerDropUsd({
-  levelIndex: 1,
-  levels: DCA1000_LEVELS,
-  symbol: "XAUUSD",
-  lotsAtLevel: 0.01,
-  avgPrice: 4080,
-});
-assert("L1 dropUsd ≈ 0.82", Math.abs(drop1 - 0.82) < 0.02, { drop1 });
-
-const dca = shouldTriggerDcaUsd({
-  pnl: -1,
-  usedMargin: margin,
-  adversePct: 0.5,
-  brokerLeverage: 500,
-  needUsd: drop1,
-});
-assert("DCA fires when adverse$ ≥ dropUsd", dca.hit === true, dca);
+// 3) DCA = 순수 바스켓 마진 ROI ≤ -drop% (가격 로직 없음)
+const dcaMiss = shouldTriggerDcaRoi({ pnl: -margin * 0.05, usedMargin: margin, dropRoiPct: 20 });
+assert("DCA 미발동: ROI -5% > -20%", dcaMiss.hit === false, dcaMiss);
+const dcaHit = shouldTriggerDcaRoi({ pnl: -margin * 0.25, usedMargin: margin, dropRoiPct: 20 });
+assert("DCA 발동: ROI -25% ≤ -20%", dcaHit.hit === true, dcaHit);
+assert("DCA basketRoi = pnl/margin (가격 미사용)", Math.abs(dcaHit.basketRoi - -25) < 0.001, dcaHit);
 
 // 4) EUR L0
 const eur = resolveTpSlUsd({

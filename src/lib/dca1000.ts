@@ -483,54 +483,27 @@ export function shouldTriggerStopLossUsd(opts: {
 }
 
 /**
- * 물타기 회차 필요 손실$ = 해당 회차 로트 증거금 × (drop ROI%/100).
- * 표 drop 은 첫 진입 대비 절대 ROI였으므로, 동일 숫자를 $로 환산.
+ * 물타기 트리거 — 순수 바스켓 마진 ROI (가격 로직 없음, 바이낸스 선물식).
+ * BasketROI = BasketFloatingProfit / BasketMargin × 100.
+ * BasketROI ≤ -dropRoiPct(표 drop) 이면 다음 회차 진입.
+ * 예: 표 drop 20 → 바스켓 ROI ≤ -20% 에서 2번째 주문 추가.
  */
-export function triggerDropUsd(opts: {
-  levelIndex: number;
-  levels?: Dca1000Level[];
-  symbol: string;
-  lotsAtLevel: number;
-  avgPrice: number;
-  brokerLeverage?: number;
-}) {
-  const dropRoi = triggerDropRoi(opts.levelIndex, opts.levels);
-  if (!(dropRoi > 0) || !(opts.lotsAtLevel > 0)) return 0;
-  const margin = mt5UsedMargin({
-    symbol: opts.symbol,
-    lots: opts.lotsAtLevel,
-    avgPrice: Math.max(0, opts.avgPrice),
-    brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
-  });
-  return roiPctToUsd(margin, dropRoi);
-}
-
-/**
- * 물타기 트리거($): max(바스켓 손실$, 가격역행×증거금 환산$) ≥ needUsd
- * 기존 max(lossRoi, adverseRoiPrice) ≥ dropRoi 와 동일 구조의 달러판.
- */
-export function shouldTriggerDcaUsd(opts: {
+export function shouldTriggerDcaRoi(opts: {
+  /** 심볼 바스켓 합산 미실현 손익($) */
   pnl: number;
+  /** 바스켓 사용증거금($) — 브로커 margin 합 우선 */
   usedMargin: number;
-  /** 첫 진입 대비 동일호가 역행 % */
-  adversePct: number;
-  brokerLeverage?: number;
-  needUsd: number;
+  /** 표 drop ROI% (양수, 예: 20/40/…/350) */
+  dropRoiPct: number;
 }) {
-  const lev = Math.max(1, opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT);
-  const lossUsd = Math.max(0, -opts.pnl);
-  const adverseUsdFromPrice =
-    opts.usedMargin > 0
-      ? Math.round(opts.usedMargin * ((opts.adversePct * lev) / 100) * 100) / 100
-      : 0;
-  const adverseUsd = Math.max(lossUsd, adverseUsdFromPrice);
-  const needUsd = Math.max(0, opts.needUsd);
+  const margin = Math.max(0, opts.usedMargin);
+  const dropRoi = Math.max(0, opts.dropRoiPct);
+  const basketRoi = mt5FloatingRoiPct(opts.pnl, margin);
   return {
-    hit: needUsd > 0 && adverseUsd >= needUsd,
-    adverseUsd,
-    lossUsd,
-    adverseUsdFromPrice,
-    needUsd,
+    hit: margin > 0 && dropRoi > 0 && basketRoi <= -dropRoi,
+    basketRoi,
+    dropRoiPct: dropRoi,
+    lossUsd: Math.max(0, -opts.pnl),
   };
 }
 

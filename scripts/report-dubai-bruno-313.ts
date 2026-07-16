@@ -14,7 +14,7 @@ import { getTableLevels, getTableLeverage, tableLogicMeta } from "../src/lib/tab
 
 const logic = "dubai_bruno_313";
 const slPct = 225;
-const levels = getTableLevels(logic); // [L0, ...935 rows]
+const levels = getTableLevels(logic); // [L0, ...313 rows]
 const tableLev = getTableLeverage(logic) || DCA1000_LEVERAGE_BASE;
 const meta = tableLogicMeta(logic);
 
@@ -52,12 +52,14 @@ const fmt = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 console.log("=== Dubai Bruno 313 (dubai_bruno_313) · 정본표 ===");
-console.log(`파일 데이터 행 수: ${meta.dcaRows} (물타기 레벨) · L0 포함 총 ${meta.count}레벨/회차`);
-console.log(`익절 ROI: 회차별 profit% (drop≤130→20, drop140→25, drop150→30) · 손절 ${slPct}% · 표레버 ${tableLev} · 브로커레버 500`);
+console.log(`파일 데이터 행 수: ${meta.dcaRows} (물타기 레벨) · L0 포함 총 ${meta.count}레벨/주문`);
+console.log(
+  `익절 ROI: 회차별 profit% (20→25→30→45→60→70→100→110→125) · 물타기 drop -20~-350% · 손절 ${slPct}% · 표레버 ${tableLev} · 브로커레버 500`,
+);
 console.log("");
 
-// 회차 마커: L0=1, 10, 50, 100, 200, 419(첫 25%), 700(첫 30%), 최종
-const markers = [1, 10, 50, 100, 200, 419, 700, levels.length];
+// 회차 마커: 티어 경계 (index+1). L0=1, 첫25%=idx17, 첫30%=idx61, …, 최심=314
+const markers = [1, 17, 61, 92, 139, 181, 209, 251, 301, levels.length];
 
 const starts: Record<string, number> = { EURUSD: 0.08, XAUUSD: 0.03 };
 for (const symbol of ["EURUSD", "XAUUSD"]) {

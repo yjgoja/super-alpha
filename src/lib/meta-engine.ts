@@ -1,17 +1,13 @@
 import {
   liveBasketTpSlUsd,
-  mt5DcaAdversePct,
   mt5EntryQuote,
   mt5FloatingRoiPct,
   mt5PnlForTakeProfit,
   mt5ProfitPct,
-  mt5UsedMargin,
-  roiPctToUsd,
-  shouldTriggerDcaUsd,
+  shouldTriggerDcaRoi,
   shouldTriggerStopLossUsd,
   shouldTriggerTakeProfit,
   spreadPct,
-  triggerDropUsd,
   MT5_BROKER_LEVERAGE_DEFAULT,
 } from "./dca1000";
 import {
@@ -58,16 +54,6 @@ function avgPrice(legs: { lots: number; price: number }[]) {
 
 function pnlPct(direction: "BUY" | "SELL", avg: number, bid: number, ask: number) {
   return mt5ProfitPct(direction, avg, bid, ask);
-}
-
-function adversePct(direction: "BUY" | "SELL", first: number, bid: number, ask: number) {
-  if (first <= 0) return 0;
-  if (direction === "BUY") {
-    if (bid >= first) return 0;
-    return ((first - bid) / first) * 100;
-  }
-  if (ask <= first) return 0;
-  return ((ask - first) / first) * 100;
 }
 
 type BotCfg = {
@@ -427,7 +413,6 @@ async function runSymbolTableDca(
       : avgPrice(legs);
   const floatingPnl = ourPositions.reduce((s, p) => s + p.profit, 0);
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
-  const adverse = mt5DcaAdversePct(direction, basket.firstEntryPrice, price.bid, price.ask);
 
   // 익절 ROI: 두바이부르노(bulk 표)는 "현재(가장 깊은) 회차"의 표 profit%를 사용.
   // (표 profit 티어: drop≤130→20%, drop140→25%, drop150→30%)
@@ -491,13 +476,6 @@ async function runSymbolTableDca(
     usedMargin,
     tpRoiPct: liveUsd.takeProfitPct,
   });
-  const dcaEvalBase = {
-    pnl: tpPnl.pnl,
-    usedMargin,
-    adversePct: adverse,
-    brokerLeverage: brokerLev,
-  };
-
   // 익절 우선: BasketROI ≥ TP% → 바스켓 전량 청산 → 재진입
   if (tpDecision.hit) {
     const tpClose = await closeBasketTp({
@@ -602,25 +580,24 @@ async function runSymbolTableDca(
     };
   }
 
+  // 물타기: 순수 바스켓 마진 ROI ≤ -표 drop% (가격 로직 없음). drop 은 20/40/…/350.
+  // 한 틱(평가)당 최대 1회차만 추가 → 다음 틱에서 avg/margin/ROI 재계산 (바이낸스 안전주문식).
   let filled = basket.filledLevel;
   let actions = 0;
-  const maxPerTick = 8;
-  let lastDca: ReturnType<typeof shouldTriggerDcaUsd> | null = null;
+  const maxPerTick = 1;
+  let lastDca: ReturnType<typeof shouldTriggerDcaRoi> | null = null;
   while (filled + 1 < maxLevels && actions < maxPerTick) {
     const next = filled + 1;
-    const lots = levelLots(next);
-    const needUsd = triggerDropUsd({
-      levelIndex: next,
-      levels,
-      symbol,
-      lotsAtLevel: lots,
-      avgPrice: avg > 0 ? avg : basket.firstEntryPrice,
-      brokerLeverage: brokerLev,
+    const dropRoi = Math.max(0, levels[next]?.drop ?? 0);
+    const dcaHit = shouldTriggerDcaRoi({
+      pnl: tpPnl.pnl,
+      usedMargin,
+      dropRoiPct: dropRoi,
     });
-    const dcaHit = shouldTriggerDcaUsd({ ...dcaEvalBase, needUsd });
     lastDca = dcaHit;
     if (!dcaHit.hit) break;
 
+    const lots = levelLots(next);
     const order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
@@ -651,7 +628,7 @@ async function runSymbolTableDca(
         price: fillPrice,
         kind: "DCA",
         level: next,
-        note: `${logic}|need$${needUsd}|adv$${dcaHit.adverseUsd.toFixed(2)}|loss$${dcaHit.lossUsd.toFixed(2)}|lev=${brokerLev}`,
+        note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}`,
       },
     });
     filled = next;
@@ -672,23 +649,13 @@ async function runSymbolTableDca(
       symbol,
       filled,
       actions,
-      adverse,
-      adverseUsd: lastDca?.adverseUsd,
+      basketRoi: lastDca?.basketRoi ?? floatingRoi,
       spreadPct: spr,
     };
   }
 
-  const nextNeedUsd =
-    filled + 1 < maxLevels
-      ? triggerDropUsd({
-          levelIndex: filled + 1,
-          levels,
-          symbol,
-          lotsAtLevel: levelLots(filled + 1),
-          avgPrice: avg > 0 ? avg : basket.firstEntryPrice,
-          brokerLeverage: brokerLev,
-        })
-      : null;
+  const nextDropRoi =
+    filled + 1 < maxLevels ? Math.max(0, levels[filled + 1]?.drop ?? 0) : null;
 
   await prisma.basket.update({
     where: { id: basket.id },
@@ -707,12 +674,8 @@ async function runSymbolTableDca(
     tpMoney: liveUsd.takeProfitUsd,
     stopLossUsd: liveUsd.stopLossUsd,
     tpRoi: liveUsd.takeProfitPct,
-    adverse,
-    adverseUsd: lastDca?.adverseUsd ?? shouldTriggerDcaUsd({
-      ...dcaEvalBase,
-      needUsd: nextNeedUsd ?? 0,
-    }).adverseUsd,
-    nextDropUsd: nextNeedUsd,
+    basketRoi: floatingRoi,
+    nextDropRoi,
     spreadPct: spr,
   };
 }
@@ -834,7 +797,6 @@ async function runSymbolDca(
       : avgPrice(legs);
   const floatingPnl = ourPositions.reduce((s, p) => s + p.profit, 0);
   const profit = pnlPct(direction, avg, price.bid, price.ask);
-  const adverse = adversePct(direction, basket.firstEntryPrice, price.bid, price.ask);
   const nextLevel = basket.filledLevel + 1;
   const brokerLev = Math.max(1, cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT);
   const lotsForTp = posVol > 0 ? posVol : legs.reduce((s, l) => s + l.lots, 0);
@@ -962,23 +924,13 @@ async function runSymbolDca(
   }
 
   if (nextLevel < maxLevels) {
+    // 순수 바스켓 마진 ROI ≤ -needRoi% (가격 로직 없음)
     const lots = lotsAtLevel(cfg.startLots, cfg.entryMultiplier, nextLevel, logic);
     const needRoi = (cfg.entryIntervalPct || 5) * nextLevel;
-    const needUsd = roiPctToUsd(
-      mt5UsedMargin({
-        symbol,
-        lots,
-        avgPrice: avg > 0 ? avg : basket.firstEntryPrice,
-        brokerLeverage: brokerLev,
-      }),
-      needRoi,
-    );
-    const dcaHit = shouldTriggerDcaUsd({
+    const dcaHit = shouldTriggerDcaRoi({
       pnl: tpPnl.pnl,
       usedMargin,
-      adversePct: adverse,
-      brokerLeverage: brokerLev,
-      needUsd,
+      dropRoiPct: needRoi,
     });
     if (dcaHit.hit) {
       const order = await placeMarketOrder({
@@ -1006,7 +958,7 @@ async function runSymbolDca(
           price: fillPrice,
           kind: "DCA",
           level: nextLevel,
-          note: `${logic}|need$${needUsd}|adv$${dcaHit.adverseUsd.toFixed(2)}|lev=${brokerLev}`,
+          note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}`,
         },
       });
       return { ok: true as const, action: "dca", level: nextLevel, symbol };
@@ -1022,7 +974,6 @@ async function runSymbolDca(
     action: "hold",
     symbol,
     profit,
-    adverse,
     floatingRoi,
     tpMoney: liveUsd.takeProfitUsd,
     stopLossUsd: liveUsd.stopLossUsd,
