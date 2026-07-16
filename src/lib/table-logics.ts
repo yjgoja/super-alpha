@@ -21,6 +21,10 @@ export type StrategyPayload = {
   startLots?: number;
   takeProfitPct?: number;
   stopLossPct?: number;
+  /** 고정 익절$ (우선). 없으면 takeProfitPct×시작로트증거금 */
+  takeProfitUsd?: number;
+  /** 고정 손절$ (우선). 없으면 stopLossPct×시작로트증거금 */
+  stopLossUsd?: number;
   levels?: StrategyLevelRow[];
 };
 
@@ -30,6 +34,8 @@ export type ResolvedStrategy = {
   startLots: number;
   takeProfitPct: number | null;
   stopLossPct: number | null;
+  takeProfitUsd: number | null;
+  stopLossUsd: number | null;
   mode: "bulk" | "levels" | "preset";
   hasOverride: boolean;
 };
@@ -235,6 +241,8 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
       startLots: 0.01,
       takeProfitPct: meta.firstTpRoi || 20,
       stopLossPct: 225,
+      takeProfitUsd: 0,
+      stopLossUsd: 0,
     };
   }
   return {
@@ -243,6 +251,8 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
     startLots: 0.01,
     takeProfitPct: 20,
     stopLossPct: 225,
+    takeProfitUsd: 0,
+    stopLossUsd: 0,
     levels: presetToEditorRows(logic, 0.01, 2),
   };
 }

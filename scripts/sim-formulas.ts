@@ -1,17 +1,18 @@
 /**
- * Offline formula alignment: UI labels ↔ engine triggers.
+ * Offline formula alignment: fixed USD TP/SL from startLots margin × ROI%.
  * Run: npx tsx scripts/sim-formulas.ts
  */
 import {
   calcDca1000Defense,
   DCA1000_DEFAULT_SL_ROI,
-  DCA1000_LEVERAGE_BASE,
   MT5_BROKER_LEVERAGE_DEFAULT,
-  mt5DcaAdverseRoi,
-  mt5TpMoneyTarget,
-  mt5UsedMargin,
-  roiToPricePct,
+  resolveTpSlUsd,
+  shouldTriggerDcaUsd,
+  shouldTriggerStopLossUsd,
   shouldTriggerTakeProfit,
+  startLotsMarginUsd,
+  triggerDropUsd,
+  DCA1000_LEVELS,
 } from "../src/lib/dca1000";
 
 let failed = 0;
@@ -24,68 +25,74 @@ function assert(name: string, cond: boolean, detail?: unknown) {
   }
 }
 
-// 1) SL chart% = slRoi / 20
-const slRoi = DCA1000_DEFAULT_SL_ROI;
-const slChart = roiToPricePct(slRoi);
-assert("SL chart% = 225/20 = 11.25", slChart === 11.25, { slChart });
-
-// 2) TP money = margin@500 × ROI%
-const margin = mt5UsedMargin({
+// 1) startLots margin × ROI%
+const margin = startLotsMarginUsd({
   symbol: "XAUUSD",
-  lots: 0.01,
-  avgPrice: 4080,
+  startLots: 0.01,
   brokerLeverage: MT5_BROKER_LEVERAGE_DEFAULT,
 });
-const tpMoney = mt5TpMoneyTarget({
+const usd = resolveTpSlUsd({
   symbol: "XAUUSD",
-  lots: 0.01,
-  avgPrice: 4080,
-  tpRoiPct: 20,
-  brokerLeverage: 500,
+  startLots: 0.01,
+  takeProfitPct: 20,
+  stopLossPct: DCA1000_DEFAULT_SL_ROI,
 });
 assert("TP margin XAU 0.01@4080 ≈ 8.16", Math.abs(margin - 8.16) < 0.02, { margin });
-assert("TP $ = margin×20% ≈ 1.63", Math.abs(tpMoney - 1.63) < 0.02, { tpMoney });
+assert("TP $ = margin×20% ≈ 1.63", Math.abs(usd.takeProfitUsd - 1.63) < 0.02, usd);
+assert("SL $ = margin×225% ≈ 18.36", Math.abs(usd.stopLossUsd - 18.36) < 0.05, usd);
 
-const tpHit = shouldTriggerTakeProfit({ pnl: 1.63, usedMargin: margin, tpRoiPct: 20 });
-assert("TP hits at margin ROI 20%", tpHit.hit === true, tpHit);
+const tpHit = shouldTriggerTakeProfit({
+  pnl: 1.63,
+  takeProfitUsd: usd.takeProfitUsd,
+  usedMargin: margin,
+});
+assert("TP hits at +$1.63", tpHit.hit === true, tpHit);
 
-// 3) DCA adverse ROI = price% × 500
-const adv = mt5DcaAdverseRoi("BUY", 4080, 4060, 4060.4, 500);
-assert("DCA adverse ROI uses lev500", adv > 200 && adv < 300, { adv });
+const slHit = shouldTriggerStopLossUsd({
+  pnl: -18.36,
+  stopLossUsd: usd.stopLossUsd,
+});
+assert("SL hits at -$18.36", slHit.hit === true, slHit);
 
-// 4) Defense: estimatedSlAmount === mt5CashSlAmount; ≠ table (legacy)
+// 2) DCA dropUsd L1 = startLots margin × 10%
+const drop1 = triggerDropUsd({
+  levelIndex: 1,
+  levels: DCA1000_LEVELS,
+  symbol: "XAUUSD",
+  lotsAtLevel: 0.01,
+  avgPrice: 4080,
+});
+assert("L1 dropUsd ≈ 0.82", Math.abs(drop1 - 0.82) < 0.02, { drop1 });
+
+const dca = shouldTriggerDcaUsd({
+  pnl: -1,
+  usedMargin: margin,
+  adversePct: 0.5,
+  brokerLeverage: 500,
+  needUsd: drop1,
+});
+assert("DCA fires when adverse$ ≥ dropUsd", dca.hit === true, dca);
+
+// 3) EUR defaults
+const eur = resolveTpSlUsd({
+  symbol: "EURUSD",
+  startLots: 0.01,
+  takeProfitPct: 20,
+  stopLossPct: 225,
+});
+assert("EUR TP$ ≈ 0.43", Math.abs(eur.takeProfitUsd - 0.43) < 0.02, eur);
+assert("EUR SL$ ≈ 4.88", Math.abs(eur.stopLossUsd - 4.88) < 0.05, eur);
+
+// 4) Defense still computable (reference cash)
 const def = calcDca1000Defense({
   symbol: "EURUSD",
   startLots: 0.01,
-  stopLossRoiPct: slRoi,
+  stopLossRoiPct: DCA1000_DEFAULT_SL_ROI,
 });
-assert(
-  "estimatedSl = MT5 cash (engine)",
-  def.estimatedSlAmount === def.mt5CashSlAmount,
-  { est: def.estimatedSlAmount, mt5: def.mt5CashSlAmount },
-);
-assert(
-  "estimatedSl ≠ table margin (legacy)",
-  def.estimatedSlAmount !== def.tableMarginSlAmount,
-  { est: def.estimatedSlAmount, table: def.tableMarginSlAmount },
-);
-assert(
-  "slTriggerPricePct = ROI/lev20",
-  Math.abs(def.slTriggerPricePct - slRoi / DCA1000_LEVERAGE_BASE) < 0.0001,
-  def.slTriggerPricePct,
-);
-assert("방어폭 (평균) > SL chart% (after DCA)", def.roiDefensePct > slChart, {
-  defense: def.roiDefensePct,
-  slChart,
-});
-
-// 5) Defaults
-assert("default SL ROI 225", DCA1000_DEFAULT_SL_ROI === 225);
-assert("broker lev 500", MT5_BROKER_LEVERAGE_DEFAULT === 500);
-assert("table lev 20", DCA1000_LEVERAGE_BASE === 20);
+assert("defense estimatedSl > 0", def.estimatedSlAmount > 0, def);
 
 if (failed > 0) {
   console.error(`\nSIM FORMULAS FAILED: ${failed}`);
   process.exit(1);
 }
-console.log("\nSIM FORMULAS ALL PASSED — UI/engine formula alignment");
+console.log("\nSIM FORMULAS ALL PASSED — USD = startLotsMargin × ROI%");

@@ -234,28 +234,167 @@ export function mt5FloatingRoiPct(pnl: number, usedMargin: number) {
   return (pnl / usedMargin) * 100;
 }
 
+/** ROI% → 달러 (증거금 × ROI%/100). 코인: 마진10 × ROI20% = $2 */
+export function roiPctToUsd(marginUsd: number, roiPct: number) {
+  if (!(marginUsd > 0) || !(roiPct > 0)) return 0;
+  return Math.round(marginUsd * (roiPct / 100) * 100) / 100;
+}
+
+/** 시작로트 기준 사용증거금($) — 익절/손절 고정$ 환산 분모 */
+export function startLotsMarginUsd(opts: {
+  symbol: string;
+  startLots: number;
+  brokerLeverage?: number;
+  refMid?: number;
+}) {
+  const raw = (opts.symbol || "EURUSD").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const key =
+    raw === "GOLD" || raw.startsWith("XAU")
+      ? "XAUUSD"
+      : raw.startsWith("XAG") || raw === "SILVER"
+        ? "XAGUSD"
+        : raw in MT5_REF_MID
+          ? raw
+          : "EURUSD";
+  const mid = opts.refMid ?? MT5_REF_MID[key] ?? MT5_REF_MID.EURUSD;
+  return mt5UsedMargin({
+    symbol: opts.symbol,
+    lots: Math.max(0.01, opts.startLots),
+    avgPrice: mid,
+    brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
+  });
+}
+
 /**
- * 심볼 바스켓(합산) 익절 판정.
- * UI 익절값은 ROI% — 목표$ = 사용증거금 × ROI%/100.
- * 포지션별이 아니라 합산 pnl / 합산 증거금으로 비교한다.
+ * 봇/로직 설정 → 고정 익절$/손절$.
+ * 저장값이 있으면 그대로, 없으면 startLots 증거금 × (구 ROI%/100).
+ */
+export function resolveTpSlUsd(opts: {
+  symbol: string;
+  startLots: number;
+  takeProfitUsd?: number | null;
+  stopLossUsd?: number | null;
+  takeProfitPct?: number | null;
+  stopLossPct?: number | null;
+  brokerLeverage?: number;
+  refMid?: number;
+}) {
+  const marginUsd = startLotsMarginUsd({
+    symbol: opts.symbol,
+    startLots: opts.startLots,
+    brokerLeverage: opts.brokerLeverage,
+    refMid: opts.refMid,
+  });
+  const tpRoi =
+    opts.takeProfitPct != null && opts.takeProfitPct > 0 ? opts.takeProfitPct : 20;
+  const slRoi =
+    opts.stopLossPct != null && opts.stopLossPct > 0
+      ? opts.stopLossPct
+      : DCA1000_DEFAULT_SL_ROI;
+  const takeProfitUsd =
+    opts.takeProfitUsd != null && opts.takeProfitUsd > 0
+      ? Math.round(opts.takeProfitUsd * 100) / 100
+      : roiPctToUsd(marginUsd, tpRoi);
+  const stopLossUsd =
+    opts.stopLossUsd != null && opts.stopLossUsd > 0
+      ? Math.round(opts.stopLossUsd * 100) / 100
+      : roiPctToUsd(marginUsd, slRoi);
+  return {
+    marginUsd: Math.round(marginUsd * 100) / 100,
+    takeProfitUsd,
+    stopLossUsd,
+    takeProfitPct: tpRoi,
+    stopLossPct: slRoi,
+  };
+}
+
+/**
+ * 심볼 바스켓(합산) 익절 판정 — 고정 목표$ 기준.
+ * 바스켓 미실현 손익($) ≥ takeProfitUsd → 전량 청산.
  */
 export function shouldTriggerTakeProfit(opts: {
   /** 심볼 합산 미실현 손익($) */
   pnl: number;
-  usedMargin: number;
-  tpRoiPct: number;
+  /** 고정 익절 목표($). startLots 증거금 × ROI% 로 환산된 값 */
+  takeProfitUsd: number;
+  /** 표시용 (선택) */
+  usedMargin?: number;
+  tpRoiPct?: number;
+  /** @deprecated ROI 경로 — takeProfitUsd 없을 때만 사용 */
+  tpRoiPctLegacy?: number;
 }) {
-  const tpRoi = Math.max(0, opts.tpRoiPct);
-  const floatingRoi = mt5FloatingRoiPct(opts.pnl, opts.usedMargin);
-  const tpMoney =
-    opts.usedMargin > 0
-      ? Math.round(opts.usedMargin * (tpRoi / 100) * 100) / 100
-      : 0;
-  const hit =
-    tpRoi > 0 &&
-    opts.usedMargin > 0 &&
-    (floatingRoi >= tpRoi || opts.pnl >= tpMoney);
+  let tpMoney = Math.max(0, opts.takeProfitUsd);
+  if (!(tpMoney > 0) && opts.usedMargin != null && (opts.tpRoiPct ?? opts.tpRoiPctLegacy)) {
+    tpMoney = roiPctToUsd(
+      opts.usedMargin,
+      opts.tpRoiPct ?? opts.tpRoiPctLegacy ?? 0,
+    );
+  }
+  const floatingRoi = mt5FloatingRoiPct(opts.pnl, opts.usedMargin ?? 0);
+  const tpRoi = opts.tpRoiPct ?? opts.tpRoiPctLegacy ?? 0;
+  const hit = tpMoney > 0 && opts.pnl >= tpMoney;
   return { hit, floatingRoi, tpMoney, tpRoi };
+}
+
+/** 바스켓 미실현 손익($) ≤ -stopLossUsd → 전량 손절 */
+export function shouldTriggerStopLossUsd(opts: {
+  pnl: number;
+  stopLossUsd: number;
+}) {
+  const sl = Math.max(0, opts.stopLossUsd);
+  return { hit: sl > 0 && opts.pnl <= -sl, stopLossUsd: sl };
+}
+
+/**
+ * 물타기 회차 필요 손실$ = 해당 회차 로트 증거금 × (drop ROI%/100).
+ * 표 drop 은 첫 진입 대비 절대 ROI였으므로, 동일 숫자를 $로 환산.
+ */
+export function triggerDropUsd(opts: {
+  levelIndex: number;
+  levels?: Dca1000Level[];
+  symbol: string;
+  lotsAtLevel: number;
+  avgPrice: number;
+  brokerLeverage?: number;
+}) {
+  const dropRoi = triggerDropRoi(opts.levelIndex, opts.levels);
+  if (!(dropRoi > 0) || !(opts.lotsAtLevel > 0)) return 0;
+  const margin = mt5UsedMargin({
+    symbol: opts.symbol,
+    lots: opts.lotsAtLevel,
+    avgPrice: Math.max(0, opts.avgPrice),
+    brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
+  });
+  return roiPctToUsd(margin, dropRoi);
+}
+
+/**
+ * 물타기 트리거($): max(바스켓 손실$, 가격역행×증거금 환산$) ≥ needUsd
+ * 기존 max(lossRoi, adverseRoiPrice) ≥ dropRoi 와 동일 구조의 달러판.
+ */
+export function shouldTriggerDcaUsd(opts: {
+  pnl: number;
+  usedMargin: number;
+  /** 첫 진입 대비 동일호가 역행 % */
+  adversePct: number;
+  brokerLeverage?: number;
+  needUsd: number;
+}) {
+  const lev = Math.max(1, opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT);
+  const lossUsd = Math.max(0, -opts.pnl);
+  const adverseUsdFromPrice =
+    opts.usedMargin > 0
+      ? Math.round(opts.usedMargin * ((opts.adversePct * lev) / 100) * 100) / 100
+      : 0;
+  const adverseUsd = Math.max(lossUsd, adverseUsdFromPrice);
+  const needUsd = Math.max(0, opts.needUsd);
+  return {
+    hit: needUsd > 0 && adverseUsd >= needUsd,
+    adverseUsd,
+    lossUsd,
+    adverseUsdFromPrice,
+    needUsd,
+  };
 }
 
 /**

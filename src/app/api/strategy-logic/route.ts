@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
+import { resolveTpSlUsd } from "@/lib/dca1000";
 import { isLogicId } from "@/lib/strategies";
 import {
   defaultEditorPayload,
@@ -36,6 +37,8 @@ const putSchema = z.object({
       startLots: z.number().positive().max(100).optional(),
       takeProfitPct: z.number().min(1).max(500).optional(),
       stopLossPct: z.number().min(0).max(1000).optional(),
+      takeProfitUsd: z.number().min(0.01).max(1_000_000).optional(),
+      stopLossUsd: z.number().min(0).max(1_000_000).optional(),
       levels: z.array(levelSchema).max(60).optional(),
     })
     .optional(),
@@ -72,6 +75,17 @@ export async function GET(req: Request) {
 
   const defaults = defaultEditorPayload(logicId);
   const payload = (saved?.payload as StrategyPayload | null) || defaults;
+  const startLots = payload.startLots ?? resolved.startLots ?? 0.01;
+  const tpPct = payload.takeProfitPct ?? resolved.takeProfitPct ?? defaults.takeProfitPct ?? 20;
+  const slPct = payload.stopLossPct ?? resolved.stopLossPct ?? defaults.stopLossPct ?? 225;
+  const usd = resolveTpSlUsd({
+    symbol: "XAUUSD",
+    startLots,
+    takeProfitUsd: payload.takeProfitUsd ?? resolved.takeProfitUsd,
+    stopLossUsd: payload.stopLossUsd ?? resolved.stopLossUsd,
+    takeProfitPct: tpPct,
+    stopLossPct: slPct,
+  });
 
   // levels 에디터용: 저장된 levels 없으면 resolved에서 생성
   let editorLevels = payload.levels;
@@ -92,15 +106,19 @@ export async function GET(req: Request) {
       ...payload,
       mode: isBulkLogic(logicId) ? "bulk" : "levels",
       levels: editorLevels,
-      startLots: payload.startLots ?? resolved.startLots,
-      takeProfitPct: payload.takeProfitPct ?? resolved.takeProfitPct ?? defaults.takeProfitPct,
-      stopLossPct: payload.stopLossPct ?? resolved.stopLossPct ?? defaults.stopLossPct,
+      startLots,
+      takeProfitPct: tpPct,
+      stopLossPct: slPct,
+      takeProfitUsd: usd.takeProfitUsd,
+      stopLossUsd: usd.stopLossUsd,
     },
     resolved: {
       levelCount: resolved.levels.length,
       startLots: resolved.startLots,
       takeProfitPct: resolved.takeProfitPct,
       stopLossPct: resolved.stopLossPct,
+      takeProfitUsd: usd.takeProfitUsd,
+      stopLossUsd: usd.stopLossUsd,
     },
   });
 }
@@ -141,6 +159,8 @@ export async function PUT(req: Request) {
     startLots: body.payload.startLots ?? 0.01,
     takeProfitPct: body.payload.takeProfitPct,
     stopLossPct: body.payload.stopLossPct,
+    takeProfitUsd: body.payload.takeProfitUsd,
+    stopLossUsd: body.payload.stopLossUsd,
   };
 
   if (mode === "levels") {
@@ -158,12 +178,25 @@ export async function PUT(req: Request) {
     payload.takeProfitPct = tp;
     payload.levels = levels.map((lv, i) => ({
       lots: Math.max(0.01, Math.round(lv.lots * 100) / 100),
-      // 엔진 바스켓 익절은 단일 ROI — 회차별 profit 통일
+      // 엔진 바스켓 익절은 단일 $ — 회차별 profit(레거시)도 동일 값으로 맞춤
       profit: tp,
       drop: i === 0 ? 0 : lv.drop,
     }));
     payload.startLots = payload.levels[0].lots;
   }
+
+  const usdResolved = resolveTpSlUsd({
+    symbol: "XAUUSD",
+    startLots: payload.startLots ?? 0.01,
+    takeProfitUsd: payload.takeProfitUsd,
+    stopLossUsd: payload.stopLossUsd,
+    takeProfitPct: payload.takeProfitPct ?? 20,
+    stopLossPct: payload.stopLossPct ?? 225,
+  });
+  payload.takeProfitUsd = usdResolved.takeProfitUsd;
+  payload.stopLossUsd = usdResolved.stopLossUsd;
+  payload.takeProfitPct = usdResolved.takeProfitPct;
+  payload.stopLossPct = usdResolved.stopLossPct;
 
   const row = await prisma.strategyLogic.upsert({
     where: { accountId_logicId: { accountId: account.id, logicId } },
@@ -179,28 +212,31 @@ export async function PUT(req: Request) {
     },
   });
 
-  // 이 로직을 쓰는 종목봇에 시작로트·익절·손절 동기화
-  const botPatch: {
-    startLots?: number;
-    takeProfitPct?: number;
-    stopLossPct?: number;
-    stopLossEnabled?: boolean;
-    entryCount?: number;
-  } = {};
-  if (payload.startLots != null) botPatch.startLots = payload.startLots;
-  if (payload.takeProfitPct != null && payload.takeProfitPct > 0) {
-    botPatch.takeProfitPct = payload.takeProfitPct;
-  }
-  if (payload.stopLossPct != null) {
-    botPatch.stopLossPct = payload.stopLossPct;
-    botPatch.stopLossEnabled = payload.stopLossPct > 0;
-  }
-  if (payload.levels?.length) botPatch.entryCount = payload.levels.length;
-
-  if (Object.keys(botPatch).length > 0) {
-    await prisma.symbolBot.updateMany({
-      where: { accountId: account.id, logic: logicId },
-      data: botPatch,
+  // 이 로직을 쓰는 종목봇에 시작로트·익절$·손절$ 동기화 (심볼별 $는 봇 심볼로 재계산)
+  const botsUsing = await prisma.symbolBot.findMany({
+    where: { accountId: account.id, logic: logicId },
+  });
+  for (const b of botsUsing) {
+    const perSym = resolveTpSlUsd({
+      symbol: b.symbol,
+      startLots: payload.startLots ?? b.startLots,
+      takeProfitUsd:
+        body.payload.takeProfitUsd != null ? payload.takeProfitUsd : undefined,
+      stopLossUsd: body.payload.stopLossUsd != null ? payload.stopLossUsd : undefined,
+      takeProfitPct: payload.takeProfitPct,
+      stopLossPct: payload.stopLossPct,
+    });
+    await prisma.symbolBot.update({
+      where: { id: b.id },
+      data: {
+        startLots: payload.startLots ?? b.startLots,
+        takeProfitPct: perSym.takeProfitPct,
+        stopLossPct: perSym.stopLossPct,
+        takeProfitUsd: perSym.takeProfitUsd,
+        stopLossUsd: perSym.stopLossUsd,
+        stopLossEnabled: (payload.stopLossPct ?? 0) > 0 || perSym.stopLossUsd > 0,
+        ...(payload.levels?.length ? { entryCount: payload.levels.length } : {}),
+      },
     });
   }
 

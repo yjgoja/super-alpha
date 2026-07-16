@@ -80,37 +80,37 @@ export const LOGIC_OPTIONS = [
   {
     id: "dca_1000",
     name: "1000차 DCA",
-    desc: "물타기·익절 = MT5 증거금 ROI · 손절 = 표 ROI÷20",
+    desc: "익절/손절/물타기 = 바스켓 손익$ (시작로트 증거금×ROI% 환산)",
   },
   {
     id: "martin_9",
     name: "마틴게일 9차",
-    desc: "단계별 로트 증가 · 물타기 drop = ROI%",
+    desc: "단계별 로트 증가 · 익절/손절/물타기 = 손익$",
   },
   {
     id: "martin_10",
     name: "마틴게일 10차",
-    desc: "단계별 로트 증가 · 물타기 drop = ROI%",
+    desc: "단계별 로트 증가 · 익절/손절/물타기 = 손익$",
   },
   {
     id: "martin_11",
     name: "마틴게일 11차",
-    desc: "단계별 로트 증가 · 물타기 drop = ROI%",
+    desc: "단계별 로트 증가 · 익절/손절/물타기 = 손익$",
   },
   {
     id: "martin_12",
     name: "마틴게일 12차",
-    desc: "단계별 로트 증가 · 물타기 drop = ROI%",
+    desc: "단계별 로트 증가 · 익절/손절/물타기 = 손익$",
   },
   {
     id: "dubai_bruno_313",
     name: "두바이부르노 313차",
-    desc: "313차 표 · 물타기 drop = MT5 증거금 ROI%",
+    desc: "313차 표 · 익절/손절/물타기 = 손익$",
   },
   {
     id: "custom",
     name: "커스텀 전략",
-    desc: "회차별 계약수·물타기·익절을 직접 편집",
+    desc: "회차별 계약수·물타기$·익절$를 직접 편집",
   },
 ] as const;
 

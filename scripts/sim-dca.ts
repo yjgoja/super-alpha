@@ -1,15 +1,15 @@
 /**
- * Simulate table-DCA decision for an underwater basket (no live orders).
- * Proves engine thresholds fire for the user's screenshot losses.
+ * Simulate table-DCA decision with dollar adverse thresholds.
+ * Run: npx tsx scripts/sim-dca.ts
  */
 import {
   mt5UsedMargin,
-  mt5FloatingRoiPct,
-  mt5DcaAdverseRoi,
-  triggerDropRoi,
+  shouldTriggerDcaUsd,
+  triggerDropUsd,
   DCA1000_LEVELS,
   MT5_BROKER_LEVERAGE_DEFAULT,
   lotsFromSize,
+  mt5DcaAdversePct,
 } from "../src/lib/dca1000";
 
 type SimPos = {
@@ -29,34 +29,48 @@ function simulateDca(pos: SimPos, startLots = 1) {
     avgPrice: pos.entry,
     brokerLeverage: lev,
   });
-  const lossRoi = Math.max(0, -mt5FloatingRoiPct(pos.pnl, margin));
-  const advPx = mt5DcaAdverseRoi("BUY", pos.entry, pos.bid, pos.ask, lev);
-  const adverseRoi = Math.max(lossRoi, advPx);
+  const adversePct = mt5DcaAdversePct("BUY", pos.entry, pos.bid, pos.ask);
 
-  const orders: { level: number; dropRoi: number; lots: number }[] = [];
-  let filled = 0; // currently only L0
+  const orders: { level: number; needUsd: number; lots: number }[] = [];
+  let filled = 0;
   let actions = 0;
   const maxPerTick = 8;
   while (filled + 1 < DCA1000_LEVELS.length && actions < maxPerTick) {
     const next = filled + 1;
-    const needRoi = triggerDropRoi(next, DCA1000_LEVELS);
-    if (adverseRoi < needRoi) break;
-    const size = DCA1000_LEVELS[next]?.size ?? 10;
-    const lots = lotsFromSize(size, startLots);
-    orders.push({ level: next, dropRoi: needRoi, lots });
+    const lots = lotsFromSize(DCA1000_LEVELS[next]?.size ?? 10, startLots);
+    const needUsd = triggerDropUsd({
+      levelIndex: next,
+      levels: DCA1000_LEVELS,
+      symbol: pos.symbol,
+      lotsAtLevel: lots,
+      avgPrice: pos.entry,
+      brokerLeverage: lev,
+    });
+    const hit = shouldTriggerDcaUsd({
+      pnl: pos.pnl,
+      usedMargin: margin,
+      adversePct,
+      brokerLeverage: lev,
+      needUsd,
+    });
+    if (!hit.hit) break;
+    orders.push({ level: next, needUsd, lots });
     filled = next;
     actions += 1;
   }
   return {
     symbol: pos.symbol,
-    adverseRoi: +adverseRoi.toFixed(2),
-    firstNeed: triggerDropRoi(1, DCA1000_LEVELS),
+    adversePct: +adversePct.toFixed(4),
+    firstNeedUsd: triggerDropUsd({
+      levelIndex: 1,
+      levels: DCA1000_LEVELS,
+      symbol: pos.symbol,
+      lotsAtLevel: lotsFromSize(10, startLots),
+      avgPrice: pos.entry,
+      brokerLeverage: lev,
+    }),
     wouldEnterDca: orders.length > 0,
     ordersThisTick: orders,
-    nextDropAfter:
-      filled + 1 < DCA1000_LEVELS.length
-        ? triggerDropRoi(filled + 1, DCA1000_LEVELS)
-        : null,
   };
 }
 
@@ -92,4 +106,4 @@ for (const c of cases) {
 }
 
 if (fail) process.exit(1);
-console.log("\nSIM DCA ALL PASSED — underwater 1-lot positions would DCA immediately");
+console.log("\nSIM DCA ALL PASSED — underwater 1-lot positions DCA on $ thresholds");

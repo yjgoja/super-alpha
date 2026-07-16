@@ -70,7 +70,7 @@ model StrategyLogic {
   /// dca_1000 | dubai_bruno_313 | martin_9..12 | custom
   logicId   String
   name      String?
-  /// { mode, leverageBase, startLots?, takeProfitPct?, stopLossPct?, levels?: [{lots,profit,drop}] }
+  /// { mode, leverageBase, startLots?, takeProfitPct?, stopLossPct?, takeProfitUsd?, stopLossUsd?, levels?: [{lots,profit,drop}] }
   payload   Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -92,9 +92,13 @@ model SymbolBot {
   entryMultiplier  Float   @default(2)
   entryIntervalPct Float   @default(5)
   takeProfitPct    Float   @default(20)
+  /// 고정 익절 목표($). 0이면 startLots 증거금 × takeProfitPct/100
+  takeProfitUsd    Float   @default(0)
   startLots        Float   @default(0.01)
   repeatEnabled    Boolean @default(true)
   stopLossPct      Float   @default(225)
+  /// 고정 손절 한도($). 0이면 startLots 증거금 × stopLossPct/100
+  stopLossUsd      Float   @default(0)
   stopLossEnabled  Boolean @default(true)
   stopOnSl         Boolean @default(true)
   createdAt        DateTime @default(now())

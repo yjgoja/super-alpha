@@ -1,16 +1,17 @@
 import {
   mt5DcaAdversePct,
-  mt5DcaAdverseRoi,
   mt5EntryQuote,
   mt5FloatingRoiPct,
   mt5PnlForTakeProfit,
   mt5ProfitPct,
-  mt5TpMoneyTarget,
   mt5UsedMargin,
-  roiToPricePct,
+  resolveTpSlUsd,
+  roiPctToUsd,
+  shouldTriggerDcaUsd,
+  shouldTriggerStopLossUsd,
   shouldTriggerTakeProfit,
   spreadPct,
-  triggerDropRoi,
+  triggerDropUsd,
   MT5_BROKER_LEVERAGE_DEFAULT,
 } from "./dca1000";
 import {
@@ -75,12 +76,16 @@ type BotCfg = {
   entryMultiplier: number;
   entryIntervalPct: number;
   takeProfitPct: number;
+  /** 고정 익절 목표($). 0이면 startLots 증거금×ROI%로 환산 */
+  takeProfitUsd: number;
   startLots: number;
   repeatEnabled: boolean;
   stopLossPct: number;
+  /** 고정 손절 한도($). 0이면 startLots 증거금×ROI%로 환산 */
+  stopLossUsd: number;
   stopLossEnabled: boolean;
   stopOnSl: boolean;
-  /** MT5 계좌 레버 — 익절 ROI = 손익/사용증거금 */
+  /** MT5 계좌 레버 — 시작로트 증거금/$ 환산 */
   brokerLeverage?: number;
 };
 
@@ -217,7 +222,7 @@ async function closeBasketTp(opts: {
       price: direction === "BUY" ? bid : ask,
       pnl: pnlSum,
       kind: "TP",
-      note: `${logic}|roi=${floatingRoi.toFixed(1)}>=${tpRoi}|pnl=${pnlSum.toFixed(2)}/tp$${tpMoney}|legs=${opts.ourPositions.length || legs.length}`,
+      note: `${logic}|pnl=${pnlSum.toFixed(2)}>=tp$${tpMoney}|roi=${floatingRoi.toFixed(1)}~${tpRoi}|legs=${opts.ourPositions.length || legs.length}`,
     },
   });
   await prisma.brokerAccount.update({
@@ -421,32 +426,39 @@ async function runSymbolTableDca(
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
   const adverse = mt5DcaAdversePct(direction, basket.firstEntryPrice, price.bid, price.ask);
 
-  // 익절: SymbolBot 우선, StrategyLogic 오버라이드 보조 (양방향 동기화됨)
-  const tpRoi =
+  // 익절/손절$: SymbolBot 고정$ 우선, 없으면 startLots 증거금×구 ROI%
+  const tpRoiFallback =
     cfg.takeProfitPct > 0
       ? cfg.takeProfitPct
       : resolved.takeProfitPct && resolved.takeProfitPct > 0
         ? resolved.takeProfitPct
         : levels[basket.filledLevel]?.profit ?? 20;
+  const slRoiFallback =
+    cfg.stopLossPct > 0
+      ? cfg.stopLossPct
+      : resolved.stopLossPct && resolved.stopLossPct > 0
+        ? resolved.stopLossPct
+        : 225;
   const brokerLev = Math.max(
     1,
     cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
   );
+  const fixedUsd = resolveTpSlUsd({
+    symbol,
+    startLots: cfg.startLots,
+    takeProfitUsd: cfg.takeProfitUsd,
+    stopLossUsd: cfg.stopLossUsd,
+    takeProfitPct: tpRoiFallback,
+    stopLossPct: slRoiFallback,
+    brokerLeverage: brokerLev,
+    refMid: avg > 0 ? avg : (price.bid + price.ask) / 2,
+  });
   const lotsForTp = posVol > 0 ? posVol : legs.reduce((s, l) => s + l.lots, 0);
   const usedMargin = mt5UsedMargin({
     symbol,
     lots: lotsForTp,
     avgPrice: avg,
     brokerLeverage: brokerLev,
-  });
-  const tpMoney = mt5TpMoneyTarget({
-    symbol,
-    lots: lotsForTp,
-    avgPrice: avg,
-    tpRoiPct: tpRoi,
-    brokerLeverage: brokerLev,
-    bid: price.bid,
-    ask: price.ask,
   });
   const pnlLegs =
     ourPositions.length > 0
@@ -463,21 +475,18 @@ async function runSymbolTableDca(
   const floatingRoi = mt5FloatingRoiPct(tpPnl.pnl, usedMargin);
   const tpDecision = shouldTriggerTakeProfit({
     pnl: tpPnl.pnl,
+    takeProfitUsd: fixedUsd.takeProfitUsd,
     usedMargin,
-    tpRoiPct: tpRoi,
+    tpRoiPct: fixedUsd.takeProfitPct,
   });
-  // 물타기: 손실 ROI%(손익/증거금) 또는 가격역행×계좌레버 — 표 drop ROI와 비교
-  const adverseRoiPrice = mt5DcaAdverseRoi(
-    direction,
-    basket.firstEntryPrice,
-    price.bid,
-    price.ask,
-    brokerLev,
-  );
-  const lossRoi = Math.max(0, -floatingRoi);
-  const adverseRoi = Math.max(lossRoi, adverseRoiPrice);
+  const dcaEvalBase = {
+    pnl: tpPnl.pnl,
+    usedMargin,
+    adversePct: adverse,
+    brokerLeverage: brokerLev,
+  };
 
-  // 익절 우선: 심볼 합산 ROI/목표$ → 전량 청산 → 재진입 (물타기·손절보다 먼저)
+  // 익절 우선: 바스켓 합산$ ≥ 고정 익절$ → 전량 청산 → 재진입
   if (tpDecision.hit) {
     const tpClose = await closeBasketTp({
       accountId,
@@ -522,19 +531,20 @@ async function runSymbolTableDca(
       quotePnl: tpPnl.quotePnl,
       spreadCost: tpPnl.spreadCost,
       profit,
-      profitRoi: profit * 20,
       reentered: tpClose.reentered,
       reentryError: tpClose.error,
       spreadPct: spr,
     };
   }
 
-  // 손절: ROI → 가격% (금액 손절은 별도; 기존과 동일)
-  const slPricePct =
-    cfg.stopLossEnabled && cfg.stopLossPct > 0 ? roiToPricePct(cfg.stopLossPct) : 0;
-  if (slPricePct > 0 && profit <= -slPricePct) {
+  // 손절: 바스켓 합산$ ≤ -고정 손절$
+  const slDecision = shouldTriggerStopLossUsd({
+    pnl: tpPnl.pnl,
+    stopLossUsd: cfg.stopLossEnabled ? fixedUsd.stopLossUsd : 0,
+  });
+  if (slDecision.hit) {
     await closePositionsBySymbol(metaId, symbol);
-    const pnlSum = floatingPnl;
+    const pnlSum = tpPnl.pnl;
     await prisma.basket.update({
       where: { id: basket.id },
       data: {
@@ -553,7 +563,7 @@ async function runSymbolTableDca(
         price: direction === "BUY" ? price.bid : price.ask,
         pnl: pnlSum,
         kind: "SL",
-        note: `${logic}|roi=${(profit * 20).toFixed(1)}`,
+        note: `${logic}|pnl=${pnlSum.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
       },
     });
     await prisma.brokerAccount.update({
@@ -571,8 +581,8 @@ async function runSymbolTableDca(
       action: "sl",
       symbol,
       profit,
-      profitRoi: profit * 20,
-      floatingPnl,
+      floatingPnl: pnlSum,
+      stopLossUsd: slDecision.stopLossUsd,
       spreadPct: spr,
     };
   }
@@ -580,13 +590,22 @@ async function runSymbolTableDca(
   let filled = basket.filledLevel;
   let actions = 0;
   const maxPerTick = 8;
+  let lastDca: ReturnType<typeof shouldTriggerDcaUsd> | null = null;
   while (filled + 1 < maxLevels && actions < maxPerTick) {
     const next = filled + 1;
-    // 표 drop = ROI% — MT5 증거금 손실 ROI와 비교 (익절과 동일 정의)
-    const needRoi = triggerDropRoi(next, levels);
-    if (adverseRoi < needRoi) break;
-
     const lots = levelLots(next);
+    const needUsd = triggerDropUsd({
+      levelIndex: next,
+      levels,
+      symbol,
+      lotsAtLevel: lots,
+      avgPrice: avg > 0 ? avg : basket.firstEntryPrice,
+      brokerLeverage: brokerLev,
+    });
+    const dcaHit = shouldTriggerDcaUsd({ ...dcaEvalBase, needUsd });
+    lastDca = dcaHit;
+    if (!dcaHit.hit) break;
+
     const order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
@@ -617,7 +636,7 @@ async function runSymbolTableDca(
         price: fillPrice,
         kind: "DCA",
         level: next,
-        note: `${logic}|dropRoi=${needRoi}|lossRoi=${lossRoi.toFixed(1)}|advPx=${adverseRoiPrice.toFixed(1)}|lev=${brokerLev}`,
+        note: `${logic}|need$${needUsd}|adv$${dcaHit.adverseUsd.toFixed(2)}|loss$${dcaHit.lossUsd.toFixed(2)}|lev=${brokerLev}`,
       },
     });
     filled = next;
@@ -639,10 +658,22 @@ async function runSymbolTableDca(
       filled,
       actions,
       adverse,
-      adverseRoi,
+      adverseUsd: lastDca?.adverseUsd,
       spreadPct: spr,
     };
   }
+
+  const nextNeedUsd =
+    filled + 1 < maxLevels
+      ? triggerDropUsd({
+          levelIndex: filled + 1,
+          levels,
+          symbol,
+          lotsAtLevel: levelLots(filled + 1),
+          avgPrice: avg > 0 ? avg : basket.firstEntryPrice,
+          brokerLeverage: brokerLev,
+        })
+      : null;
 
   await prisma.basket.update({
     where: { id: basket.id },
@@ -653,16 +684,20 @@ async function runSymbolTableDca(
     action: "hold",
     symbol,
     profit,
-    profitRoi: profit * 20,
     floatingPnl: tpPnl.pnl,
+    floatingRoi,
     apiProfit: tpPnl.apiProfit,
     quotePnl: tpPnl.quotePnl,
     spreadCost: tpPnl.spreadCost,
-    tpMoney,
-    tpRoi,
+    tpMoney: fixedUsd.takeProfitUsd,
+    stopLossUsd: fixedUsd.stopLossUsd,
+    tpRoi: fixedUsd.takeProfitPct,
     adverse,
-    adverseRoi,
-    nextDropRoi: filled + 1 < maxLevels ? triggerDropRoi(filled + 1, levels) : null,
+    adverseUsd: lastDca?.adverseUsd ?? shouldTriggerDcaUsd({
+      ...dcaEvalBase,
+      needUsd: nextNeedUsd ?? 0,
+    }).adverseUsd,
+    nextDropUsd: nextNeedUsd,
     spreadPct: spr,
   };
 }
@@ -786,8 +821,17 @@ async function runSymbolDca(
   const profit = pnlPct(direction, avg, price.bid, price.ask);
   const adverse = adversePct(direction, basket.firstEntryPrice, price.bid, price.ask);
   const nextLevel = basket.filledLevel + 1;
-  const tpRoi = cfg.takeProfitPct > 0 ? cfg.takeProfitPct : 20;
   const brokerLev = Math.max(1, cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT);
+  const fixedUsd = resolveTpSlUsd({
+    symbol,
+    startLots: cfg.startLots,
+    takeProfitUsd: cfg.takeProfitUsd,
+    stopLossUsd: cfg.stopLossUsd,
+    takeProfitPct: cfg.takeProfitPct > 0 ? cfg.takeProfitPct : 20,
+    stopLossPct: cfg.stopLossPct > 0 ? cfg.stopLossPct : 225,
+    brokerLeverage: brokerLev,
+    refMid: avg > 0 ? avg : (price.bid + price.ask) / 2,
+  });
   const lotsForTp = posVol > 0 ? posVol : legs.reduce((s, l) => s + l.lots, 0);
   const usedMargin = mt5UsedMargin({
     symbol,
@@ -810,18 +854,10 @@ async function runSymbolDca(
   const floatingRoi = mt5FloatingRoiPct(tpPnl.pnl, usedMargin);
   const tpDecision = shouldTriggerTakeProfit({
     pnl: tpPnl.pnl,
+    takeProfitUsd: fixedUsd.takeProfitUsd,
     usedMargin,
-    tpRoiPct: tpRoi,
+    tpRoiPct: fixedUsd.takeProfitPct,
   });
-  const adverseRoiPrice = mt5DcaAdverseRoi(
-    direction,
-    basket.firstEntryPrice,
-    price.bid,
-    price.ask,
-    brokerLev,
-  );
-  const lossRoi = Math.max(0, -floatingRoi);
-  const adverseRoi = Math.max(lossRoi, adverseRoiPrice);
 
   if (tpDecision.hit) {
     const tpClose = await closeBasketTp({
@@ -861,47 +897,72 @@ async function runSymbolDca(
     };
   }
 
-  if (cfg.stopLossEnabled && nextLevel >= maxLevels) {
-    // entryIntervalPct · stopLossPct 도 코인 ROI% 로 취급 → 차트% 환산
-    const slTrigger =
-      roiToPricePct((cfg.entryIntervalPct || 5) * (maxLevels - 1)) +
-      roiToPricePct(cfg.stopLossPct || 0);
-    if (adverse >= slTrigger) {
-      await closePositionsBySymbol(metaId, symbol);
-      await prisma.basket.update({
-        where: { id: basket.id },
-        data: { status: "closed", lastExitAt: new Date() },
+  const slDecision = shouldTriggerStopLossUsd({
+    pnl: tpPnl.pnl,
+    stopLossUsd: cfg.stopLossEnabled ? fixedUsd.stopLossUsd : 0,
+  });
+  if (slDecision.hit) {
+    await closePositionsBySymbol(metaId, symbol);
+    await prisma.basket.update({
+      where: { id: basket.id },
+      data: {
+        status: "closed",
+        realizedPnl: tpPnl.pnl,
+        lastExitAt: new Date(),
+        unrealizedPnl: 0,
+      },
+    });
+    await prisma.brokerAccount.update({
+      where: { id: accountId },
+      data: { slCount: { increment: 1 } },
+    });
+    await prisma.fill.create({
+      data: {
+        accountId,
+        symbol,
+        side: direction === "BUY" ? "SELL" : "BUY",
+        lots: legs.reduce((s, l) => s + l.lots, 0),
+        price: direction === "BUY" ? price.bid : price.ask,
+        pnl: tpPnl.pnl,
+        kind: "SL",
+        note: `${logic}|pnl=${tpPnl.pnl.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
+      },
+    });
+    if (cfg.stopOnSl) {
+      await prisma.symbolBot.updateMany({
+        where: { accountId, symbol },
+        data: { enabled: false },
       });
-      await prisma.brokerAccount.update({
-        where: { id: accountId },
-        data: { slCount: { increment: 1 } },
-      });
-      await prisma.fill.create({
-        data: {
-          accountId,
-          symbol,
-          side: direction === "BUY" ? "SELL" : "BUY",
-          lots: legs.reduce((s, l) => s + l.lots, 0),
-          price: direction === "BUY" ? price.bid : price.ask,
-          kind: "SL",
-          note: logic,
-        },
-      });
-      if (cfg.stopOnSl) {
-        await prisma.symbolBot.updateMany({
-          where: { accountId, symbol },
-          data: { enabled: false },
-        });
-      }
-      return { ok: true as const, action: "sl", symbol };
     }
+    return {
+      ok: true as const,
+      action: "sl",
+      symbol,
+      stopLossUsd: slDecision.stopLossUsd,
+      floatingPnl: tpPnl.pnl,
+    };
   }
 
   if (nextLevel < maxLevels) {
-    // 물타기: 익절과 동일 — 증거금 손실 ROI / 가격역행×계좌레버 vs 간격 ROI%
+    const lots = lotsAtLevel(cfg.startLots, cfg.entryMultiplier, nextLevel, logic);
     const needRoi = (cfg.entryIntervalPct || 5) * nextLevel;
-    if (adverseRoi >= needRoi) {
-      const lots = lotsAtLevel(cfg.startLots, cfg.entryMultiplier, nextLevel, logic);
+    const needUsd = roiPctToUsd(
+      mt5UsedMargin({
+        symbol,
+        lots,
+        avgPrice: avg > 0 ? avg : basket.firstEntryPrice,
+        brokerLeverage: brokerLev,
+      }),
+      needRoi,
+    );
+    const dcaHit = shouldTriggerDcaUsd({
+      pnl: tpPnl.pnl,
+      usedMargin,
+      adversePct: adverse,
+      brokerLeverage: brokerLev,
+      needUsd,
+    });
+    if (dcaHit.hit) {
       const order = await placeMarketOrder({
         metaApiAccountId: metaId,
         symbol,
@@ -927,7 +988,7 @@ async function runSymbolDca(
           price: fillPrice,
           kind: "DCA",
           level: nextLevel,
-          note: `${logic}|needRoi=${needRoi}|lossRoi=${lossRoi.toFixed(1)}|lev=${brokerLev}`,
+          note: `${logic}|need$${needUsd}|adv$${dcaHit.adverseUsd.toFixed(2)}|lev=${brokerLev}`,
         },
       });
       return { ok: true as const, action: "dca", level: nextLevel, symbol };
@@ -938,7 +999,16 @@ async function runSymbolDca(
     where: { id: basket.id },
     data: { unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0) },
   });
-  return { ok: true as const, action: "hold", symbol, profit, adverse };
+  return {
+    ok: true as const,
+    action: "hold",
+    symbol,
+    profit,
+    adverse,
+    floatingRoi,
+    tpMoney: fixedUsd.takeProfitUsd,
+    stopLossUsd: fixedUsd.stopLossUsd,
+  };
 }
 
 const tickLocks = new Set<string>();
@@ -1056,9 +1126,11 @@ async function runDcaTickInner(accountId: string) {
     entryMultiplier: b.entryMultiplier,
     entryIntervalPct: b.entryIntervalPct,
     takeProfitPct: b.takeProfitPct,
+    takeProfitUsd: b.takeProfitUsd ?? 0,
     startLots: b.startLots,
     repeatEnabled: b.repeatEnabled,
     stopLossPct: b.stopLossPct,
+    stopLossUsd: b.stopLossUsd ?? 0,
     stopLossEnabled: b.stopLossEnabled,
     stopOnSl: b.stopOnSl,
     brokerLeverage: snap.leverage > 0 ? snap.leverage : MT5_BROKER_LEVERAGE_DEFAULT,
@@ -1075,9 +1147,11 @@ async function runDcaTickInner(accountId: string) {
         entryMultiplier: c.entryMultiplier,
         entryIntervalPct: c.entryIntervalPct,
         takeProfitPct: c.takeProfitPct,
+        takeProfitUsd: 0,
         startLots: c.startLots || c.baseLots,
         repeatEnabled: c.repeatEnabled,
         stopLossPct: c.stopLossPct,
+        stopLossUsd: 0,
         stopLossEnabled: c.stopLossEnabled,
         stopOnSl: c.stopOnSl,
         brokerLeverage: snap.leverage > 0 ? snap.leverage : MT5_BROKER_LEVERAGE_DEFAULT,

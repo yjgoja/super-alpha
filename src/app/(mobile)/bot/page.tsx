@@ -5,10 +5,8 @@ import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
   DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
-  MT5_REF_MID,
   calcDca1000Defense,
-  mt5TpMoneyTarget,
-  roiToPricePct,
+  resolveTpSlUsd,
 } from "@/lib/dca1000";
 import type { Dca1000Level } from "@/lib/dca1000";
 import {
@@ -20,7 +18,7 @@ import {
 } from "@/lib/table-logics";
 import { brokerGateRedirect } from "@/lib/post-login";
 
-/** 표 기본 익절 ROI% (코인선물 profit 컬럼) */
+/** 표 기본 익절 ROI% — $ 환산용 (코인: 마진×ROI%) */
 const DEFAULT_TP_ROI = 20;
 
 type Bot = {
@@ -33,9 +31,11 @@ type Bot = {
   entryMultiplier: number;
   entryIntervalPct: number;
   takeProfitPct: number;
+  takeProfitUsd: number;
   startLots: number;
   repeatEnabled: boolean;
   stopLossPct: number;
+  stopLossUsd: number;
   stopLossEnabled: boolean;
   stopOnSl: boolean;
 };
@@ -57,31 +57,27 @@ function fmtNum(n: number, d = 2) {
 
 function DefenseCard({
   defense,
+  takeProfitUsd,
+  stopLossUsd,
 }: {
   defense: ReturnType<typeof calcDca1000Defense>;
+  takeProfitUsd: number;
+  stopLossUsd: number;
 }) {
   return (
     <div className="m-calc-box">
       <div className="m-calc-title">계산결과</div>
       <div className="m-calc-row">
-        <span>차트 방어폭 (평균)</span>
-        <strong className="c-roi">{fmtNum(defense.roiDefensePct)} %</strong>
+        <span>익절 (고정$)</span>
+        <strong style={{ color: "var(--ok, #0a7)" }}>+${fmtNum(takeProfitUsd)}</strong>
       </div>
       <div className="m-calc-row">
-        <span>Buy 손절 (차트↓)</span>
-        <strong className="c-long">{fmtNum(defense.spotLongPct)} %</strong>
-      </div>
-      <div className="m-calc-row">
-        <span>Sell 손절 (차트↑)</span>
-        <strong className="c-short">{fmtNum(defense.spotShortPct)} %</strong>
-      </div>
-      <div className="m-calc-row">
-        <span>예상 손절금 (MT5·전체 회차)</span>
-        <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
+        <span>손절 (고정$)</span>
+        <strong style={{ color: "var(--danger)" }}>-${fmtNum(stopLossUsd)}</strong>
       </div>
       <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-        <span>손절 차트% (ROI÷20)</span>
-        <strong>{fmtNum(defense.slTriggerPricePct)} %</strong>
+        <span>전체 회차 소진 시 참고 손절금</span>
+        <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
       </div>
     </div>
   );
@@ -136,27 +132,24 @@ export default function BotPage() {
     return previewMartinLots(start, mult, n);
   }, [draft.logic, draft.startLots, draft.entryMultiplier]);
 
-  const tpMoneyPreview = useMemo(() => {
+  const usdPreview = useMemo(() => {
     if (!edit) return null;
-    const lots = Number(draft.startLots ?? 0.01);
-    const tpRoi = Number(draft.takeProfitPct ?? DEFAULT_TP_ROI);
-    const sym = edit.toUpperCase();
-    const mid =
-      MT5_REF_MID[
-        sym.includes("XAU") || sym === "GOLD"
-          ? "XAUUSD"
-          : sym.includes("EUR")
-            ? "EURUSD"
-            : sym
-      ] ?? (sym.includes("XAU") ? MT5_REF_MID.XAUUSD : MT5_REF_MID.EURUSD);
-    return mt5TpMoneyTarget({
+    return resolveTpSlUsd({
       symbol: edit,
-      lots,
-      avgPrice: mid,
-      tpRoiPct: tpRoi,
-      brokerLeverage: 500,
+      startLots: Number(draft.startLots ?? 0.01),
+      takeProfitUsd: draft.takeProfitUsd,
+      stopLossUsd: draft.stopLossUsd,
+      takeProfitPct: Number(draft.takeProfitPct ?? DEFAULT_TP_ROI),
+      stopLossPct: Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
     });
-  }, [edit, draft.startLots, draft.takeProfitPct]);
+  }, [
+    edit,
+    draft.startLots,
+    draft.takeProfitUsd,
+    draft.stopLossUsd,
+    draft.takeProfitPct,
+    draft.stopLossPct,
+  ]);
 
   const load = useCallback(async () => {
     const [botsRes, statsRes] = await Promise.all([
@@ -235,9 +228,9 @@ export default function BotPage() {
     setMsg("");
     const logic = (draft.logic as string) || "dca_1000";
     const meta = tableLogicMeta(logic);
-    const sl = Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
-    const tp = Number(draft.takeProfitPct ?? DEFAULT_TP_ROI);
     const lots = Number(draft.startLots ?? 0.01);
+    const tpUsd = Number(draft.takeProfitUsd ?? 0);
+    const slUsd = Number(draft.stopLossUsd ?? 0);
     const mult = isMartinLogic(logic)
       ? Math.max(1.01, Number(draft.entryMultiplier ?? 2))
       : 1;
@@ -246,16 +239,24 @@ export default function BotPage() {
       setMsg("시작 로트는 0.01~100 사이여야 합니다.");
       return;
     }
-    if (!(tp >= 1) || tp > 500) {
+    if (!(tpUsd >= 0.01) || tpUsd > 1_000_000) {
       setBusy(false);
-      setMsg("익절 ROI%는 1~500 사이여야 합니다.");
+      setMsg("익절 $는 0.01~1000000 사이여야 합니다.");
       return;
     }
-    if (!(sl >= 0) || sl > 1000) {
+    if (!(slUsd >= 0) || slUsd > 1_000_000) {
       setBusy(false);
-      setMsg("손절 ROI%는 0~1000 사이여야 합니다.");
+      setMsg("손절 $는 0~1000000 사이여야 합니다.");
       return;
     }
+    const derived = resolveTpSlUsd({
+      symbol: edit,
+      startLots: lots,
+      takeProfitUsd: tpUsd,
+      stopLossUsd: slUsd,
+      takeProfitPct: Number(draft.takeProfitPct ?? DEFAULT_TP_ROI),
+      stopLossPct: Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
+    });
     const res = await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -264,9 +265,11 @@ export default function BotPage() {
         logic,
         direction: draft.direction,
         startLots: Math.max(0.01, Math.round(lots * 100) / 100),
-        takeProfitPct: tp,
-        stopLossPct: sl,
-        stopLossEnabled: sl > 0 && draft.stopLossEnabled !== false,
+        takeProfitUsd: derived.takeProfitUsd,
+        stopLossUsd: derived.stopLossUsd,
+        takeProfitPct: derived.takeProfitPct,
+        stopLossPct: derived.stopLossPct,
+        stopLossEnabled: derived.stopLossUsd > 0 && draft.stopLossEnabled !== false,
         repeatEnabled: draft.repeatEnabled,
         stopOnSl: draft.stopOnSl,
         entryCount: meta.count,
@@ -301,8 +304,20 @@ export default function BotPage() {
         entryCount: meta.count,
         entryMultiplier: 1,
         startLots: 0.01,
-        takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
-        stopLossPct: DCA1000_DEFAULT_SL_ROI,
+        ...(() => {
+          const usd = resolveTpSlUsd({
+            symbol: addSymbol,
+            startLots: 0.01,
+            takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
+            stopLossPct: DCA1000_DEFAULT_SL_ROI,
+          });
+          return {
+            takeProfitPct: usd.takeProfitPct,
+            stopLossPct: usd.stopLossPct,
+            takeProfitUsd: usd.takeProfitUsd,
+            stopLossUsd: usd.stopLossUsd,
+          };
+        })(),
         stopLossEnabled: true,
         repeatEnabled: true,
         stopOnSl: true,
@@ -318,10 +333,23 @@ export default function BotPage() {
     const logic = bot.logic || "dca_1000";
     const meta = tableLogicMeta(logic);
     const savedMult = Number(bot.entryMultiplier || 0);
+    const tpPct = bot.takeProfitPct > 5 ? bot.takeProfitPct : meta.firstTpRoi || DEFAULT_TP_ROI;
+    const slPct = bot.stopLossPct > 0 ? bot.stopLossPct : DCA1000_DEFAULT_SL_ROI;
+    const usd = resolveTpSlUsd({
+      symbol: bot.symbol,
+      startLots: bot.startLots,
+      takeProfitUsd: bot.takeProfitUsd,
+      stopLossUsd: bot.stopLossUsd,
+      takeProfitPct: tpPct,
+      stopLossPct: slPct,
+    });
     setDraft({
       logic,
       direction: bot.direction,
-      takeProfitPct: bot.takeProfitPct > 5 ? bot.takeProfitPct : meta.firstTpRoi || DEFAULT_TP_ROI,
+      takeProfitPct: tpPct,
+      stopLossPct: slPct,
+      takeProfitUsd: usd.takeProfitUsd,
+      stopLossUsd: usd.stopLossUsd,
       startLots: bot.startLots,
       entryMultiplier: isMartinLogic(logic)
         ? savedMult > 1
@@ -329,17 +357,45 @@ export default function BotPage() {
           : 2
         : 1,
       repeatEnabled: bot.repeatEnabled,
-      stopLossPct: bot.stopLossPct > 0 ? bot.stopLossPct : DCA1000_DEFAULT_SL_ROI,
-      stopLossEnabled: bot.stopLossEnabled || bot.stopLossPct > 0,
+      stopLossEnabled: bot.stopLossEnabled || usd.stopLossUsd > 0,
       stopOnSl: bot.stopOnSl,
     });
   }
 
   function scaleLots(mult: number) {
-    setDraft((d) => ({
-      ...d,
-      startLots: roundLots((d.startLots ?? 0.01) * mult),
-    }));
+    setDraft((d) => {
+      const startLots = roundLots((d.startLots ?? 0.01) * mult);
+      const usd = resolveTpSlUsd({
+        symbol: edit || "EURUSD",
+        startLots,
+        takeProfitPct: Number(d.takeProfitPct ?? DEFAULT_TP_ROI),
+        stopLossPct: Number(d.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
+      });
+      return {
+        ...d,
+        startLots,
+        takeProfitUsd: usd.takeProfitUsd,
+        stopLossUsd: usd.stopLossUsd,
+      };
+    });
+  }
+
+  function setStartLots(lots: number) {
+    setDraft((d) => {
+      const startLots = Number(lots);
+      const usd = resolveTpSlUsd({
+        symbol: edit || "EURUSD",
+        startLots,
+        takeProfitPct: Number(d.takeProfitPct ?? DEFAULT_TP_ROI),
+        stopLossPct: Number(d.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
+      });
+      return {
+        ...d,
+        startLots,
+        takeProfitUsd: usd.takeProfitUsd,
+        stopLossUsd: usd.stopLossUsd,
+      };
+    });
   }
 
   const dir = ((draft.direction as string) || "BUY") as string;
@@ -437,6 +493,29 @@ export default function BotPage() {
                             }`
                           : `${bot.startLots} lot`}
                       </div>
+                      <div style={{ fontSize: "0.78rem", marginTop: "0.2rem" }}>
+                        {(() => {
+                          const u = resolveTpSlUsd({
+                            symbol: bot.symbol,
+                            startLots: bot.startLots,
+                            takeProfitUsd: bot.takeProfitUsd,
+                            stopLossUsd: bot.stopLossUsd,
+                            takeProfitPct: bot.takeProfitPct || DEFAULT_TP_ROI,
+                            stopLossPct: bot.stopLossPct || DCA1000_DEFAULT_SL_ROI,
+                          });
+                          return (
+                            <>
+                              <span style={{ color: "var(--ok, #0a7)" }}>
+                                익절 +${fmtNum(u.takeProfitUsd)}
+                              </span>
+                              {" · "}
+                              <span style={{ color: "var(--danger)" }}>
+                                손절 -${fmtNum(u.stopLossUsd)}
+                              </span>
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
                     <button
                       type="button"
@@ -491,10 +570,20 @@ export default function BotPage() {
                           onChange={(e) => {
                             const logic = e.target.value;
                             const meta = tableLogicMeta(logic);
+                            const usd = resolveTpSlUsd({
+                              symbol: bot.symbol,
+                              startLots: Number(draft.startLots ?? bot.startLots),
+                              takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
+                              stopLossPct: Number(
+                                draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
+                              ),
+                            });
                             setDraft((d) => ({
                               ...d,
                               logic,
                               takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
+                              takeProfitUsd: usd.takeProfitUsd,
+                              stopLossUsd: usd.stopLossUsd,
                               entryMultiplier: isMartinLogic(logic) ? 2 : 1,
                             }));
                           }}
@@ -543,9 +632,7 @@ export default function BotPage() {
                           step="0.01"
                           min="0.01"
                           value={draft.startLots ?? bot.startLots}
-                          onChange={(e) =>
-                            setDraft((d) => ({ ...d, startLots: Number(e.target.value) }))
-                          }
+                          onChange={(e) => setStartLots(Number(e.target.value))}
                         />
                         <div className="m-scale-row">
                           {LOT_SCALES.map((m) => (
@@ -617,35 +704,33 @@ export default function BotPage() {
 
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem" }}>
                         <label>
-                          <span className="sa-label">익절 ROI %</span>
+                          <span className="sa-label">익절 $</span>
                           <input
                             className="sa-input"
                             type="number"
-                            step="1"
-                            min="1"
-                            max="500"
-                            value={draft.takeProfitPct ?? bot.takeProfitPct}
+                            step="0.01"
+                            min="0.01"
+                            value={draft.takeProfitUsd ?? bot.takeProfitUsd ?? ""}
                             onChange={(e) =>
                               setDraft((d) => ({
                                 ...d,
-                                takeProfitPct: Number(e.target.value),
+                                takeProfitUsd: Number(e.target.value),
                               }))
                             }
                           />
                         </label>
                         <label>
-                          <span className="sa-label">손절 ROI %</span>
+                          <span className="sa-label">손절 $</span>
                           <input
                             className="sa-input"
                             type="number"
-                            step="1"
+                            step="0.01"
                             min="0"
-                            max="1000"
-                            value={draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI}
+                            value={draft.stopLossUsd ?? bot.stopLossUsd ?? ""}
                             onChange={(e) =>
                               setDraft((d) => ({
                                 ...d,
-                                stopLossPct: Number(e.target.value),
+                                stopLossUsd: Number(e.target.value),
                                 stopLossEnabled: Number(e.target.value) > 0,
                               }))
                             }
@@ -653,26 +738,22 @@ export default function BotPage() {
                         </label>
                       </div>
                       <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                        익절·물타기 모두{" "}
-                        <strong style={{ color: "var(--ink)" }}>손익÷MT5사용증거금×100 ≥ ROI%</strong>{" "}
-                        (계좌 1:500). 목표$ ≈ (로트×계약×평단÷500)×ROI%. 손절만 전략표 ROI÷20
-                        차트%.
-                        {tpMoneyPreview != null ? (
-                          <>
-                            {" "}
-                            → 1회차 약 <strong style={{ color: "var(--ink)" }}>${fmtNum(tpMoneyPreview)}</strong>
-                          </>
-                        ) : null}
-                        . 익절 ROI {fmtNum(Number(draft.takeProfitPct ?? bot.takeProfitPct), 0)}% · 손절 ROI{" "}
-                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI), 0)}% → 차트{" "}
-                        {fmtNum(
-                          roiToPricePct(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI)),
-                          2,
-                        )}
-                        %.
+                        바스켓 미실현 손익$ 기준:{" "}
+                        <strong style={{ color: "var(--ink)" }}>
+                          익절 ≥ +${fmtNum(usdPreview?.takeProfitUsd ?? 0)} / 손절 ≤ -$
+                          {fmtNum(usdPreview?.stopLossUsd ?? 0)}
+                        </strong>
+                        . 기본값 = 시작로트 증거금(1:500) × 구 ROI%(익절{" "}
+                        {fmtNum(Number(draft.takeProfitPct ?? DEFAULT_TP_ROI), 0)}% · 손절{" "}
+                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI), 0)}%). 물타기도
+                        회차 로트 증거금 × dropROI% → $.
                       </p>
 
-                      <DefenseCard defense={defense} />
+                      <DefenseCard
+                        defense={defense}
+                        takeProfitUsd={usdPreview?.takeProfitUsd ?? 0}
+                        stopLossUsd={usdPreview?.stopLossUsd ?? 0}
+                      />
 
                       <div className="m-toggle-list">
                         <button

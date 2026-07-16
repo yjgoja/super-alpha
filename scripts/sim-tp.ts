@@ -1,11 +1,12 @@
 /**
- * Simulate symbol-basket take-profit decisions (no live orders).
- * Proves: aggregate PnL/ROI, not per-position; mixed win/loss legs; close-all+reentry signal.
+ * Simulate symbol-basket take-profit in fixed USD (no live orders).
+ * Proves: basket PnL ≥ takeProfitUsd closes all; not per-leg.
  *
  * Run: npx tsx scripts/sim-tp.ts
  */
 import {
   mt5UsedMargin,
+  resolveTpSlUsd,
   shouldTriggerTakeProfit,
   MT5_BROKER_LEVERAGE_DEFAULT,
 } from "../src/lib/dca1000";
@@ -16,7 +17,7 @@ function evalBasket(opts: {
   name: string;
   symbol: string;
   legs: Leg[];
-  tpRoiPct: number;
+  takeProfitUsd: number;
   expectHit: boolean;
 }) {
   const lots = opts.legs.reduce((s, l) => s + l.lots, 0);
@@ -31,24 +32,16 @@ function evalBasket(opts: {
   });
   const d = shouldTriggerTakeProfit({
     pnl,
+    takeProfitUsd: opts.takeProfitUsd,
     usedMargin: margin,
-    tpRoiPct: opts.tpRoiPct,
   });
 
-  // Per-position would wrongly TP if any single leg hits — we must NOT do that
-  const anyLegAloneWouldHit = opts.legs.some((leg) => {
-    const m = mt5UsedMargin({
-      symbol: opts.symbol,
-      lots: leg.lots,
-      avgPrice: leg.price,
-      brokerLeverage: MT5_BROKER_LEVERAGE_DEFAULT,
-    });
-    return shouldTriggerTakeProfit({
+  const anyLegAloneWouldHit = opts.legs.some((leg) =>
+    shouldTriggerTakeProfit({
       pnl: leg.profit,
-      usedMargin: m,
-      tpRoiPct: opts.tpRoiPct,
-    }).hit;
-  });
+      takeProfitUsd: opts.takeProfitUsd,
+    }).hit,
+  );
 
   const pass = d.hit === opts.expectHit;
   console.log(
@@ -57,15 +50,11 @@ function evalBasket(opts: {
         name: opts.name,
         lots: +lots.toFixed(2),
         pnl: +pnl.toFixed(2),
-        margin: +margin.toFixed(2),
-        roi: +d.floatingRoi.toFixed(2),
-        tpRoi: opts.tpRoiPct,
-        tpMoney: d.tpMoney,
+        takeProfitUsd: opts.takeProfitUsd,
         hit: d.hit,
         expectHit: opts.expectHit,
         anyLegAloneWouldHit,
         pass,
-        // close-all + reentry is the engine action when hit
         wouldCloseAllAndReenter: d.hit,
       },
       null,
@@ -77,129 +66,83 @@ function evalBasket(opts: {
 
 let fail = 0;
 
-// 1) Basket total above TP → hit (even if one leg is tiny)
+// Fixed $ from startLots 0.01 EUR @1.085 lev500 → margin≈2.17 → TP20%≈$0.43
+const eurFixed = resolveTpSlUsd({
+  symbol: "EURUSD",
+  startLots: 0.01,
+  takeProfitPct: 20,
+  stopLossPct: 225,
+});
+
+// 1) Basket total above fixed TP → hit
 if (
   !evalBasket({
-    name: "basket_above_tp",
+    name: "basket_above_fixed_tp",
     symbol: "EURUSD",
-    tpRoiPct: 20,
+    takeProfitUsd: eurFixed.takeProfitUsd,
     expectHit: true,
     legs: [
-      { lots: 1, price: 1.14, profit: 50 },
-      { lots: 1, price: 1.13, profit: 50 },
+      { lots: 0.01, price: 1.085, profit: 0.5 },
+      { lots: 0.01, price: 1.084, profit: 0.2 },
     ],
   })
 )
   fail += 1;
 
-// 2) One leg big profit, others lose — basket below TP → no close
-// EUR 2 lots @1.14 lev500 → margin ≈ 456, 20% TP ≈ $91
+// 2) Mixed legs — basket below fixed TP → no close (even if one leg alone > TP)
 if (
   !evalBasket({
-    name: "mixed_below_basket_tp",
+    name: "mixed_below_fixed_tp",
     symbol: "EURUSD",
-    tpRoiPct: 20,
+    takeProfitUsd: eurFixed.takeProfitUsd,
     expectHit: false,
     legs: [
-      { lots: 1, price: 1.14, profit: 80 }, // alone would be near/above its own margin TP
-      { lots: 1, price: 1.14, profit: -50 },
+      { lots: 0.01, price: 1.085, profit: 0.5 },
+      { lots: 0.01, price: 1.09, profit: -0.4 },
     ],
   })
 )
   fail += 1;
 
-// 3) Same mixed but basket above → close ALL (not just winner)
+// 3) Large lots but FIXED startLots TP — big basket profit still hits fixed $0.43
 if (
   !evalBasket({
-    name: "mixed_above_basket_tp",
+    name: "large_lots_still_uses_fixed_usd",
     symbol: "EURUSD",
-    tpRoiPct: 20,
+    takeProfitUsd: eurFixed.takeProfitUsd,
     expectHit: true,
-    legs: [
-      { lots: 1, price: 1.14, profit: 200 },
-      { lots: 1, price: 1.14, profit: -50 },
-    ],
+    legs: [{ lots: 1, price: 1.14, profit: 2 }],
   })
 )
   fail += 1;
 
-// 4) Live-scale EUR 224 lots: $2000 profit is NOT enough for ROI 20 (need ~$10k)
-{
-  const lots = 224;
-  const avg = 1.14491;
-  const margin = mt5UsedMargin({
-    symbol: "EURUSD",
-    lots,
-    avgPrice: avg,
-    brokerLeverage: 500,
-  });
-  const d2k = shouldTriggerTakeProfit({
-    pnl: 2000,
-    usedMargin: margin,
-    tpRoiPct: 20,
-  });
-  const dAtTarget = shouldTriggerTakeProfit({
-    pnl: d2k.tpMoney,
-    usedMargin: margin,
-    tpRoiPct: 20,
-  });
-  const ok = !d2k.hit && dAtTarget.hit && d2k.tpMoney > 10000;
-  console.log(
-    JSON.stringify(
-      {
-        name: "live_scale_eur_224lots_explains_2000",
-        margin: +margin.toFixed(2),
-        tpMoney: d2k.tpMoney,
-        pnl2000_hit: d2k.hit,
-        pnlAtTpMoney_hit: dAtTarget.hit,
-        pass: ok,
-      },
-      null,
-      2,
-    ),
-  );
-  if (!ok) fail += 1;
-}
-
-// 5) XAU small basket: $2000 easily hits 20% ROI
-{
-  const margin = mt5UsedMargin({
+// 4) XAU startLots 0.01 → TP ≈ $1.63
+const xauFixed = resolveTpSlUsd({
+  symbol: "XAUUSD",
+  startLots: 0.01,
+  takeProfitPct: 20,
+  stopLossPct: 225,
+});
+if (
+  !evalBasket({
+    name: "xau_fixed_tp",
     symbol: "XAUUSD",
-    lots: 1,
-    avgPrice: 4050,
-    brokerLeverage: 500,
-  });
-  const d = shouldTriggerTakeProfit({ pnl: 2000, usedMargin: margin, tpRoiPct: 20 });
-  // margin = 100*4050/500 = 810, tpMoney = 162
-  const ok = d.hit && d.tpMoney < 200;
-  console.log(
-    JSON.stringify(
-      {
-        name: "xau_1lot_2000_hits",
-        margin: +margin.toFixed(2),
-        tpMoney: d.tpMoney,
-        hit: d.hit,
-        pass: ok,
-      },
-      null,
-      2,
-    ),
-  );
-  if (!ok) fail += 1;
+    takeProfitUsd: xauFixed.takeProfitUsd,
+    expectHit: true,
+    legs: [{ lots: 0.01, price: 4080, profit: 1.63 }],
+  })
+)
+  fail += 1;
+
+if (Math.abs(xauFixed.takeProfitUsd - 1.63) > 0.02) {
+  console.error("FAIL xau TP default", xauFixed);
+  fail += 1;
+} else {
+  console.log("PASS xau default TP$ ≈ 1.63", xauFixed.takeProfitUsd);
 }
 
-// 6) Empty / zero margin → no TP
-{
-  const d = shouldTriggerTakeProfit({ pnl: 100, usedMargin: 0, tpRoiPct: 20 });
-  const ok = !d.hit;
-  console.log(JSON.stringify({ name: "zero_margin_no_tp", hit: d.hit, pass: ok }));
-  if (!ok) fail += 1;
-}
-
-if (fail) {
-  console.error("\nSIM TP FAILED", fail);
+if (fail > 0) {
+  console.error(`\nSIM TP FAILED: ${fail}`);
   process.exit(1);
 }
-console.log(
-  "\nSIM TP ALL PASSED — basket aggregate ROI TP; $2000 on 224-lot EUR does not hit 20% ROI",
-);
+console.log("\nSIM TP ALL PASSED — fixed USD basket TP");

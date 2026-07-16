@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
+import { resolveTpSlUsd } from "@/lib/dca1000";
 import { LOGIC_IDS, LOGIC_OPTIONS, SYMBOL_GROUPS, SYMBOL_OPTIONS, isLogicId } from "@/lib/strategies";
 import {
   defaultEntryMultiplier,
@@ -60,13 +61,65 @@ export async function GET() {
     });
   }
 
-  // 예전 가격% 저장값(≤5) → ROI%로 마이그레이션 (1%가격 = 20 ROI)
-  const needTpMigrate = bots.filter((b) => b.takeProfitPct > 0 && b.takeProfitPct <= 5);
-  if (needTpMigrate.length > 0) {
-    for (const b of needTpMigrate) {
+  // 예전 가격% 저장값 → ROI% (1%가격 = 20 ROI). 손절 <10 도 구 차트%/오류값으로 간주
+  const needRoiMigrate = bots.filter(
+    (b) =>
+      (b.takeProfitPct > 0 && b.takeProfitPct <= 5) ||
+      (b.stopLossPct > 0 && b.stopLossPct < 10),
+  );
+  if (needRoiMigrate.length > 0) {
+    for (const b of needRoiMigrate) {
+      const tp =
+        b.takeProfitPct > 0 && b.takeProfitPct <= 5
+          ? Math.round(b.takeProfitPct * 20 * 100) / 100
+          : b.takeProfitPct;
+      const sl =
+        b.stopLossPct > 0 && b.stopLossPct < 10
+          ? Math.max(225, Math.round(b.stopLossPct * 20 * 100) / 100)
+          : b.stopLossPct > 0
+            ? b.stopLossPct
+            : 225;
       await prisma.symbolBot.update({
         where: { id: b.id },
-        data: { takeProfitPct: Math.round(b.takeProfitPct * 20 * 100) / 100 },
+        data: { takeProfitPct: tp, stopLossPct: sl, stopLossEnabled: sl > 0 },
+      });
+    }
+    bots = await prisma.symbolBot.findMany({
+      where: { accountId: account.id },
+      orderBy: { symbol: "asc" },
+    });
+  }
+
+  // ROI% → 고정 익절$/손절$ (startLots 증거금 × ROI%/100)
+  // 손절$가 시작증거금의 1% 미만이면 구값 오염으로 재계산
+  const needUsdMigrate = bots.filter((b) => {
+    if (!(b.takeProfitUsd > 0) || !(b.stopLossUsd > 0)) return true;
+    const m = resolveTpSlUsd({
+      symbol: b.symbol,
+      startLots: b.startLots,
+      takeProfitPct: b.takeProfitPct > 0 ? b.takeProfitPct : 20,
+      stopLossPct: b.stopLossPct >= 10 ? b.stopLossPct : 225,
+    });
+    return b.stopLossUsd < m.marginUsd * 0.01;
+  });
+  if (needUsdMigrate.length > 0) {
+    for (const b of needUsdMigrate) {
+      const slPct = b.stopLossPct >= 10 ? b.stopLossPct : 225;
+      const usd = resolveTpSlUsd({
+        symbol: b.symbol,
+        startLots: b.startLots,
+        takeProfitUsd: b.takeProfitUsd > 0 ? b.takeProfitUsd : undefined,
+        takeProfitPct: b.takeProfitPct > 0 ? b.takeProfitPct : 20,
+        stopLossPct: slPct,
+      });
+      await prisma.symbolBot.update({
+        where: { id: b.id },
+        data: {
+          takeProfitUsd: usd.takeProfitUsd,
+          stopLossUsd: usd.stopLossUsd,
+          stopLossPct: slPct,
+          stopLossEnabled: true,
+        },
       });
     }
     bots = await prisma.symbolBot.findMany({
@@ -76,6 +129,18 @@ export async function GET() {
   }
 
   if (bots.length === 0) {
+    const eur = resolveTpSlUsd({
+      symbol: "EURUSD",
+      startLots: 0.01,
+      takeProfitPct: 20,
+      stopLossPct: 225,
+    });
+    const xau = resolveTpSlUsd({
+      symbol: "XAUUSD",
+      startLots: 0.01,
+      takeProfitPct: 20,
+      stopLossPct: 225,
+    });
     await prisma.symbolBot.createMany({
       data: [
         {
@@ -86,7 +151,9 @@ export async function GET() {
           entryCount: 999,
           entryMultiplier: 1,
           takeProfitPct: 20,
+          takeProfitUsd: eur.takeProfitUsd,
           stopLossPct: 225,
+          stopLossUsd: eur.stopLossUsd,
           stopLossEnabled: true,
           stopOnSl: true,
           repeatEnabled: true,
@@ -99,7 +166,9 @@ export async function GET() {
           entryCount: 999,
           entryMultiplier: 1,
           takeProfitPct: 20,
+          takeProfitUsd: xau.takeProfitUsd,
           stopLossPct: 225,
+          stopLossUsd: xau.stopLossUsd,
           stopLossEnabled: true,
           stopOnSl: true,
           repeatEnabled: true,
@@ -141,9 +210,11 @@ const upsertSchema = z.object({
   entryMultiplier: z.number().positive().max(10).optional(),
   entryIntervalPct: z.number().positive().max(50).optional(),
   takeProfitPct: z.number().min(1).max(500).optional(),
+  takeProfitUsd: z.number().min(0.01).max(1_000_000).optional(),
   startLots: z.number().positive().max(100).optional(),
   repeatEnabled: z.boolean().optional(),
   stopLossPct: z.number().min(0).max(1000).optional(),
+  stopLossUsd: z.number().min(0).max(1_000_000).optional(),
   stopLossEnabled: z.boolean().optional(),
   stopOnSl: z.boolean().optional(),
 });
@@ -175,6 +246,18 @@ export async function PUT(req: Request) {
   const levels = getTableLevels(resolvedLogic);
   const defaultMult = defaultEntryMultiplier(resolvedLogic);
 
+  const createLots = body.startLots ?? 0.01;
+  const createTpPct = body.takeProfitPct ?? meta.firstTpRoi ?? 20;
+  const createSlPct = body.stopLossPct ?? 225;
+  const createUsd = resolveTpSlUsd({
+    symbol: body.symbol,
+    startLots: createLots,
+    takeProfitUsd: body.takeProfitUsd,
+    stopLossUsd: body.stopLossUsd,
+    takeProfitPct: createTpPct,
+    stopLossPct: createSlPct,
+  });
+
   const bot = await prisma.symbolBot.upsert({
     where: {
       accountId_symbol: { accountId: account.id, symbol: body.symbol },
@@ -188,10 +271,12 @@ export async function PUT(req: Request) {
       entryCount: body.entryCount ?? meta.count,
       entryMultiplier: body.entryMultiplier ?? defaultMult,
       entryIntervalPct: body.entryIntervalPct ?? 5,
-      takeProfitPct: body.takeProfitPct ?? meta.firstTpRoi ?? 20,
-      startLots: body.startLots ?? 0.01,
+      takeProfitPct: createTpPct,
+      takeProfitUsd: createUsd.takeProfitUsd,
+      startLots: createLots,
       repeatEnabled: body.repeatEnabled ?? true,
-      stopLossPct: body.stopLossPct ?? 225,
+      stopLossPct: createSlPct,
+      stopLossUsd: createUsd.stopLossUsd,
       stopLossEnabled: body.stopLossEnabled ?? true,
       stopOnSl: body.stopOnSl ?? true,
     },
@@ -211,13 +296,35 @@ export async function PUT(req: Request) {
       ...(body.entryMultiplier != null ? { entryMultiplier: body.entryMultiplier } : {}),
       ...(body.entryIntervalPct != null ? { entryIntervalPct: body.entryIntervalPct } : {}),
       ...(body.takeProfitPct != null ? { takeProfitPct: body.takeProfitPct } : {}),
+      ...(body.takeProfitUsd != null ? { takeProfitUsd: body.takeProfitUsd } : {}),
       ...(body.startLots != null ? { startLots: body.startLots } : {}),
       ...(body.repeatEnabled != null ? { repeatEnabled: body.repeatEnabled } : {}),
       ...(body.stopLossPct != null ? { stopLossPct: body.stopLossPct } : {}),
+      ...(body.stopLossUsd != null ? { stopLossUsd: body.stopLossUsd } : {}),
       ...(body.stopLossEnabled != null ? { stopLossEnabled: body.stopLossEnabled } : {}),
       ...(body.stopOnSl != null ? { stopOnSl: body.stopOnSl } : {}),
     },
   });
+
+  // startLots/ROI 변경 시 USD 미지정이면 재계산해 저장
+  if (
+    (body.startLots != null || body.takeProfitPct != null || body.stopLossPct != null) &&
+    body.takeProfitUsd == null &&
+    body.stopLossUsd == null
+  ) {
+    const usd = resolveTpSlUsd({
+      symbol: bot.symbol,
+      startLots: bot.startLots,
+      takeProfitPct: bot.takeProfitPct,
+      stopLossPct: bot.stopLossPct > 0 ? bot.stopLossPct : 225,
+    });
+    await prisma.symbolBot.update({
+      where: { id: bot.id },
+      data: { takeProfitUsd: usd.takeProfitUsd, stopLossUsd: usd.stopLossUsd },
+    });
+    bot.takeProfitUsd = usd.takeProfitUsd;
+    bot.stopLossUsd = usd.stopLossUsd;
+  }
 
   // Keep StrategyLogic override in sync so engine lots/TP/SL match /bot edits
   const logicId = bot.logic;
@@ -232,6 +339,12 @@ export async function PUT(req: Request) {
       ...(body.startLots != null ? { startLots: bot.startLots } : {}),
       ...(body.takeProfitPct != null ? { takeProfitPct: bot.takeProfitPct } : {}),
       ...(body.stopLossPct != null ? { stopLossPct: bot.stopLossPct } : {}),
+      ...(body.takeProfitUsd != null || body.startLots != null
+        ? { takeProfitUsd: bot.takeProfitUsd }
+        : {}),
+      ...(body.stopLossUsd != null || body.startLots != null
+        ? { stopLossUsd: bot.stopLossUsd }
+        : {}),
     };
     if (Array.isArray(prev.levels) && body.startLots != null) {
       const rows = prev.levels as Array<{ lots: number; profit: number; drop: number }>;

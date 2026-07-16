@@ -32,6 +32,8 @@ export async function resolveStrategyForAccount(
       startLots: levels[0]?.lots ?? startLots,
       takeProfitPct: payload.takeProfitPct ?? levels[0]?.profit ?? null,
       stopLossPct: payload.stopLossPct ?? null,
+      takeProfitUsd: payload.takeProfitUsd ?? null,
+      stopLossUsd: payload.stopLossUsd ?? null,
       mode: "levels",
       hasOverride: true,
     };
@@ -43,6 +45,8 @@ export async function resolveStrategyForAccount(
       startLots: payload.startLots ?? startLots,
       takeProfitPct: payload.takeProfitPct,
       stopLossPct: payload.stopLossPct,
+      takeProfitUsd: payload.takeProfitUsd,
+      stopLossUsd: payload.stopLossUsd,
       leverageBase: lev,
     });
     return {
@@ -51,6 +55,8 @@ export async function resolveStrategyForAccount(
       startLots: payload.startLots ?? startLots,
       takeProfitPct: payload.takeProfitPct ?? null,
       stopLossPct: payload.stopLossPct ?? null,
+      takeProfitUsd: payload.takeProfitUsd ?? null,
+      stopLossUsd: payload.stopLossUsd ?? null,
       mode: "bulk",
       hasOverride: true,
     };
@@ -73,6 +79,8 @@ export async function resolveStrategyForAccount(
     startLots,
     takeProfitPct: null,
     stopLossPct: null,
+    takeProfitUsd: null,
+    stopLossUsd: null,
     mode: "preset",
     hasOverride: false,
   };

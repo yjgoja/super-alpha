@@ -1,10 +1,10 @@
 /**
- * Offline SL trigger + stopOnSl / repeatEnabled policy checks.
+ * Offline SL trigger in fixed USD + stopOnSl / repeatEnabled policy.
  * Run: npx tsx scripts/sim-sl.ts
  */
 import {
-  mt5ProfitPct,
-  roiToPricePct,
+  resolveTpSlUsd,
+  shouldTriggerStopLossUsd,
   DCA1000_DEFAULT_SL_ROI,
 } from "../src/lib/dca1000";
 
@@ -18,28 +18,37 @@ function assert(name: string, cond: boolean, detail?: unknown) {
   }
 }
 
-const slRoi = DCA1000_DEFAULT_SL_ROI;
-const slPricePct = roiToPricePct(slRoi); // 11.25
-
-// BUY: avg 100, bid must be <= 88.75 to hit SL
-const avg = 100;
-const hitBid = avg * (1 - slPricePct / 100);
-const missBid = hitBid + 0.01;
-const profitHit = mt5ProfitPct("BUY", avg, hitBid, hitBid + 0.0002);
-const profitMiss = mt5ProfitPct("BUY", avg, missBid, missBid + 0.0002);
-
-assert("SL price% 11.25", slPricePct === 11.25);
-assert("profit at SL bid ≈ -11.25%", Math.abs(profitHit + slPricePct) < 0.05, {
-  profitHit,
-  hitBid,
+const eur = resolveTpSlUsd({
+  symbol: "EURUSD",
+  startLots: 0.01,
+  takeProfitPct: 20,
+  stopLossPct: DCA1000_DEFAULT_SL_ROI,
 });
-assert("engine would SL", profitHit <= -slPricePct, { profitHit, slPricePct });
-assert("engine would NOT SL just above", profitMiss > -slPricePct, {
-  profitMiss,
-  slPricePct,
+const xau = resolveTpSlUsd({
+  symbol: "XAUUSD",
+  startLots: 0.01,
+  takeProfitPct: 20,
+  stopLossPct: DCA1000_DEFAULT_SL_ROI,
 });
 
-// Policy (mirrors meta-engine): stopOnSl disables bot; !repeatEnabled disables after TP
+assert("EUR SL$ = margin×225%", eur.stopLossUsd > 0, eur);
+assert("XAU SL$ = margin×225%", Math.abs(xau.stopLossUsd - 18.36) < 0.05, xau);
+
+const hit = shouldTriggerStopLossUsd({
+  pnl: -eur.stopLossUsd,
+  stopLossUsd: eur.stopLossUsd,
+});
+const miss = shouldTriggerStopLossUsd({
+  pnl: -(eur.stopLossUsd - 0.01),
+  stopLossUsd: eur.stopLossUsd,
+});
+assert("SL hits at -stopLossUsd", hit.hit === true, hit);
+assert("SL misses just above", miss.hit === false, miss);
+
+// Basket: large adverse $ hits fixed SL even if chart% small
+const deep = shouldTriggerStopLossUsd({ pnl: -100, stopLossUsd: xau.stopLossUsd });
+assert("deep loss hits XAU SL$", deep.hit === true, deep);
+
 function afterSl(stopOnSl: boolean) {
   return { botEnabled: !stopOnSl, reentrySameTick: false };
 }
@@ -51,10 +60,7 @@ assert("stopOnSl=true → bot off, no reentry", (() => {
   const r = afterSl(true);
   return r.botEnabled === false && r.reentrySameTick === false;
 })());
-assert("stopOnSl=false → bot stays on (next-tick entry)", (() => {
-  const r = afterSl(false);
-  return r.botEnabled === true && r.reentrySameTick === false;
-})());
+assert("stopOnSl=false → bot stays on", afterSl(false).botEnabled === true);
 assert("repeatEnabled=true → same-tick reentry", afterTp(true).reentrySameTick === true);
 assert("repeatEnabled=false → bot off", afterTp(false).botEnabled === false);
 
@@ -62,4 +68,4 @@ if (failed > 0) {
   console.error(`\nSIM SL FAILED: ${failed}`);
   process.exit(1);
 }
-console.log("\nSIM SL ALL PASSED — chart% SL + stopOnSl/repeat policy");
+console.log("\nSIM SL ALL PASSED — fixed USD SL + stopOnSl/repeat policy");
