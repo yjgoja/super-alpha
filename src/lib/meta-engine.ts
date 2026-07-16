@@ -15,6 +15,7 @@ import {
   MT5_BROKER_LEVERAGE_DEFAULT,
 } from "./dca1000";
 import {
+  isBulkLogic,
   isTableLogic,
   lotsForLogicLevel,
 } from "./table-logics";
@@ -428,13 +429,21 @@ async function runSymbolTableDca(
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
   const adverse = mt5DcaAdversePct(direction, basket.firstEntryPrice, price.bid, price.ask);
 
-  // 익절/손절$: SymbolBot 고정$ 우선, 없으면 startLots 증거금×구 ROI%
-  const tpRoiFallback =
-    cfg.takeProfitPct > 0
+  // 익절 ROI: 두바이부르노(bulk 표)는 "현재(가장 깊은) 회차"의 표 profit%를 사용.
+  // (표 profit 티어: drop≤130→20%, drop140→25%, drop150→30%)
+  // 그 외 표 로직(마틴/커스텀)은 기존 우선순위 유지(고정 cfg → override → 표 profit).
+  const levelProfit = levels[basket.filledLevel]?.profit;
+  const tpRoiFallback = isBulkLogic(logic)
+    ? levelProfit != null && levelProfit > 0
+      ? levelProfit
+      : cfg.takeProfitPct > 0
+        ? cfg.takeProfitPct
+        : 20
+    : cfg.takeProfitPct > 0
       ? cfg.takeProfitPct
       : resolved.takeProfitPct && resolved.takeProfitPct > 0
         ? resolved.takeProfitPct
-        : levels[basket.filledLevel]?.profit ?? 20;
+        : levelProfit ?? 20;
   const slRoiFallback =
     cfg.stopLossPct > 0
       ? cfg.stopLossPct

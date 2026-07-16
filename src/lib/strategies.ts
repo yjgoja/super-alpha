@@ -100,7 +100,7 @@ export const LOGIC_OPTIONS = [
   {
     id: "dubai_bruno_313",
     name: "두바이부르노 313차",
-    desc: "313차 표 · 익절/손절/물타기 = 손익$",
+    desc: "실제 936레벨(L0+935 물타기) 표 · 익절 ROI=회차별(20/25/30%) · 손절 225% · 익절/손절/물타기 = 손익$",
   },
   {
     id: "custom",

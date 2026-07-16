@@ -73,7 +73,7 @@ async function main() {
         enabled: true,
         logic: "dubai_bruno_313",
         direction: "BUY",
-        entryCount: 999,
+        entryCount: 313,
         entryMultiplier: 1,
         entryIntervalPct: 10,
         takeProfitPct: 20,

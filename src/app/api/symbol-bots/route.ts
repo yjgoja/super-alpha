@@ -21,6 +21,9 @@ import {
 import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
 import type { Prisma } from "@prisma/client";
 
+/** 두바이부르노 전체 회차(L0 포함) — 표에서 파생 (하드코딩 999 금지) */
+const DUBAI313_LEVEL_COUNT = tableLogicMeta("dubai_bruno_313").count;
+
 async function getAccount(userId: string) {
   return prisma.brokerAccount.findFirst({
     where: { userId },
@@ -57,7 +60,7 @@ export async function GET() {
         data: {
           logic,
           ...(logic === "dubai_bruno_313"
-            ? { entryCount: 999, entryMultiplier: 1, stopLossPct: 225, stopLossEnabled: true }
+            ? { entryCount: DUBAI313_LEVEL_COUNT, entryMultiplier: 1, stopLossPct: 225, stopLossEnabled: true }
             : {}),
         },
       });
@@ -173,7 +176,7 @@ export async function GET() {
           symbol: "EURUSD",
           enabled: true,
           logic: "dubai_bruno_313",
-          entryCount: 999,
+          entryCount: DUBAI313_LEVEL_COUNT,
           entryMultiplier: 1,
           takeProfitPct: 20,
           takeProfitUsd: eur.takeProfitUsd,
@@ -188,7 +191,7 @@ export async function GET() {
           symbol: "XAUUSD",
           enabled: false,
           logic: "dubai_bruno_313",
-          entryCount: 999,
+          entryCount: DUBAI313_LEVEL_COUNT,
           entryMultiplier: 1,
           takeProfitPct: 20,
           takeProfitUsd: xau.takeProfitUsd,

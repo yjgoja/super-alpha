@@ -5,11 +5,14 @@ import {
   mt5DcaAdverseRoi,
   mt5DcaAdversePct,
   triggerDropRoi,
-  DCA1000_LEVELS,
   DCA1000_DEFAULT_SL_ROI,
   roiToPricePct,
   contractSizeForSymbol,
 } from "../src/lib/dca1000";
+import { getTableLevels } from "../src/lib/table-logics";
+
+// 두바이부르노 정본표 (L0 + 935 물타기 = 936레벨)
+const DCA1000_LEVELS = getTableLevels("dubai_bruno_313");
 
 const LEV = 500;
 const TP_ROI = 20; // default table / UI
@@ -81,7 +84,7 @@ console.log("- 익절 $: 사용증거금 × (tpRoi/100)");
 console.log("- 물타기: max(손실ROI, 가격역행%×레버) ≥ 표 drop ROI");
 console.log("- 손절: 가격역행% ≥ 손절ROI÷20  (표/코인 레버20 환산)");
 console.log("- 틱당 물타기 최대: 8회차");
-console.log("- 기본 전략표: dubai_bruno_313 (L0..L998, drop 누적 ROI)");
+console.log(`- 기본 전략표: dubai_bruno_313 (L0 + ${DCA1000_LEVELS.length - 1} 물타기 = ${DCA1000_LEVELS.length}레벨, drop 누적 ROI)`);
 console.log("- 기본 익절 ROI: " + TP_ROI + "% / 기본 손절 ROI: " + DCA1000_DEFAULT_SL_ROI + "%");
 console.log("");
 
