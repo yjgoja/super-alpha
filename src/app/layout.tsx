@@ -15,7 +15,17 @@ const body = Manrope({
 
 export const metadata: Metadata = {
   title: "Super Alpha | 무설치 자동매매",
-  description: "MT5 계좌 3칸만 입력하면 즉시 연결. DCA 자동매매 대시보드.",
+  description:
+    "계좌 세 칸만 넣으면 설치 없이 MT5 자동매매가 바로 시작됩니다. 클라우드 엔진이 초단위로 동작합니다.",
+  metadataBase: new URL("https://www.superalpha.kr"),
+  openGraph: {
+    title: "Super Alpha",
+    description: "설치 없이, 계좌 3칸으로 시작하는 자동매매.",
+    url: "https://www.superalpha.kr",
+    siteName: "Super Alpha",
+    locale: "ko_KR",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
