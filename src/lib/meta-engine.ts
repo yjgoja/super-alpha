@@ -9,6 +9,7 @@ import {
   shouldTriggerTakeProfit,
   spreadPct,
   MT5_BROKER_LEVERAGE_DEFAULT,
+  DCA1000_DEFAULT_SL_ROI,
 } from "./dca1000";
 import {
   isBulkLogic,
@@ -18,15 +19,17 @@ import {
 import { normalizeLogicId } from "./strategies";
 import { resolveStrategyForAccount } from "./strategy-resolve";
 import {
-  closePositionsBySymbol,
+  closePositionsBySymbolDirection,
+  ensureCloudLive,
   fetchSnapshot,
   getSymbolPrice,
   placeMarketOrder,
   resolveBrokerSymbol,
   symbolsMatch,
 } from "./metaapi";
-import { dayKeySeoul, seoulDayStartUtc } from "./day-key";
 import { prisma } from "./db";
+import { isCloudColdError } from "./engine-guard";
+import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
 
 function lotsAtLevel(
   startLots: number,
@@ -60,6 +63,8 @@ type BotCfg = {
   symbol: string;
   logic: string;
   direction: string;
+  /** 양방향: 같은 종목에 BUY·SELL 바스켓을 동시에 운용 */
+  dualDirection?: boolean;
   entryCount: number;
   entryMultiplier: number;
   entryIntervalPct: number;
@@ -96,8 +101,14 @@ type PosRow = {
   margin?: number;
 };
 
-function positionsForSymbol(positions: PosRow[], symbol: string) {
-  return positions.filter((p) => symbolsMatch(p.symbol, symbol));
+function positionsForSymbol(
+  positions: PosRow[],
+  symbol: string,
+  direction?: "BUY" | "SELL",
+) {
+  return positions.filter(
+    (p) => symbolsMatch(p.symbol, symbol) && (!direction || p.direction === direction),
+  );
 }
 
 /** MT5 PC/앱에서 수동 청산 → 전체 자동매매 중지 (웹 수동청산과 동일) */
@@ -114,20 +125,80 @@ async function stopBotAfterExternalClose(accountId: string, message: string) {
 
 /**
  * DB엔 열린 바스켓이 있는데 MT5 포지션이 없음 = 터미널/외부 수동 청산.
- * 고스트 바스켓 정리 + 봇 중지. true면 이번 틱에서 주문 중단.
+ * 클라우드 재기동 직후 빈 포지션 오탐 방지: 2회 연속 확인 + 재조회.
+ * true면 이번 틱에서 주문 중단.
  */
+const ghostCloseSuspectUntil = new Map<string, number>();
+
 async function detectAndStopOnExternalClose(
   accountId: string,
+  metaId: string,
   baskets: BasketRow[],
   positions: PosRow[],
+  opts?: { skip?: boolean; margin?: number; equity?: number; balance?: number },
 ) {
-  const ghosts = baskets.filter(
-    (b) => b.legs.length > 0 && positionsForSymbol(positions, b.symbol).length === 0,
-  );
-  if (ghosts.length === 0) return false;
+  if (opts?.skip) return false;
 
+  const ghosts = baskets.filter(
+    (b) =>
+      b.legs.length > 0 &&
+      positionsForSymbol(positions, b.symbol, b.direction === "SELL" ? "SELL" : "BUY")
+        .length === 0,
+  );
+  if (ghosts.length === 0) {
+    ghostCloseSuspectUntil.delete(accountId);
+    return false;
+  }
+
+  // Used margin / equity drawdown → positions almost certainly still open (API lag)
+  const margin = opts?.margin ?? 0;
+  const equity = opts?.equity ?? 0;
+  const balance = opts?.balance ?? 0;
+  if (margin > 1 || (balance > 0 && equity > 0 && Math.abs(balance - equity) > 1)) {
+    console.warn(
+      `[engine] skip ghost-close account=${accountId} margin=${margin} eq=${equity} bal=${balance}`,
+    );
+    return false;
+  }
+
+  // Confirm with a second snapshot (MetaAPI can return [] briefly after deploy)
+  await new Promise((r) => setTimeout(r, 2000));
+  const again = await fetchSnapshot(metaId);
+  if (!again.ok) return false;
+  const stillGhost = ghosts.filter(
+    (b) =>
+      positionsForSymbol(
+        again.positions,
+        b.symbol,
+        b.direction === "SELL" ? "SELL" : "BUY",
+      ).length === 0,
+  );
+  if (stillGhost.length === 0) return false;
+
+  const againMargin = Number(again.margin ?? 0);
+  if (
+    againMargin > 1 ||
+    (again.balance > 0 &&
+      again.equity > 0 &&
+      Math.abs(again.balance - again.equity) > 1)
+  ) {
+    return false;
+  }
+
+  // Require two consecutive tick confirmations before stopping live bots
+  const now = Date.now();
+  const suspectedAt = ghostCloseSuspectUntil.get(accountId);
+  if (!suspectedAt || now - suspectedAt > 120_000) {
+    ghostCloseSuspectUntil.set(accountId, now);
+    console.warn(
+      `[engine] ghost-close suspect account=${accountId} — confirm next tick before stop`,
+    );
+    return false;
+  }
+
+  ghostCloseSuspectUntil.delete(accountId);
   await prisma.basket.updateMany({
-    where: { id: { in: ghosts.map((g) => g.id) } },
+    where: { id: { in: stillGhost.map((g) => g.id) } },
     data: {
       status: "closed",
       lastExitAt: new Date(),
@@ -182,7 +253,7 @@ async function closeBasketTp(opts: {
     floatingRoi,
   } = opts;
 
-  const closeRes = await closePositionsBySymbol(metaId, symbol);
+  const closeRes = await closePositionsBySymbolDirection(metaId, symbol, direction);
   if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
     return {
       closed: false as const,
@@ -273,7 +344,7 @@ async function closeBasketTp(opts: {
   return { closed: true as const, reentered: true as const };
 }
 
-/** 표 기반 DCA (마틴게일 / 두바이부르노) + MT5 스프레드 */
+/** 표 기반 DCA (마틴게일 / 313차) + MT5 스프레드 */
 async function runSymbolTableDca(
   accountId: string,
   metaId: string,
@@ -290,10 +361,20 @@ async function runSymbolTableDca(
   });
   const levels = resolved.levels;
   const startLots = resolved.startLots || cfg.startLots;
-  const maxLevels = levels.length;
+  // 회차 상한: entryCount 설정을 존중 (표 전체보다 작으면 캡). 소형 계좌 폭주 방지.
+  const maxLevels = Math.max(
+    1,
+    Math.min(levels.length, cfg.entryCount > 0 ? cfg.entryCount : levels.length),
+  );
   const tag = logic.replace(/[^a-z0-9_]/gi, "").slice(0, 12) || "table";
 
   const levelLots = (levelIndex: number) => {
+    // L0(첫 배팅)은 종목별 SymbolBot.startLots를 사용한다. 전략 오버라이드는
+    // logicId 단위라 종목별로 다른 첫 배팅을 표현할 수 없으므로, 첫 회차만
+    // 종목별 값으로 덮고 이후 물타기 회차는 표/오버라이드 로트를 따른다.
+    if (levelIndex === 0 && cfg.startLots > 0) {
+      return Math.max(0.01, Math.round(cfg.startLots * 100) / 100);
+    }
     const row = levels[levelIndex] || levels[0];
     return lotsForLogicLevel(
       logic,
@@ -316,8 +397,11 @@ async function runSymbolTableDca(
   }
 
   const spr = spreadPct(price.bid, price.ask);
-  let basket = baskets.find((b) => symbolsMatch(b.symbol, symbol));
-  const ourPositions = positionsForSymbol(positions, symbol);
+  // 양방향 운용: 같은 종목에 BUY/SELL 바스켓이 공존할 수 있으므로 방향으로 구분한다.
+  let basket = baskets.find(
+    (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
+  );
+  const ourPositions = positionsForSymbol(positions, symbol, direction);
 
   // MT5 PC 등에서 수동 청산 → 고스트 바스켓. 재진입하지 않고 봇 중지
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
@@ -414,7 +498,7 @@ async function runSymbolTableDca(
   const floatingPnl = ourPositions.reduce((s, p) => s + p.profit, 0);
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
 
-  // 익절 ROI: 두바이부르노(bulk 표)는 "현재(가장 깊은) 회차"의 표 profit%를 사용.
+  // 익절 ROI: 313차(bulk 표)는 "현재(가장 깊은) 회차"의 표 profit%를 사용.
   // (표 profit 티어: drop≤130→20%, drop140→25%, drop150→30%)
   // 그 외 표 로직(마틴/커스텀)은 기존 우선순위 유지(고정 cfg → override → 표 profit).
   const levelProfit = levels[basket.filledLevel]?.profit;
@@ -434,7 +518,7 @@ async function runSymbolTableDca(
       ? cfg.stopLossPct
       : resolved.stopLossPct && resolved.stopLossPct > 0
         ? resolved.stopLossPct
-        : 225;
+        : DCA1000_DEFAULT_SL_ROI;
   const brokerLev = Math.max(
     1,
     cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
@@ -493,7 +577,8 @@ async function runSymbolTableDca(
       reentryLots: levelLots(0),
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
-      pnlSum: tpPnl.pnl,
+      // 기록용: MetaAPI 포지션 수익(수수료·스왑 포함). 익절 판정은 위에서 tpPnl.pnl 사용.
+      pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
     });
     if (!tpClose.closed) {
@@ -515,7 +600,7 @@ async function runSymbolTableDca(
       symbol,
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
-      floatingPnl: tpPnl.pnl,
+      floatingPnl: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
       apiProfit: tpPnl.apiProfit,
       quotePnl: tpPnl.quotePnl,
@@ -535,8 +620,8 @@ async function runSymbolTableDca(
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    await closePositionsBySymbol(metaId, symbol);
-    const pnlSum = tpPnl.pnl;
+    await closePositionsBySymbolDirection(metaId, symbol, direction);
+    const pnlSum = tpPnl.apiProfit;
     await prisma.basket.update({
       where: { id: basket.id },
       data: {
@@ -706,8 +791,10 @@ async function runSymbolDca(
     };
   }
 
-  let basket = baskets.find((b) => symbolsMatch(b.symbol, symbol));
-  const ourPositions = positionsForSymbol(positions, symbol);
+  let basket = baskets.find(
+    (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
+  );
+  const ourPositions = positionsForSymbol(positions, symbol, direction);
 
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
     await prisma.basket.update({
@@ -810,7 +897,7 @@ async function runSymbolDca(
     lots: lotsForTp,
     avgPrice: midRef,
     takeProfitPct: cfg.takeProfitPct > 0 ? cfg.takeProfitPct : 20,
-    stopLossPct: cfg.stopLossPct > 0 ? cfg.stopLossPct : 225,
+    stopLossPct: cfg.stopLossPct > 0 ? cfg.stopLossPct : DCA1000_DEFAULT_SL_ROI,
     brokerLeverage: brokerLev,
     brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
   });
@@ -851,7 +938,7 @@ async function runSymbolDca(
       reentryLots: lotsAtLevel(cfg.startLots, cfg.entryMultiplier, 0, logic),
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
-      pnlSum: tpPnl.pnl,
+      pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
     });
     if (!tpClose.closed) {
@@ -869,7 +956,7 @@ async function runSymbolDca(
       reentered: tpClose.reentered,
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
-      floatingPnl: tpPnl.pnl,
+      floatingPnl: tpPnl.apiProfit,
       floatingRoi,
     };
   }
@@ -881,12 +968,12 @@ async function runSymbolDca(
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    await closePositionsBySymbol(metaId, symbol);
+    await closePositionsBySymbolDirection(metaId, symbol, direction);
     await prisma.basket.update({
       where: { id: basket.id },
       data: {
         status: "closed",
-        realizedPnl: tpPnl.pnl,
+        realizedPnl: tpPnl.apiProfit,
         lastExitAt: new Date(),
         unrealizedPnl: 0,
       },
@@ -902,9 +989,9 @@ async function runSymbolDca(
         side: direction === "BUY" ? "SELL" : "BUY",
         lots: legs.reduce((s, l) => s + l.lots, 0),
         price: direction === "BUY" ? price.bid : price.ask,
-        pnl: tpPnl.pnl,
+        pnl: tpPnl.apiProfit,
         kind: "SL",
-        note: `${logic}|roi=${floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${tpPnl.pnl.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
+        note: `${logic}|roi=${floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${tpPnl.apiProfit.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
       },
     });
     if (cfg.stopOnSl) {
@@ -918,7 +1005,7 @@ async function runSymbolDca(
       action: "sl",
       symbol,
       stopLossUsd: slDecision.stopLossUsd,
-      floatingPnl: tpPnl.pnl,
+      floatingPnl: tpPnl.apiProfit,
       floatingRoi,
     };
   }
@@ -983,7 +1070,10 @@ async function runSymbolDca(
 const tickLocks = new Set<string>();
 const lastEquitySnapAt = new Map<string, number>();
 
-const TICK_LOCK_STALE_MS = 90_000;
+const TICK_LOCK_STALE_MS = Math.max(
+  20_000,
+  Number(process.env.ENGINE_TICK_LOCK_STALE_MS || 45_000),
+);
 
 /** In-process + DB mutex so local engine / GHA / serverless don't double-trade. */
 async function tryAcquireTickLock(accountId: string): Promise<boolean> {
@@ -1045,11 +1135,37 @@ async function runDcaTickInner(accountId: string) {
   }
 
   const metaId = account.metaApiAccountId;
-  const snap = await fetchSnapshot(metaId);
+  let snap = await fetchSnapshot(metaId);
+  let cloudJustRecovered = false;
+  // Bot ON but MetaAPI cloud cold/undeployed → redeploy once (never leave live money unmonitored)
+  if (!snap.ok && isCloudColdError(snap.message || "")) {
+    const waitMs = Math.max(
+      8_000,
+      Number(process.env.ENGINE_CLOUD_WAIT_MS || 45_000),
+    );
+    const live = await ensureCloudLive(metaId, waitMs);
+    if (live.ok && live.snap) {
+      snap = live.snap;
+      cloudJustRecovered = true;
+      await prisma.brokerAccount.update({
+        where: { id: account.id },
+        data: {
+          status: "connected",
+          botStoppedAt: null,
+          statusMessage: "클라우드 재활성화 · 봇 실행 중",
+        },
+      });
+    }
+  }
   if (!snap.ok) {
     await prisma.brokerAccount.update({
       where: { id: account.id },
-      data: { statusMessage: snap.message },
+      data: {
+        statusMessage: snap.message,
+        ...(isCloudColdError(snap.message || "")
+          ? { status: "undeployed" }
+          : {}),
+      },
     });
     return { ok: false as const, error: snap.message };
   }
@@ -1069,7 +1185,18 @@ async function runDcaTickInner(accountId: string) {
 
   // MT5 터미널 수동 청산: 열린 바스켓인데 포지션 없음 → 전체 중지 (심볼 루프 전)
   if (
-    await detectAndStopOnExternalClose(account.id, account.baskets, snap.positions)
+    await detectAndStopOnExternalClose(
+      account.id,
+      metaId,
+      account.baskets,
+      snap.positions,
+      {
+        skip: cloudJustRecovered,
+        margin: snap.margin,
+        equity: snap.equity,
+        balance: snap.balance,
+      },
+    )
   ) {
     return {
       ok: true as const,
@@ -1091,6 +1218,7 @@ async function runDcaTickInner(accountId: string) {
     symbol: b.symbol,
     logic: b.logic,
     direction: b.direction,
+    dualDirection: (b as { dualDirection?: boolean }).dualDirection ?? false,
     entryCount: b.entryCount,
     entryMultiplier: b.entryMultiplier,
     entryIntervalPct: b.entryIntervalPct,
@@ -1131,9 +1259,20 @@ async function runDcaTickInner(accountId: string) {
   // 심볼명 사전 해석 (XAU→GOLD 등) — 진입 전 캐시 워밍
   await Promise.all(bots.map((b) => resolveBrokerSymbol(metaId, b.symbol)));
 
-  // 동일 계좌 증거금 레이스 방지: 종목 순차 처리 (TP→SL→DCA 순서는 심볼 내부)
-  const results = [];
+  // 양방향(dualDirection) 봇은 BUY·SELL 각각 실행 → 한 종목에 롱/숏 바스켓 동시 운용.
+  const runs: BotCfg[] = [];
   for (const bot of bots) {
+    if (bot.dualDirection) {
+      runs.push({ ...bot, direction: "BUY", dualDirection: false });
+      runs.push({ ...bot, direction: "SELL", dualDirection: false });
+    } else {
+      runs.push(bot);
+    }
+  }
+
+  // 동일 계좌 증거금 레이스 방지: 순차 처리 (TP→SL→DCA 순서는 심볼 내부)
+  const results = [];
+  for (const bot of runs) {
     try {
       results.push(await runSymbolDca(account.id, metaId, bot, account.baskets, snap.positions));
     } catch (e) {
@@ -1157,33 +1296,12 @@ async function runDcaTickInner(accountId: string) {
     });
   }
 
-  const day = dayKeySeoul();
-  const dayFills = await prisma.fill.findMany({
-    where: {
-      accountId: account.id,
-      createdAt: { gte: seoulDayStartUtc(day) },
-    },
-  });
-  const dayPnl = dayFills.reduce((s, f) => s + (f.pnl || 0), 0);
-  await prisma.dailyStat.upsert({
-    where: { accountId_date: { accountId: account.id, date: day } },
-    create: {
-      accountId: account.id,
-      date: day,
-      startEquity: account.startingBalance || snap.equity,
-      endEquity: snap.equity,
-      pnl: dayPnl,
-      returnPct:
-        account.startingBalance > 0 ? (dayPnl / account.startingBalance) * 100 : 0,
-      tpCount: dayFills.filter((f) => f.kind === "TP").length,
-      slCount: dayFills.filter((f) => f.kind === "SL").length,
-    },
-    update: {
-      endEquity: snap.equity,
-      pnl: dayPnl,
-      tpCount: dayFills.filter((f) => f.kind === "TP").length,
-      slCount: dayFills.filter((f) => f.kind === "SL").length,
-    },
+  // 오늘 실현 = MT5 딜 히스토리(총손익과 동일: profit+swap+commission)
+  await syncTodayPnlFromMt5Deals({
+    accountId: account.id,
+    metaApiAccountId: metaId,
+    equity: snap.equity,
+    startingBalance: account.startingBalance,
   });
 
   return { ok: true as const, results };
@@ -1198,12 +1316,20 @@ export type RunAllBotsOpts = {
 
 /**
  * Tick all botEnabled accounts whose owner is approved (or admin).
- * Rejected/pending owners are skipped so approval gate applies to trading too.
+ * Rejected owners are skipped so ban gate applies to trading too.
  */
+function resolveTickBudgetMs(optsBudget?: number): number {
+  if (optsBudget != null && Number.isFinite(optsBudget)) return optsBudget;
+  const fromEnv = Number(process.env.ENGINE_BUDGET_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  // Local direct engine: do not starve accounts (serverless cron keeps 52s)
+  if (process.env.ENGINE_MODE === "direct") return 600_000;
+  return 52_000;
+}
+
 export async function runAllBots(opts: RunAllBotsOpts = {}) {
   const { undeployIdleAccounts } = await import("./cost-optimize");
-  const { ensureCloudLive } = await import("./metaapi");
-  const budgetMs = opts.budgetMs ?? 52_000;
+  const budgetMs = resolveTickBudgetMs(opts.budgetMs);
   const started = Date.now();
 
   if (!opts.skipIdleUndeploy) {
@@ -1238,8 +1364,12 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
     }
     try {
       if (a.status === "undeployed" && a.metaApiAccountId) {
-        // Cap redeploy wait so one cold account cannot starve the fleet
-        const remaining = Math.max(3_000, Math.min(12_000, budgetMs - elapsed - 2_000));
+        // Local engine can wait longer; serverless cron must stay under ~52s
+        const maxWait =
+          process.env.ENGINE_MODE === "direct"
+            ? Math.min(60_000, Number(process.env.ENGINE_CLOUD_WAIT_MS || 45_000))
+            : 12_000;
+        const remaining = Math.max(3_000, Math.min(maxWait, budgetMs - elapsed - 2_000));
         const live = await ensureCloudLive(String(a.metaApiAccountId), remaining);
         if (!live.ok) {
           results.push({

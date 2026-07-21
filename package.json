@@ -14,6 +14,12 @@
     "engine": "tsx --env-file=.env scripts/tick-direct.ts",
     "engine:http": "tsx --env-file=.env scripts/tick-loop.ts",
     "engine:direct": "tsx --env-file=.env scripts/tick-direct.ts",
+    "engine:supervise": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-engine.ps1",
+    "engine:verify-guard": "tsx scripts/verify-engine-guard.ts",
+    "ticks:record": "tsx --env-file=.env scripts/record-live-ticks.ts",
+    "ticks:g1": "tsx --env-file=.env scripts/reprovision-g1-ticks.ts",
+    "ticks:import": "tsx scripts/import-mt5-ticks.ts",
+    "ticks:backtest": "tsx scripts/_backtest-ticks.ts",
     "seed:admin": "tsx --env-file=.env scripts/seed-admin.ts"
   },
   "dependencies": {
@@ -24,6 +30,7 @@
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "tsx": "^4.20.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -36,7 +43,6 @@
     "eslint-config-next": "16.2.10",
     "prisma": "^5.22.0",
     "tailwindcss": "^4",
-    "tsx": "^4.20.3",
     "typescript": "^5"
   }
 }

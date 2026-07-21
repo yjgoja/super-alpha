@@ -1,13 +1,32 @@
+# Super Alpha always-on trading engine (PC 불필요, ~2초 틱)
+# Deploy: push to GitHub → Render Blueprint / `render services create`
+# Cost: Background Worker Starter ≈ $7/mo (always-on; Free tier 없음)
 services:
   - type: worker
     name: super-alpha-engine
     runtime: docker
     dockerfilePath: ./Dockerfile.engine
-    plan: free
+    repo: https://github.com/yjgoja/super-alpha
+    plan: starter
+    region: ohio
+    branch: master
+    autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: super-alpha-db
+          property: connectionString
       - key: METAAPI_TOKEN
         sync: false
+      - key: ENGINE_MODE
+        value: direct
       - key: ENGINE_INTERVAL_MS
-        value: "5000"
+        value: "2000"
+      - key: ENGINE_BUDGET_MS
+        value: "600000"
+      - key: ENGINE_DB_HOST_ALLOW
+        value: render.com
+      - key: ENGINE_CLOUD_WAIT_MS
+        value: "45000"
+      - key: NODE_ENV
+        value: production

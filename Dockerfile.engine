@@ -1,13 +1,21 @@
-# Always-on DCA worker (5s ticks) — Render / Railway / Fly / 로컬
-# 웹을 닫아도 물타기·익절이 거의 실시간에 가깝게 돈다.
+# Always-on Super Alpha trading engine (direct MetaAPI, ~2s ticks)
+# Runs on Render Background Worker — PC 없이 익절/물타기/손절
 FROM node:20-alpine
 WORKDIR /app
+
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci --omit=dev && npx prisma generate
+RUN npm ci && npx prisma generate
+
 COPY scripts ./scripts
 COPY src ./src
 COPY tsconfig.json ./
+
 ENV NODE_ENV=production
-ENV ENGINE_INTERVAL_MS=5000
-CMD ["npx", "tsx", "scripts/tick-loop.ts"]
+ENV ENGINE_MODE=direct
+ENV ENGINE_INTERVAL_MS=2000
+ENV ENGINE_BUDGET_MS=600000
+ENV ENGINE_DB_HOST_ALLOW=render.com
+ENV ENGINE_CLOUD_WAIT_MS=45000
+
+CMD ["npx", "tsx", "scripts/tick-direct.ts"]

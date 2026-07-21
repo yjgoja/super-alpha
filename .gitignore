@@ -47,3 +47,7 @@ prisma/dev.db-journal
 *.db
 
 .vercel
+
+# local engine runtime
+/scripts/out/engine.pid
+/scripts/out/engine-heartbeat.json

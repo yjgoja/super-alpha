@@ -20,8 +20,8 @@ GitHub + Vercel. Production 환경변수:
 
 | 변수 | 설명 |
 |------|------|
-| `DATABASE_URL` | Neon Postgres (서버리스는 pooled + `?pgbouncer=true`) |
-| `DIRECT_URL` | (권장) Neon non-pooled — `prisma migrate deploy` 시 pooled와 충돌하면 사용; schema에는 미연결 |
+| `DATABASE_URL` | **Always-on Postgres** (Render 등). Neon Free 서버리스 금지 — 쿼터 초과 시 실계좌 TP/SL 중단 |
+| `DIRECT_URL` | (선택) migrate용 non-pooled URL |
 | `AUTH_SECRET` | 세션 JWT (16자 이상) |
 | `METAAPI_TOKEN` | MetaAPI 토큰 |
 | `CRON_SECRET` | `/api/cron/tick` Bearer 전용 (GHA `bot-tick`) |
@@ -30,20 +30,20 @@ GitHub + Vercel. Production 환경변수:
 
 배포 후: `npx prisma migrate deploy` (또는 Vercel build에 포함).
 
-### 다회원 틱 (중요) — 웹 브라우저 불필요
+### 다회원 틱 (중요) — PC·웹 브라우저 불필요
 
-매매(TP/DCA/SL)는 **서버 사이드** MetaAPI입니다. 사이트 탭을 닫아도 봇은 멈춘 게 아닙니다.
+매매(TP/DCA/SL)는 **서버 사이드** MetaAPI입니다.
 
 | 경로 | 간격 | 역할 |
 |------|------|------|
-| **로컬** `npm run engine` / `engine:direct` | ≈ 2초 | PC 상시 켜짐 → 최저 지연 |
-| **GitHub Actions** `bot-tick.yml` | ≈ 1분 (루프) | PC 없이도 **승인된** `botEnabled` 전 회원 틱 |
-| **앱 오픈 시** `BotHeartbeat` | ≈ 10초 | 해당 로그인 유저만 **보조** (대체 불가) |
-| Vercel Hobby cron | ≈ 하루 1회 | 매매 엔진으로 쓰지 않음 |
+| **Render Worker** `super-alpha-engine` | ≈ 2초 | **주 엔진** — PC 꺼도 24시간 초단위 매매 |
+| **로컬** `npm run engine:supervise` | ≈ 2초 | 백업/개발용 (Render와 동시 켜도 틱락으로 중복주문 방지) |
+| **GitHub Actions** `bot-tick.yml` | ≈ 1분 | 워커 장애 시 분 단위 백업 |
+| **앱 오픈 시** `BotHeartbeat` | ≈ 10초 | 보조만 |
 
-**왜 웹 끄면 느려 보였나:** 예전에 GHA `schedule: * * * * *`가 공개 저장소에서 ~1시간마다만 실제 실행됐고, 브라우저 Heartbeat(10초)가 사실상 빠른 틱을 담당했습니다. 지금은 GHA 한 번이 뜨면 **~170분 동안 60초마다** `/api/cron/tick`을 호출해 브라우저 없이도 분 단위로 유지합니다.
+**초단위 실거래:** Render Background Worker(Starter ≈ $7/월)가 `scripts/tick-direct.ts`를 상시 실행합니다. Neon Free 서버리스는 사용 금지(쿼터 시 매매 중단).
 
-**초 단위 TP/SL/DCA**가 필요하면 PC에서 `npm run engine:direct`를 켜 두세요 (≈2초).
+로컬 백업이 필요하면 `scripts/start-engine.ps1`을 켜 두세요. 슈퍼바이저가 크래시 시 자동 재시작·`.env` 재로드합니다.
 
 스케일: 한 HTTP 틱에서 순차 처리 + ~52s 예산. 계좌가 많으면 다음 틱에서 round-robin. MetaAPI 429는 자동 재시도.
 

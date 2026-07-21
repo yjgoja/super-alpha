@@ -1,35 +1,210 @@
 /**
  * Direct realtime engine — MetaAPI + DB on this machine (lowest latency).
- * Prefer this over HTTP mode for 즉각 익절/물타기/손절.
  *
- *   DATABASE_URL=... METAAPI_TOKEN=... ENGINE_INTERVAL_MS=2000
- *   npm run engine:direct
+ * Hard requirements for live money:
+ * - Always-on Postgres (Neon serverless blocked)
+ * - Startup DB ping + env guard
+ * - Fatal DB errors → process.exit (supervisor restarts with fresh .env)
+ * - Single-instance PID lock
+ *
+ *   npm run engine
+ *   scripts/start-engine.ps1  (recommended: auto-restart supervisor)
  */
+import fs from "fs";
+import path from "path";
+import { prisma } from "../src/lib/db";
+import {
+  assertTradingDatabase,
+  isFatalEngineError,
+} from "../src/lib/engine-guard";
 import { runAllBots } from "../src/lib/meta-engine";
 
+process.env.ENGINE_MODE = "direct";
+
 const INTERVAL_MS = Math.max(1500, Number(process.env.ENGINE_INTERVAL_MS || 2000));
+const OUT_DIR = path.join(process.cwd(), "scripts", "out");
+const PID_FILE = path.join(OUT_DIR, "engine.pid");
+const HEARTBEAT_FILE = path.join(OUT_DIR, "engine-heartbeat.json");
+const MAX_CONSECUTIVE_FAILS = Math.max(
+  3,
+  Number(process.env.ENGINE_MAX_CONSECUTIVE_FAILS || 8),
+);
 
 let running = false;
 let ticks = 0;
+let consecutiveFails = 0;
+let shuttingDown = false;
+
+function ensureOutDir() {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+}
+
+function pidAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquirePidLock() {
+  ensureOutDir();
+  if (fs.existsSync(PID_FILE)) {
+    const raw = fs.readFileSync(PID_FILE, "utf8").trim();
+    const oldPid = Number(raw);
+    if (pidAlive(oldPid) && oldPid !== process.pid) {
+      throw new Error(
+        `[direct] 이미 엔진 실행 중 (pid=${oldPid}). 중복 기동 차단 — 기존 프로세스를 종료하세요.`,
+      );
+    }
+  }
+  fs.writeFileSync(PID_FILE, String(process.pid), "utf8");
+}
+
+function releasePidLock() {
+  try {
+    if (fs.existsSync(PID_FILE)) {
+      const raw = fs.readFileSync(PID_FILE, "utf8").trim();
+      if (Number(raw) === process.pid) fs.unlinkSync(PID_FILE);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function writeHeartbeat(extra: Record<string, unknown> = {}) {
+  try {
+    ensureOutDir();
+    fs.writeFileSync(
+      HEARTBEAT_FILE,
+      JSON.stringify(
+        {
+          pid: process.pid,
+          ticks,
+          consecutiveFails,
+          at: new Date().toISOString(),
+          intervalMs: INTERVAL_MS,
+          ...extra,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function pingDatabase() {
+  await prisma.$queryRaw`SELECT 1`;
+}
+
+async function clearStaleTickLocks() {
+  const r = await prisma.brokerAccount.updateMany({
+    data: { tickLockedAt: null },
+  });
+  if (r.count > 0) {
+    console.log(`[direct] cleared tick locks on ${r.count} account(s)`);
+  }
+}
+
+async function preflight() {
+  const { host } = assertTradingDatabase();
+  await pingDatabase();
+  await clearStaleTickLocks();
+  console.log(`[direct] DB ok host=${host}`);
+  return host;
+}
+
+function fatalExit(reason: unknown, code = 1): never {
+  console.error(`[direct] FATAL — exiting so supervisor can restart`, reason);
+  writeHeartbeat({ fatal: String(reason instanceof Error ? reason.message : reason) });
+  releasePidLock();
+  process.exit(code);
+}
 
 async function tick() {
-  if (running) return;
+  if (running || shuttingDown) return;
   running = true;
   const t0 = Date.now();
   try {
     const results = await runAllBots();
     ticks += 1;
+    consecutiveFails = 0;
+    const summary = JSON.stringify(results).slice(0, 600);
     console.log(
       `[direct] #${ticks} ${Date.now() - t0}ms accounts=${results.length}`,
-      JSON.stringify(results).slice(0, 500),
+      summary,
     );
+    writeHeartbeat({
+      lastMs: Date.now() - t0,
+      accounts: results.length,
+      ok: true,
+    });
+
+    const allHardFail =
+      results.length > 0 &&
+      results.every(
+        (r) =>
+          r &&
+          typeof r === "object" &&
+          "ok" in r &&
+          (r as { ok?: boolean }).ok === false &&
+          isFatalEngineError((r as { error?: string }).error),
+      );
+    if (allHardFail) {
+      fatalExit(results.map((r) => (r as { error?: string }).error).join("; "));
+    }
   } catch (e) {
-    console.error(`[direct] error`, e instanceof Error ? e.message : e);
+    consecutiveFails += 1;
+    console.error(
+      `[direct] error (${consecutiveFails}/${MAX_CONSECUTIVE_FAILS})`,
+      e instanceof Error ? e.message : e,
+    );
+    writeHeartbeat({
+      ok: false,
+      error: String(e instanceof Error ? e.message : e),
+    });
+    if (isFatalEngineError(e) || consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+      fatalExit(e);
+    }
   } finally {
     running = false;
   }
 }
 
-console.log(`[direct] start interval=${INTERVAL_MS}ms pid=${process.pid}`);
-tick();
-setInterval(tick, INTERVAL_MS);
+function setupSignals() {
+  const stop = (sig: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[direct] ${sig} — shutdown`);
+    releasePidLock();
+    void prisma.$disconnect().finally(() => process.exit(0));
+  };
+  process.on("SIGINT", () => stop("SIGINT"));
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  process.on("uncaughtException", (e) => fatalExit(e));
+  process.on("unhandledRejection", (e) => fatalExit(e));
+}
+
+async function main() {
+  setupSignals();
+  acquirePidLock();
+  try {
+    await preflight();
+  } catch (e) {
+    fatalExit(e);
+  }
+
+  console.log(`[direct] start interval=${INTERVAL_MS}ms pid=${process.pid}`);
+  writeHeartbeat({ started: true });
+  void tick();
+  setInterval(() => {
+    void tick();
+  }, INTERVAL_MS);
+}
+
+void main();
