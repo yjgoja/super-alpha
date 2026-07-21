@@ -1296,13 +1296,20 @@ async function runDcaTickInner(accountId: string) {
     });
   }
 
-  // 오늘 실현 = MT5 딜 히스토리(총손익과 동일: profit+swap+commission)
-  await syncTodayPnlFromMt5Deals({
-    accountId: account.id,
-    metaApiAccountId: metaId,
-    equity: snap.equity,
-    startingBalance: account.startingBalance,
-  });
+  // 오늘 실현 = MT5 딜 히스토리 (실패해도 매매 틱은 계속)
+  try {
+    await syncTodayPnlFromMt5Deals({
+      accountId: account.id,
+      metaApiAccountId: metaId,
+      equity: snap.equity,
+      startingBalance: account.startingBalance,
+    });
+  } catch (e) {
+    console.warn(
+      `[engine] pnl sync skip account=${account.id}`,
+      e instanceof Error ? e.message : e,
+    );
+  }
 
   return { ok: true as const, results };
 }

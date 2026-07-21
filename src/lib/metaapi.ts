@@ -6,19 +6,56 @@
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
-import { isTopUpOrHighReliabilityError, toKoreanError } from "./ko-errors";
+import { isRateLimitError, isTopUpOrHighReliabilityError, toKoreanError } from "./ko-errors";
 
 const PROVISIONING =
   process.env.METAAPI_PROVISIONING_URL ||
   "https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai";
 
-const REGION = process.env.METAAPI_REGION || "new-york";
+const REGION = process.env.METAAPI_REGION || "london";
 
 function clientBase(region = REGION) {
   return (
     process.env.METAAPI_CLIENT_URL ||
     `https://mt-client-api-v1.${region}.agiliumtrade.ai`
   );
+}
+
+/** Prefer account region, then common MetaAPI regions (this project uses london g2). */
+function clientApiBases(preferredRegion?: string | null) {
+  const regions = [
+    preferredRegion,
+    process.env.METAAPI_REGION,
+    "london",
+    "new-york",
+  ].filter(Boolean) as string[];
+  const urls: string[] = [];
+  if (process.env.METAAPI_CLIENT_URL) urls.push(process.env.METAAPI_CLIENT_URL);
+  for (const r of regions) {
+    const u = `https://mt-client-api-v1.${r}.agiliumtrade.ai`;
+    if (!urls.includes(u)) urls.push(u);
+  }
+  const fallback = "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai";
+  if (!urls.includes(fallback)) urls.push(fallback);
+  return urls;
+}
+
+const metaRegionCache = new Map<string, string>();
+
+async function resolveAccountRegion(metaApiAccountId: string): Promise<string | null> {
+  const id = String(metaApiAccountId);
+  const cached = metaRegionCache.get(id);
+  if (cached) return cached;
+  const st = await getMetaAccountStatus(id);
+  const region =
+    st.raw && typeof st.raw === "object"
+      ? String((st.raw as { region?: string }).region || "")
+      : "";
+  if (region) {
+    metaRegionCache.set(id, region);
+    return region;
+  }
+  return null;
 }
 
 function newTransactionId() {
@@ -74,50 +111,83 @@ async function api(
 ) {
   const t = token();
   if (!t) {
-    throw Object.assign(new Error("MetaAPI 토큰이 없습니다."), { code: "NO_TOKEN" });
+    return {
+      status: 503,
+      data: {
+        message: "MetaAPI 토큰이 설정되지 않았습니다. 관리자에게 문의하세요.",
+        details: "NO_TOKEN",
+      },
+    };
   }
 
-  const maxAttempts = 4;
+  const maxAttempts = 3;
   let lastStatus = 0;
   let lastData: unknown = null;
 
+  // Also reduce retries on abort so connect never stalls minutes
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch(`${base}${pathName}`, {
-      method,
-      headers: {
-        "auth-token": t,
-        Accept: "application/json",
-        ...(body ? { "Content-Type": "application/json" } : {}),
-        ...extraHeaders,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      cache: "no-store",
-    });
-
-    const text = await res.text();
-    let data: unknown = null;
     try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text, message: text };
-    }
-    lastStatus = res.status;
-    lastData = data;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12_000);
+      let res: Response;
+      try {
+        res = await fetch(`${base}${pathName}`, {
+          method,
+          headers: {
+            "auth-token": t,
+            Accept: "application/json",
+            ...(body ? { "Content-Type": "application/json" } : {}),
+            ...extraHeaders,
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
 
-    const retryable = res.status === 429 || res.status === 503;
-    if (retryable && attempt < maxAttempts) {
-      const ra = res.headers.get("retry-after");
-      const parsed = ra ? Number(ra) * 1000 : NaN;
-      const backoff = Number.isFinite(parsed)
-        ? Math.min(parsed, 8_000)
-        : Math.min(1000 * 2 ** (attempt - 1), 8_000);
-      await sleep(backoff);
-      continue;
+      const text = await res.text();
+      let data: unknown = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = { raw: text, message: text };
+      }
+      lastStatus = res.status;
+      lastData = data;
+
+      const retryable = res.status === 429 || res.status === 503 || res.status === 502;
+      if (retryable && attempt < maxAttempts) {
+        const ra = res.headers.get("retry-after");
+        const parsed = ra ? Number(ra) * 1000 : NaN;
+        const backoff = Number.isFinite(parsed)
+          ? Math.min(parsed, 8_000)
+          : Math.min(1000 * 2 ** (attempt - 1), 8_000);
+        await sleep(backoff);
+        continue;
+      }
+      return { status: res.status, data };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "network";
+      lastStatus = 0;
+      lastData = { message: msg, details: "NETWORK" };
+      // Abort / fetch failed: at most 2 quick retries
+      if (attempt < Math.min(maxAttempts, 2)) {
+        await sleep(600 * attempt);
+        continue;
+      }
+      return {
+        status: 503,
+        data: {
+          message: "네트워크 연결이 불안정합니다. 잠시 후 다시 시도하세요.",
+          details: "NETWORK",
+        },
+      };
     }
-    return { status: res.status, data };
   }
 
-  return { status: lastStatus, data: lastData };
+  return { status: lastStatus || 503, data: lastData };
 }
 
 function errCode(data: unknown): string {
@@ -203,34 +273,94 @@ function pickMetaAccountId(data: unknown): string {
 }
 
 export async function listMetaAccounts(): Promise<
-  Array<{ id: string; login: string; name: string; state: string; connectionStatus: string }>
+  Array<{
+    id: string;
+    login: string;
+    name: string;
+    state: string;
+    connectionStatus: string;
+    type?: string;
+    reliability?: string;
+  }>
 > {
-  const res = await api(PROVISIONING, "GET", "/users/current/accounts");
-  if (res.status >= 400 || !Array.isArray(res.data)) return [];
-  return (res.data as unknown[]).map((raw) => {
-    const x = raw as Record<string, unknown>;
-    return {
-      id: pickMetaAccountId(raw),
-      login: String(x.login || ""),
-      name: String(x.name || ""),
-      state: String(x.state || ""),
-      connectionStatus: String(x.connectionStatus || ""),
-    };
-  });
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const res = await api(PROVISIONING, "GET", "/users/current/accounts");
+    if (res.status === 429 || isRateLimitError(res.data)) {
+      await sleep(1500 * attempt);
+      continue;
+    }
+    if (res.status >= 400 || !Array.isArray(res.data)) return [];
+    return (res.data as unknown[]).map((raw) => {
+      const x = raw as Record<string, unknown>;
+      return {
+        id: pickMetaAccountId(raw),
+        login: String(x.login || ""),
+        name: String(x.name || ""),
+        state: String(x.state || ""),
+        connectionStatus: String(x.connectionStatus || ""),
+        type: x.type != null ? String(x.type) : undefined,
+        reliability: x.reliability != null ? String(x.reliability) : undefined,
+      };
+    });
+  }
+  return [];
 }
 
-/** Find already-created MetaAPI account for this MT5 login. */
-export async function findMetaAccountByLogin(login: string) {
-  const list = await listMetaAccounts();
-  const want = login.trim();
-  const exact =
-    list.find((a) => a.login === want) ||
-    list.find((a) => a.name === `SA-${want}`) ||
-    list.find((a) => a.name.includes(want));
-  if (exact) return exact;
-  // Never reuse an unrelated MetaAPI account (multi-user safety).
+/** Optional pin: METAAPI_PINNED_LOGINS=130063934:uuid,another:uuid */
+function pinnedMetaIdForLogin(login: string): string | null {
+  const raw = process.env.METAAPI_PINNED_LOGINS?.trim();
+  if (!raw) return null;
+  const want = loginDigits(login);
+  for (const part of raw.split(",")) {
+    const [lg, id] = part.split(":").map((s) => s.trim());
+    if (lg && id && loginDigits(lg) === want) return id;
+  }
   return null;
 }
+
+function loginDigits(s: string) {
+  return String(s || "").replace(/\D/g, "");
+}
+
+function metaAccountScore(a: {
+  state: string;
+  connectionStatus: string;
+  type?: string;
+}) {
+  const conn = a.connectionStatus.toUpperCase();
+  let s = 0;
+  if (a.state === "DEPLOYED") s += 10;
+  if (conn.includes("CONNECTED")) s += 20;
+  if (conn.includes("FULL")) s += 5;
+  if (a.type?.includes("g2")) s += 1;
+  return s;
+}
+
+/** All MetaAPI cloud accounts matching this MT5 login (handles MT5- prefix / SA- name). */
+export async function findAllMetaAccountsByLogin(login: string) {
+  const want = loginDigits(login);
+  if (!want) return [];
+  const list = await listMetaAccounts();
+  return list
+    .filter(
+      (a) =>
+        !!a.id &&
+        (loginDigits(a.login) === want ||
+          a.name === `SA-${want}` ||
+          a.name.includes(want) ||
+          a.login.includes(want)),
+    )
+    .sort((a, b) => metaAccountScore(b) - metaAccountScore(a));
+}
+
+/** Best already-created MetaAPI account for this MT5 login. */
+export async function findMetaAccountByLogin(login: string) {
+  const matches = await findAllMetaAccountsByLogin(login);
+  return matches[0] || null;
+}
+
+/** In-process lock so parallel connect retries cannot create duplicate clouds. */
+const provisionLocks = new Map<string, Promise<MetaSnap | MetaErr>>();
 
 /**
  * Create + deploy only (no long wait). Caller saves id then polls.
@@ -251,7 +381,6 @@ export async function startCloudAccount(input: {
   // Reuse if already registered in MetaAPI (avoids duplicate + stuck provisioning)
   const existing = await findMetaAccountByLogin(input.login);
   if (existing?.id) {
-    await deployAccount(existing.id).catch(() => null);
     return { ok: true, metaApiAccountId: existing.id };
   }
 
@@ -260,6 +389,10 @@ export async function startCloudAccount(input: {
   let lastErr: MetaErr | null = null;
 
   for (const mode of modes) {
+    // Re-check every loop — never create a second cloud for same login
+    const again0 = await findMetaAccountByLogin(input.login);
+    if (again0?.id) return { ok: true, metaApiAccountId: again0.id };
+
     const payload: Record<string, unknown> = {
       name: `SA-${input.login}`,
       type: mode.type,
@@ -278,17 +411,15 @@ export async function startCloudAccount(input: {
       "transaction-id": newTransactionId(),
     });
 
-    if (created.status >= 400) {
+    if (created.status >= 400 || created.status === 0) {
       const code = errCode(created.data);
-      // Duplicate / already exists → resolve via list
       const again = await findMetaAccountByLogin(input.login);
       if (again?.id) {
-        await deployAccount(again.id).catch(() => null);
         return { ok: true, metaApiAccountId: again.id };
       }
       lastErr = {
         ok: false,
-        code: code || "CREATE_FAILED",
+        code: code || (created.status === 0 ? "NETWORK" : "CREATE_FAILED"),
         message: toKoreanError(created.data, "클라우드 계좌 생성에 실패했습니다."),
       };
       if (code === "E_AUTH") {
@@ -299,7 +430,7 @@ export async function startCloudAccount(input: {
         };
       }
       if (isTopUpOrHighReliabilityError(created.data)) continue;
-      continue;
+      break;
     }
 
     const accountId = pickMetaAccountId(created.data);
@@ -308,14 +439,13 @@ export async function startCloudAccount(input: {
       continue;
     }
 
-    await deployAccount(accountId);
+    // Do not deploy here — deploy only when bot starts (cost save)
     return { ok: true, metaApiAccountId: accountId };
   }
 
   // Last resort: list by login
   const fallback = await findMetaAccountByLogin(input.login);
   if (fallback?.id) {
-    await deployAccount(fallback.id).catch(() => null);
     return { ok: true, metaApiAccountId: fallback.id };
   }
 
@@ -332,17 +462,31 @@ export async function waitUntilConnected(accountId: string, timeoutMs = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const res = await api(PROVISIONING, "GET", `/users/current/accounts/${accountId}`);
-    const state = (res.data as { state?: string })?.state;
-    const connectionStatus = (res.data as { connectionStatus?: string })?.connectionStatus;
+    const d = (res.data || {}) as Record<string, unknown>;
+    const state = String(d.state || "");
+    const connectionStatus = String(d.connectionStatus || "");
     const code = errCode(res.data);
+    const blob = JSON.stringify(res.data || {}).toLowerCase();
+
+    if (
+      code === "E_AUTH" ||
+      blob.includes("e_auth") ||
+      blob.includes("invalid account") ||
+      blob.includes("invalid password") ||
+      blob.includes("authentication failed")
+    ) {
+      return {
+        ok: false as const,
+        code: "E_AUTH",
+        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+      };
+    }
 
     if (
       state === "DEPLOYED" &&
       (connectionStatus === "CONNECTED" ||
         connectionStatus === "CONNECTED_NEW_ACCOUNT" ||
-        String(connectionStatus || "")
-          .toUpperCase()
-          .includes("CONNECTED"))
+        connectionStatus.toUpperCase().includes("CONNECTED"))
     ) {
       return { ok: true as const };
     }
@@ -358,13 +502,117 @@ export async function waitUntilConnected(accountId: string, timeoutMs = 20000) {
         ),
       };
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await sleep(2000);
   }
   return {
     ok: false as const,
     code: "TIMEOUT",
-    message: "서버 연결 시간이 초과되었습니다. 계좌·서버명을 확인한 뒤 다시 승인해주세요.",
+    message: "서버 연결 시간이 초과되었습니다. 계좌·서버명을 확인한 뒤 다시 시도해주세요.",
   };
+}
+
+/**
+ * Update credentials on an existing MetaAPI cloud and prove the password works.
+ * Wrong password → E_AUTH. Never soft-succeed without broker proof.
+ */
+async function verifyPasswordOnExistingAccount(input: {
+  metaApiAccountId: string;
+  login: string;
+  password: string;
+  server: string;
+  name?: string;
+}): Promise<MetaSnap | MetaErr> {
+  const id = String(input.metaApiAccountId);
+
+  const updated = await api(PROVISIONING, "PUT", `/users/current/accounts/${id}`, {
+    password: input.password,
+    login: input.login,
+    name: `SA-${input.login}`,
+    server: input.server,
+  });
+
+  if (updated.status === 429 || isRateLimitError(updated.data)) {
+    return {
+      ok: false,
+      code: "RATE_LIMIT",
+      message: "요청이 너무 많습니다. 1분 후 다시 시도하세요.",
+    };
+  }
+
+  const updateCode = errCode(updated.data);
+  const updateBlob = JSON.stringify(updated.data || {}).toLowerCase();
+  if (
+    updateCode === "E_AUTH" ||
+    updateBlob.includes("e_auth") ||
+    updateBlob.includes("invalid password") ||
+    updateBlob.includes("invalid account") ||
+    (updated.status === 401 && !isRateLimitError(updated.data))
+  ) {
+    return {
+      ok: false,
+      code: "E_AUTH",
+      message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+    };
+  }
+
+  if (updated.status === 0 || updated.status >= 400) {
+    // Still try deploy — some PUT responses are noisy but deploy reveals E_AUTH
+  }
+
+  await deployAccount(id);
+  const waited = await waitUntilConnected(id, 28000);
+
+  if (!waited.ok) {
+    if (waited.code === "E_AUTH") {
+      void undeployAccount(id).catch(() => null);
+      return {
+        ok: false,
+        code: "E_AUTH",
+        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+      };
+    }
+
+    // Snapshot success = credentials accepted by broker
+    const snap = await fetchSnapshot(id);
+    if (snap.ok) {
+      void undeployAccount(id).catch(() => null);
+      return snap;
+    }
+
+    void undeployAccount(id).catch(() => null);
+    if (waited.code === "TIMEOUT") {
+      return {
+        ok: false,
+        code: "TIMEOUT",
+        message: "비밀번호 검증에 시간이 초과되었습니다. 잠시 후 다시 시도하세요.",
+      };
+    }
+    return {
+      ok: false,
+      code: waited.code || "DEPLOY_FAILED",
+      message: toKoreanError(waited.message, "계좌 검증에 실패했습니다."),
+    };
+  }
+
+  const snap = await fetchSnapshot(id);
+  if (snap.ok) {
+    void undeployAccount(id).catch(() => null);
+    return snap;
+  }
+
+  // Connected but snapshot slow — retry before accepting empty balances
+  for (let i = 0; i < 5; i++) {
+    await sleep(2500);
+    const again = await fetchSnapshot(id);
+    if (again.ok) {
+      void undeployAccount(id).catch(() => null);
+      return again;
+    }
+  }
+
+  void undeployAccount(id).catch(() => null);
+  // Credentials OK; balances unknown until next live sync
+  return softLinkSnap({ login: input.login, server: input.server }, id, input.name);
 }
 
 /** Deploy + wait until MetaAPI can read the broker account (for live sync). */
@@ -401,13 +649,37 @@ export async function removeMetaAccount(metaApiAccountId: string) {
 
 type CloudMode = { type: "cloud-g1" | "cloud-g2"; reliability: "regular" | "high"; label: string };
 
-/** Prefer modes that work without high-reliability wallet top-up. */
+/**
+ * Default: cheap g1/regular only (stops duplicate g2 high burn).
+ * Set METAAPI_PREFER_G2=1 to try expensive g2/high first.
+ */
 function provisionModes(): CloudMode[] {
   const g1: CloudMode = { type: "cloud-g1", reliability: "regular", label: "일반(g1)" };
   const g2: CloudMode = { type: "cloud-g2", reliability: "high", label: "고성능(g2)" };
-  // Try g2 first (after wallet top-up); fall back to g1 if high-reliability blocked
   if (process.env.METAAPI_FORCE_G1 === "1") return [g1];
-  return [g2, g1];
+  if (process.env.METAAPI_PREFER_G2 === "1") return [g2, g1];
+  return [g1];
+}
+
+function softLinkSnap(
+  input: { login: string; server: string },
+  metaId: string,
+  name?: string,
+): MetaSnap {
+  return {
+    ok: true,
+    metaApiAccountId: metaId,
+    balance: 0,
+    equity: 0,
+    margin: 0,
+    freeMargin: 0,
+    leverage: 0,
+    currency: "USD",
+    name: name || `SA-${input.login}`,
+    server: input.server,
+    login: input.login,
+    positions: [],
+  };
 }
 
 async function createAndConnect(input: {
@@ -417,6 +689,9 @@ async function createAndConnect(input: {
   profileId?: string;
   mode: CloudMode;
 }): Promise<MetaSnap | MetaErr> {
+  const already = await findMetaAccountByLogin(input.login);
+  if (already?.id) return softLinkSnap(input, already.id, already.name);
+
   const payload: Record<string, unknown> = {
     name: `SA-${input.login}`,
     type: input.mode.type,
@@ -435,13 +710,36 @@ async function createAndConnect(input: {
     "transaction-id": newTransactionId(),
   });
 
-  if (created.status >= 400) {
-    const code = errCode(created.data);
-    if (isTopUpOrHighReliabilityError(created.data)) {
+  if (created.status === 0 || created.status >= 400) {
+    const found = await findMetaAccountByLogin(input.login);
+    if (found?.id) return softLinkSnap(input, found.id, found.name);
+    if (created.status === 429 || isRateLimitError(created.data)) {
       return {
         ok: false,
-        code: "TOP_UP",
-        message: toKoreanError(created.data),
+        code: "RATE_LIMIT",
+        message: "요청이 너무 많습니다. 1분 후 다시 시도하세요.",
+      };
+    }
+    if (created.status === 0 || created.status === 503) {
+      return {
+        ok: false,
+        code: "NETWORK",
+        message: toKoreanError(
+          created.data,
+          "네트워크 연결이 불안정합니다. 잠시 후 다시 시도하세요.",
+        ),
+      };
+    }
+    const code = errCode(created.data);
+    if (isTopUpOrHighReliabilityError(created.data)) {
+      return { ok: false, code: "TOP_UP", message: toKoreanError(created.data) };
+    }
+    // MetaAPI sometimes returns HTTP 401 for rate limit — never call that E_AUTH
+    if (created.status === 401 && isRateLimitError(created.data)) {
+      return {
+        ok: false,
+        code: "RATE_LIMIT",
+        message: "요청이 너무 많습니다. 1분 후 다시 시도하세요.",
       };
     }
     return {
@@ -453,40 +751,18 @@ async function createAndConnect(input: {
 
   const accountId = pickMetaAccountId(created.data);
   if (!accountId) {
+    const found = await findMetaAccountByLogin(input.login);
+    if (found?.id) return softLinkSnap(input, found.id, found.name);
     return { ok: false, code: "UNKNOWN", message: "클라우드 계좌 ID를 받지 못했습니다." };
   }
 
-  const dep = await deployAccount(accountId);
-  if (dep.status >= 400 && isTopUpOrHighReliabilityError(dep.data)) {
-    await removeMetaAccount(accountId);
-    return {
-      ok: false,
-      code: "TOP_UP",
-      message: toKoreanError(dep.data),
-    };
-  }
-
-  const waited = await waitUntilConnected(accountId);
-  if (!waited.ok) {
-    await removeMetaAccount(accountId);
-    return {
-      ok: false,
-      code: waited.code,
-      message: toKoreanError(waited.message, waited.message),
-    };
-  }
-
-  const snap = await fetchSnapshot(accountId);
-  if (!snap.ok) {
-    await removeMetaAccount(accountId);
-    return snap;
-  }
-  return snap;
+  // Do not await deploy during connect — hang risk; bot start will deploy
+  void deployAccount(accountId).catch(() => null);
+  return softLinkSnap(input, accountId);
 }
 
 /**
- * Create MetaAPI account and verify broker login.
- * Tries regular g1 first (no high-reliability top-up required), then g2.
+ * Idempotent MetaAPI link: reuse existing SA-{login} clouds; create at most one cheap g1.
  */
 export async function provisionTradingAccount(input: {
   login: string;
@@ -494,81 +770,145 @@ export async function provisionTradingAccount(input: {
   server: string;
   reuseAccountId?: string | null;
 }): Promise<MetaSnap | MetaErr> {
-  if (!token()) {
-    return {
-      ok: false,
-      code: "NO_TOKEN",
-      message: "MetaAPI 토큰이 설정되지 않았습니다. 관리자에게 문의하세요.",
-    };
-  }
+  const lockKey = loginDigits(input.login) || input.login;
+  const running = provisionLocks.get(lockKey);
+  if (running) return running;
 
-  if (input.reuseAccountId) {
-    await api(PROVISIONING, "PUT", `/users/current/accounts/${input.reuseAccountId}`, {
-      password: input.password,
-      login: input.login,
-      name: `SA-${input.login}`,
-      server: input.server,
-    });
-    await deployAccount(input.reuseAccountId);
-    const waited = await waitUntilConnected(input.reuseAccountId);
-    if (!waited.ok) {
-      return { ok: false, code: waited.code, message: toKoreanError(waited.message, waited.message) };
-    }
-    return fetchSnapshot(input.reuseAccountId);
-  }
+  const job = (async (): Promise<MetaSnap | MetaErr> => {
+    try {
+      if (!token()) {
+        return {
+          ok: false,
+          code: "NO_TOKEN",
+          message: "MetaAPI 토큰이 설정되지 않았습니다. 관리자에게 문의하세요.",
+        };
+      }
 
-  const profileId = await ensureProvisioningProfile();
-  const modes = provisionModes();
-  let lastErr: MetaErr | null = null;
+      const existingList = await findAllMetaAccountsByLogin(input.login);
+      const pinned = pinnedMetaIdForLogin(input.login);
+      const reuseId =
+        (input.reuseAccountId && String(input.reuseAccountId)) ||
+        (existingList[0]?.id ? String(existingList[0].id) : "") ||
+        pinned ||
+        "";
 
-  for (const mode of modes) {
-    const result = await createAndConnect({
-      login: input.login,
-      password: input.password,
-      server: input.server,
-      profileId,
-      mode,
-    });
-    if (result.ok) return result;
+      if (reuseId) {
+        return verifyPasswordOnExistingAccount({
+          metaApiAccountId: reuseId,
+          login: input.login,
+          password: input.password,
+          server: input.server,
+          name: existingList[0]?.name,
+        });
+      }
 
-    lastErr = result;
-    // Retry next mode on billing / reliability / create failures
-    const retryable =
-      result.code === "TOP_UP" ||
-      isTopUpOrHighReliabilityError(result.message) ||
-      result.code === "CREATE_FAILED" ||
-      result.code === "UNKNOWN";
-    if (result.code === "E_AUTH") {
+      const profileId = await ensureProvisioningProfile();
+      const modes = provisionModes();
+      let lastErr: MetaErr | null = null;
+
+      for (const mode of modes) {
+        const again = await findMetaAccountByLogin(input.login);
+        if (again?.id) {
+          return verifyPasswordOnExistingAccount({
+            metaApiAccountId: again.id,
+            login: input.login,
+            password: input.password,
+            server: input.server,
+            name: again.name,
+          });
+        }
+
+        const result = await createAndConnect({
+          login: input.login,
+          password: input.password,
+          server: input.server,
+          profileId,
+          mode,
+        });
+        if (result.ok) {
+          // New cloud: prove password via deploy (create alone is not enough)
+          return verifyPasswordOnExistingAccount({
+            metaApiAccountId: result.metaApiAccountId,
+            login: input.login,
+            password: input.password,
+            server: input.server,
+            name: result.name,
+          });
+        }
+
+        lastErr = result;
+
+        // Rate limit: never soft-link without password proof
+        if (result.code === "RATE_LIMIT" || isRateLimitError(result.message) || isRateLimitError(result.code)) {
+          await sleep(2000);
+          const afterRl = await findMetaAccountByLogin(input.login);
+          if (afterRl?.id) {
+            return verifyPasswordOnExistingAccount({
+              metaApiAccountId: afterRl.id,
+              login: input.login,
+              password: input.password,
+              server: input.server,
+              name: afterRl.name,
+            });
+          }
+          return {
+            ok: false,
+            code: "RATE_LIMIT",
+            message: "요청이 너무 많습니다. 1분 후 다시 시도하세요.",
+          };
+        }
+
+        if (result.code === "E_AUTH") {
+          return {
+            ok: false,
+            code: "E_AUTH",
+            message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+          };
+        }
+        if (result.code === "E_SRV_NOT_FOUND") {
+          return {
+            ok: false,
+            code: "E_SRV_NOT_FOUND",
+            message: `서버 '${input.server}' 를 찾지 못했습니다. 서버명을 확인하세요.`,
+          };
+        }
+        if (result.code !== "TOP_UP" && !isTopUpOrHighReliabilityError(result.message)) break;
+      }
+
+      const final = await findMetaAccountByLogin(input.login);
+      if (final?.id) {
+        return verifyPasswordOnExistingAccount({
+          metaApiAccountId: final.id,
+          login: input.login,
+          password: input.password,
+          server: input.server,
+          name: final.name,
+        });
+      }
+
       return {
         ok: false,
-        code: "E_AUTH",
-        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+        code: lastErr?.code || "NETWORK",
+        message: toKoreanError(
+          lastErr?.message,
+          "계좌 연결에 실패했습니다. 잠시 후 다시 시도하세요.",
+        ),
       };
-    }
-    if (result.code === "E_SRV_NOT_FOUND") {
+    } catch (e) {
       return {
         ok: false,
-        code: "E_SRV_NOT_FOUND",
-        message: `서버 '${input.server}' 를 찾지 못했습니다. 서버명을 확인하세요.`,
+        code: "NETWORK",
+        message: toKoreanError(e, "계좌 연결에 실패했습니다. 잠시 후 다시 시도하세요."),
       };
     }
-    if (!retryable) {
-      return {
-        ok: false,
-        code: result.code,
-        message: toKoreanError(result.message, result.message),
-      };
-    }
-    // continue to next mode for top-up / create issues
-  }
+  })();
 
-  return (
-    lastErr || {
-      ok: false,
-      code: "UNKNOWN",
-      message: "클라우드 계좌 연동에 실패했습니다. MetaAPI 잔액·구독을 확인하세요.",
-    }
-  );
+  provisionLocks.set(lockKey, job);
+  try {
+    return await job;
+  } finally {
+    provisionLocks.delete(lockKey);
+  }
 }
 
 function mapPositions(raw: unknown[]): MetaSnap["positions"] {
@@ -592,7 +932,8 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
 }
 
 export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
-  const bases = [clientBase(), "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai"];
+  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
+  const bases = clientApiBases(region);
   let info: unknown = null;
   let positionsRaw: unknown[] = [];
   let positionsErr: string | null = null;
@@ -628,12 +969,9 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
     };
   }
 
+  // Positions failure should not wipe balance/equity display
   if (positionsErr) {
-    return {
-      ok: false,
-      code: "POSITIONS_FETCH",
-      message: positionsErr,
-    };
+    positionsRaw = [];
   }
 
   const i = info as Record<string, unknown>;
@@ -691,7 +1029,8 @@ export async function listBrokerSymbols(metaApiAccountId: string): Promise<strin
   const cached = brokerSymbolsListCache.get(metaApiAccountId);
   if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.symbols;
 
-  const bases = [clientBase(), "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai"];
+  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
+  const bases = clientApiBases(region);
   for (const base of bases) {
     const res = await api(base, "GET", `/users/current/accounts/${metaApiAccountId}/symbols`);
     if (res.status < 400 && Array.isArray(res.data)) {
@@ -744,7 +1083,8 @@ export async function resolveBrokerSymbol(metaApiAccountId: string, logical: str
 }
 
 async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
-  const bases = [clientBase(), "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai"];
+  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
+  const bases = clientApiBases(region);
   for (const base of bases) {
     const res = await api(
       base,
@@ -871,6 +1211,47 @@ export async function closePositionsBySymbol(metaApiAccountId: string, symbol: s
 }
 
 /**
+ * 방향별 심볼 청산 — 양방향(dualDirection) 운용용. POSITIONS_CLOSE_SYMBOL은 방향
+ * 구분이 없어 반대편 바스켓까지 닫으므로, 해당 방향 포지션만 ID로 개별 청산한다.
+ */
+export async function closePositionsBySymbolDirection(
+  metaApiAccountId: string,
+  symbol: string,
+  direction: "BUY" | "SELL",
+) {
+  const snap = await fetchSnapshot(metaApiAccountId);
+  if (!snap.ok) return snap;
+  const targets = snap.positions.filter(
+    (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
+  );
+  if (targets.length === 0) return { ok: true as const, closed: 0, remaining: 0 };
+
+  // 소량씩 병렬 청산 (틱 타임아웃 방지)
+  const ids = targets.map((t) => t.id).filter(Boolean);
+  const BATCH = 10;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    await Promise.all(ids.slice(i, i + BATCH).map((id) => closePosition(metaApiAccountId, id)));
+  }
+
+  const after = await fetchSnapshot(metaApiAccountId);
+  if (!after.ok) {
+    return { ok: false as const, message: after.message || "청산 후 잔여 확인 실패", closed: targets.length, remaining: -1 };
+  }
+  const remaining = after.positions.filter(
+    (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
+  );
+  if (remaining.length > 0) {
+    return {
+      ok: false as const,
+      message: `${symbol} ${direction} 청산 후 ${remaining.length}건 잔여`,
+      closed: targets.length - remaining.length,
+      remaining: remaining.length,
+    };
+  }
+  return { ok: true as const, closed: targets.length, remaining: 0 };
+}
+
+/**
  * 계좌 전체 청산. 심볼별 POSITIONS_CLOSE_SYMBOL을 병렬 호출(MT5 Close All과 동일하게 일괄),
  * 잔여가 있으면 심볼 재시도 + POSITION_CLOSE_ID 병렬 폴백 1회.
  */
@@ -937,4 +1318,100 @@ export async function verifyMt5Credentials(input: {
 
 export async function syncMt5Account(metaApiAccountId: string) {
   return fetchSnapshot(metaApiAccountId);
+}
+
+export type MetaDeal = {
+  id: string;
+  type: string;
+  entryType?: string;
+  symbol: string;
+  profit: number;
+  swap: number;
+  commission: number;
+  time: string;
+  volume: number;
+};
+
+const TRADE_DEAL_TYPES = new Set(["DEAL_TYPE_BUY", "DEAL_TYPE_SELL"]);
+
+/** MT5 총손익과 동일: profit + swap + commission (잔고입출금 제외) */
+export function dealNetPnl(d: Pick<MetaDeal, "profit" | "swap" | "commission">) {
+  return Number(d.profit || 0) + Number(d.swap || 0) + Number(d.commission || 0);
+}
+
+export function sumMt5TradePnl(deals: MetaDeal[]) {
+  return deals
+    .filter((d) => TRADE_DEAL_TYPES.has(d.type))
+    .reduce((s, d) => s + dealNetPnl(d), 0);
+}
+
+function mapDeals(raw: unknown[]): MetaDeal[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((row) => {
+    const x = row as Record<string, unknown>;
+    return {
+      id: String(x.id || ""),
+      type: String(x.type || ""),
+      entryType: x.entryType != null ? String(x.entryType) : undefined,
+      symbol: String(x.symbol || ""),
+      profit: Number(x.profit || 0),
+      swap: Number(x.swap || 0),
+      commission: Number(x.commission || 0),
+      time: String(x.time || ""),
+      volume: Number(x.volume || 0),
+    };
+  });
+}
+
+/**
+ * MT5 거래 내역(딜) — 터미널 계정 기록과 동일 소스.
+ * GET .../history-deals/time/:start/:end
+ */
+export async function fetchHistoryDeals(
+  metaApiAccountId: string,
+  start: Date,
+  end: Date,
+): Promise<{ ok: true; deals: MetaDeal[] } | MetaErr> {
+  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
+  const bases = clientApiBases(region);
+  const startIso = encodeURIComponent(start.toISOString());
+  const endIso = encodeURIComponent(end.toISOString());
+  const pathBase = `/users/current/accounts/${metaApiAccountId}/history-deals/time/${startIso}/${endIso}`;
+
+  let lastErr: MetaErr | null = null;
+  for (const base of bases) {
+    const all: MetaDeal[] = [];
+    let offset = 0;
+    const limit = 1000;
+    let ok = false;
+    for (;;) {
+      const res = await api(base, "GET", `${pathBase}?offset=${offset}&limit=${limit}`);
+      if (res.status >= 400 || !Array.isArray(res.data)) {
+        lastErr = {
+          ok: false,
+          code: `HTTP_${res.status}`,
+          message: toKoreanError(
+            (res.data as { message?: string } | null)?.message,
+            "MT5 거래내역을 가져오지 못했습니다.",
+          ),
+        };
+        break;
+      }
+      ok = true;
+      const chunk = mapDeals(res.data);
+      all.push(...chunk);
+      if (chunk.length < limit) break;
+      offset += limit;
+      if (offset > 20_000) break;
+    }
+    if (ok) return { ok: true, deals: all };
+  }
+
+  return (
+    lastErr || {
+      ok: false,
+      code: "NETWORK",
+      message: "MT5 거래내역을 가져오지 못했습니다.",
+    }
+  );
 }
