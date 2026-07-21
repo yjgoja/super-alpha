@@ -3,6 +3,8 @@
 무설치 MT5 자동매매 데모 웹앱.  
 계좌번호 · 비밀번호 · 서버 3칸 입력 → **즉시 연결**.
 
+**Production:** https://www.superalpha.kr/
+
 ## 로컬 실행
 
 ```bash
@@ -55,9 +57,8 @@ GitHub + Vercel. Production 환경변수:
 - `AUTO_APPROVE_USERS=1`이면 즉시 승인 (오픈 베타용)
 - 거절(`rejected`) 시 API·cron·live sync 모두 차단, 봇 정지
 
-### 커스텀 도메인 (나중에 — DNS는 여기서 설정하지 않음)
+### 커스텀 도메인
 
-1. Vercel → Domains에 도메인 추가·DNS 확인
-2. GHA `BOT_TICK_URL`을 새 도메인 `/api/cron/tick`으로 갱신
-3. `AUTH_SECRET` / 쿠키는 동일 배포면 유지 (Secure 쿠키는 HTTPS 필요)
-4. OAuth/외부 콜백이 있으면 허용 도메인 목록 갱신
+- 운영 도메인: `https://www.superalpha.kr/` (`superalpha.kr` → www 리다이렉트)
+- GHA `BOT_TICK_URL` = `https://www.superalpha.kr/api/cron/tick`
+- 세션 쿠키는 host-only(`path=/`) — www와 apex를 섞어 쓰지 말고 **www**로 접속

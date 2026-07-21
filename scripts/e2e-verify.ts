@@ -164,7 +164,7 @@ async function main() {
   console.log("\n=== 5) Live cron ===");
   const secret = process.env.CRON_SECRET || "";
   const tickUrl =
-    process.env.TICK_URL || "https://super-alpha-inky.vercel.app/api/cron/tick";
+    process.env.TICK_URL || "https://www.superalpha.kr/api/cron/tick";
   if (!secret) {
     assert(false, "CRON_SECRET missing");
   } else {
@@ -182,7 +182,7 @@ async function main() {
   if (!admin.password) {
     console.log("SKIP: prod login (set SEED_ADMIN_PASSWORD to exercise login)");
   } else {
-    const authRes = await fetch("https://super-alpha-inky.vercel.app/api/auth", {
+    const authRes = await fetch("https://www.superalpha.kr/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

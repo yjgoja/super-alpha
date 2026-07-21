@@ -4,7 +4,7 @@
  */
 const INTERVAL_MS = Math.max(1500, Number(process.env.ENGINE_INTERVAL_MS || 2000));
 const TICK_URL =
-  process.env.TICK_URL || "https://super-alpha-inky.vercel.app/api/cron/tick";
+  process.env.TICK_URL || "https://www.superalpha.kr/api/cron/tick";
 const SECRET = process.env.CRON_SECRET || "";
 
 async function tick() {

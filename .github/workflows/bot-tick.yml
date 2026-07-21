@@ -29,7 +29,7 @@ jobs:
             echo "CRON_SECRET missing"
             exit 1
           fi
-          URL="${BOT_TICK_URL:-https://super-alpha-inky.vercel.app/api/cron/tick}"
+          URL="${BOT_TICK_URL:-https://www.superalpha.kr/api/cron/tick}"
           # Stay up ~170 min; next successful schedule restarts via concurrency.
           END=$((SECONDS + 170 * 60))
           n=0

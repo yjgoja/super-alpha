@@ -3,7 +3,7 @@
  * No Next.js/src imports (keeps `next build` typecheck clean).
  *
  *   CRON_SECRET=...
- *   TICK_URL=https://super-alpha-inky.vercel.app/api/cron/tick
+ *   TICK_URL=https://www.superalpha.kr/api/cron/tick
  *   ENGINE_INTERVAL_MS=2000
  *   npm run engine
  */
@@ -14,7 +14,7 @@ const INTERVAL_MS = Math.max(
 const TICK_URL =
   process.env.TICK_URL ||
   process.env.BOT_TICK_URL ||
-  "https://super-alpha-inky.vercel.app/api/cron/tick";
+  "https://www.superalpha.kr/api/cron/tick";
 const SECRET = process.env.CRON_SECRET || "";
 
 let running = false;
