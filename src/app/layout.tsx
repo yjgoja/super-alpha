@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Instrument_Serif, Manrope, Outfit, Syne } from "next/font/google";
+import { Instrument_Serif, Manrope } from "next/font/google";
 import "./globals.css";
 
 const display = Instrument_Serif({
@@ -13,26 +13,14 @@ const body = Manrope({
   variable: "--font-body",
 });
 
-const landingDisplay = Syne({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  variable: "--font-landing-display",
-});
-
-const landingBody = Outfit({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-landing-body",
-});
-
 export const metadata: Metadata = {
   title: "Super Alpha | 무설치 자동매매",
   description:
-    "EA 설치 없이 계좌 세 칸만 연결하세요. 클라우드 엔진이 초단위로 익절·물타기·손절을 실행합니다.",
+    "계좌 세 칸만 넣으면 설치 없이 MT5 자동매매가 바로 시작됩니다. 클라우드 엔진이 초단위로 동작합니다.",
   metadataBase: new URL("https://www.superalpha.kr"),
   openGraph: {
-    title: "Super Alpha — 설치 없는 자동매매",
-    description: "EA·VPS 없이, 계좌만 연결하면 클라우드 엔진이 바로 돌아갑니다.",
+    title: "Super Alpha",
+    description: "설치 없이, 계좌 3칸으로 시작하는 자동매매.",
     url: "https://www.superalpha.kr",
     siteName: "Super Alpha",
     locale: "ko_KR",
@@ -47,9 +35,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
-      <body
-        className={`${display.variable} ${body.variable} ${landingDisplay.variable} ${landingBody.variable} antialiased`}
-      >
+      <body className={`${display.variable} ${body.variable} antialiased`}>
         {children}
       </body>
     </html>
