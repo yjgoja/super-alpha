@@ -45,6 +45,18 @@ export const LOGIC_OPTIONS = [
   },
 ] as const;
 
+/** 메인으로 노출하는 알파 전략 4개 */
+export const PRIMARY_LOGIC_IDS = [
+  "martin_9_068",
+  "martin_9_35",
+  "martin_9_65",
+  "dubai_bruno_313",
+] as const;
+
+export const PRIMARY_LOGIC_OPTIONS = LOGIC_OPTIONS.filter((l) =>
+  (PRIMARY_LOGIC_IDS as readonly string[]).includes(l.id),
+);
+
 export type LogicId = (typeof LOGIC_OPTIONS)[number]["id"];
 
 export const LOGIC_IDS = LOGIC_OPTIONS.map((l) => l.id) as [

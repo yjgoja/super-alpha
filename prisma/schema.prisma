@@ -71,7 +71,7 @@ model StrategyLogic {
   id        String   @id @default(cuid())
   accountId String
   account   BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  /// dubai_bruno_313 | martin_9..12 | custom
+  /// dubai_bruno_313(알파지속로직) | martin_9..12 | custom
   logicId   String
   name      String?
   /// { mode, leverageBase, startLots?, takeProfitPct?, stopLossPct?, takeProfitUsd?, stopLossUsd?, levels?: [{lots,profit,drop}] }
