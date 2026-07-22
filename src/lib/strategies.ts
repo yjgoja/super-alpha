@@ -99,8 +99,8 @@ export const LOGIC_OPTIONS = [
   },
   {
     id: "dubai_bruno_313",
-    name: "두바이부르노 313차",
-    desc: "정본 314레벨(L0+313 물타기) 표 · 익절 ROI=회차별(20→25→30→45→60→70→100→110→125%) · 물타기 drop -20~-350% · 손절 225% · 익절/손절/물타기 = 바스켓 마진 ROI",
+    name: "알파지속로직",
+    desc: "정본 314레벨(L0+313 물타기) · 익절 ROI 회차별(20→25→30→45→60→70→100→110→125%) · 물타기 drop -20~-350% · 손절 225% · 바스켓 마진 ROI",
   },
   {
     id: "custom",
@@ -116,9 +116,11 @@ export const LOGIC_IDS = LOGIC_OPTIONS.map((l) => l.id) as [
   ...LogicId[],
 ];
 
-/** 삭제된 프리셋 → 동일 표의 두바이부르노 */
+/** 삭제·구명칭 프리셋 → 알파지속로직(내부 id dubai_bruno_313) */
 export const LEGACY_LOGIC_ALIASES: Record<string, LogicId> = {
   dca_1000: "dubai_bruno_313",
+  알파지속로직: "dubai_bruno_313",
+  alpha_sustain: "dubai_bruno_313",
 };
 
 export function normalizeLogicId(logic: string): string {
