@@ -308,50 +308,58 @@ export default function BotPage() {
   }
 
   async function addBot(symbol = addSymbol) {
-    if (!symbol || used.has(symbol)) {
+    const sym = (symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!sym || used.has(sym)) {
       setMsg("이미 추가된 종목이거나 선택할 종목이 없습니다.");
       return;
     }
     setBusy(true);
     setMsg("");
-    const meta = tableLogicMeta("dubai_bruno_313");
-    const res = await fetch("/api/symbol-bots", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        symbol,
-        enabled: false,
-        logic: "dubai_bruno_313",
-        entryCount: meta.count,
-        entryMultiplier: 1,
+    try {
+      const meta = tableLogicMeta("dubai_bruno_313");
+      const usd = resolveTpSlUsd({
+        symbol: sym,
         startLots: 0.01,
-        ...(() => {
-          const usd = resolveTpSlUsd({
-            symbol,
-            startLots: 0.01,
-            takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
-            stopLossPct: DCA1000_DEFAULT_SL_ROI,
-          });
-          return {
-            takeProfitPct: usd.takeProfitPct,
-            stopLossPct: usd.stopLossPct,
-            takeProfitUsd: usd.takeProfitUsd,
-            stopLossUsd: usd.stopLossUsd,
-          };
-        })(),
-        stopLossEnabled: true,
-        repeatEnabled: true,
-        stopOnSl: true,
-      }),
-    });
-    setBusy(false);
-    if (!res.ok) {
+        takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
+        stopLossPct: DCA1000_DEFAULT_SL_ROI,
+      });
+      const res = await fetch("/api/symbol-bots", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          symbol: sym,
+          enabled: false,
+          logic: "dubai_bruno_313",
+          entryCount: meta.count,
+          entryMultiplier: 1,
+          startLots: 0.01,
+          takeProfitPct: usd.takeProfitPct,
+          stopLossPct: usd.stopLossPct,
+          takeProfitUsd: usd.takeProfitUsd,
+          stopLossUsd: usd.stopLossUsd,
+          stopLossEnabled: true,
+          repeatEnabled: true,
+          stopOnSl: true,
+        }),
+      });
       const data = await res.json().catch(() => ({}));
-      setMsg(data.error || `${symbol} 추가 실패`);
-      return;
+      if (!res.ok) {
+        setMsg(
+          (typeof data.error === "string" && data.error) ||
+            (typeof data.message === "string" && data.message) ||
+            `${sym} 추가 실패 (${res.status})`,
+        );
+        return;
+      }
+      setMsg(`${sym} 추가됨 (사용 중지 상태 · 켜서 사용)`);
+      setAddSymbol(sym);
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : `${sym} 추가 실패 · 네트워크 오류`);
+    } finally {
+      setBusy(false);
     }
-    setMsg(`${symbol} 추가됨 (사용 중지 상태 · 켜서 사용)`);
-    await load();
   }
 
   function openEdit(bot: Bot) {
@@ -471,23 +479,21 @@ export default function BotPage() {
                 );
               })}
             </div>
-            {featuredAddSymbols.length > 12 ? (
-              <select
-                className="sa-select"
-                value={addSymbol}
-                onChange={(e) => setAddSymbol(e.target.value)}
-              >
-                {availableGroups.map((g) => (
-                  <optgroup key={g.id} label={g.name}>
-                    {g.symbols.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            ) : null}
+            <select
+              className="sa-select"
+              value={addSymbol}
+              onChange={(e) => setAddSymbol(e.target.value)}
+            >
+              {availableGroups.map((g) => (
+                <optgroup key={g.id} label={g.name}>
+                  {g.symbols.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
             <button
               type="button"
               className="sa-btn sa-btn-primary"
@@ -498,7 +504,18 @@ export default function BotPage() {
               {addSymbol} 추가
             </button>
             {msg ? (
-              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--gold)" }}>{msg}</p>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "0.85rem",
+                  color:
+                    msg.includes("실패") || msg.includes("없") || msg.includes("오류")
+                      ? "var(--danger)"
+                      : "var(--gold)",
+                }}
+              >
+                {msg}
+              </p>
             ) : null}
           </div>
         )}

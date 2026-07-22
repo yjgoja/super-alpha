@@ -51,6 +51,8 @@ function zodErrorKo(err: z.ZodError) {
   return `${path}${first.message}`;
 }
 
+export const runtime = "nodejs";
+
 export async function GET(req: Request) {
   const gate = await requireApprovedUser();
   if (!gate.user) {
@@ -59,18 +61,19 @@ export async function GET(req: Request) {
   const account = await getAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
-  const logicId = new URL(req.url).searchParams.get("logic") || "martin_9";
+  const logicId = new URL(req.url).searchParams.get("logic") || "dubai_bruno_313";
   if (!isLogicId(logicId) && logicId !== "custom") {
     return NextResponse.json({ error: "알 수 없는 로직입니다." }, { status: 400 });
   }
 
-  const saved = await prisma.strategyLogic.findUnique({
-    where: { accountId_logicId: { accountId: account.id, logicId } },
-  });
-
+  // resolveStrategyForAccount 내부에서 dubai 평탄화 오버라이드 heal
   const resolved = await resolveStrategyForAccount(account.id, logicId, {
     startLots: 0.01,
     entryMultiplier: 2,
+  });
+
+  const saved = await prisma.strategyLogic.findUnique({
+    where: { accountId_logicId: { accountId: account.id, logicId } },
   });
 
   const defaults = defaultEditorPayload(logicId);
@@ -157,13 +160,15 @@ export async function PUT(req: Request) {
     mode,
     leverageBase: body.payload.leverageBase ?? 20,
     startLots: body.payload.startLots ?? 0.01,
-    takeProfitPct: body.payload.takeProfitPct,
     stopLossPct: body.payload.stopLossPct,
     takeProfitUsd: body.payload.takeProfitUsd,
     stopLossUsd: body.payload.stopLossUsd,
   };
 
-  if (mode === "levels") {
+  if (mode === "bulk") {
+    // 두바이부르노: 회차 TP는 정본 표 유지. L0 미리보기용 takeProfitPct만 메타로 보관.
+    payload.takeProfitPct = body.payload.takeProfitPct;
+  } else {
     const levels = body.payload.levels || [];
     if (levels.length < 1) {
       return NextResponse.json({ error: "회차가 최소 1개 필요합니다." }, { status: 400 });
@@ -178,7 +183,7 @@ export async function PUT(req: Request) {
     payload.takeProfitPct = tp;
     payload.levels = levels.map((lv, i) => ({
       lots: Math.max(0.01, Math.round(lv.lots * 100) / 100),
-      // 엔진 바스켓 익절은 단일 $ — 회차별 profit(레거시)도 동일 값으로 맞춤
+      // 마틴/커스텀: 엔진 바스켓 익절은 단일 $ — 회차별 profit도 동일 값
       profit: tp,
       drop: i === 0 ? 0 : lv.drop,
     }));

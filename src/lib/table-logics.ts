@@ -204,17 +204,21 @@ export function levelsToDca(
   });
 }
 
+/**
+ * 두바이부르노 bulk 오버라이드 적용.
+ * - lots만 startLots로 스케일
+ * - 회차별 profit(20→125)·drop 티어는 정본 표를 유지 (takeProfitPct로 평탄화 금지)
+ *   takeProfitPct는 L0 미리보기/폴백 메타데이터일 뿐 엔진 회차 TP를 덮어쓰지 않는다.
+ */
 export function applyBulkPayload(
   logic: string,
   payload: StrategyPayload,
 ): (Dca1000Level & { lots?: number })[] {
   const base = presetFileLevels(logic);
   const startLots = Math.max(0.01, payload.startLots ?? 0.01);
-  const tp = payload.takeProfitPct;
   return base.map((lv) => ({
     ...lv,
     size: 10,
-    profit: tp != null && tp > 0 ? tp : lv.profit,
     lots: startLots,
   }));
 }
