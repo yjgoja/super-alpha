@@ -126,7 +126,7 @@ export function LandingExperience() {
               <span className="lp-tile-num">03</span>
               <h3>전략은 표로</h3>
               <p>
-                알파지속로직·마틴게일 프리셋을 고르면 끝. 복잡한 파라미터 지옥 없이 바로 가동합니다.
+                알파지속·안정·균형·공격 로직 중 고르면 끝. 복잡한 파라미터 지옥 없이 바로 가동합니다.
               </p>
             </article>
           </div>
