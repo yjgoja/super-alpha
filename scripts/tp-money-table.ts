@@ -13,7 +13,7 @@ const labels: Record<string, string> = {
   martin_10: "마틴10",
   martin_11: "마틴11",
   martin_12: "마틴12",
-  dubai_bruno_313: "두바이부르노313",
+  dubai_bruno_313: "알파지속로직",
 };
 
 function row(symbol: string, mid: number) {

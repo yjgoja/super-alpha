@@ -304,7 +304,7 @@ export default function StrategyLogicPage() {
         <section className="m-card" style={{ display: "grid", gap: "0.75rem", marginBottom: "0.75rem" }}>
           <div style={{ fontWeight: 650 }}>일괄 설정 (로트·손절)</div>
           <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            두바이부르노 회차 익절 ROI는 정본 표 티어(20→25→30→45→60→70→100→110→125%)를
+            알파지속로직 회차 익절 ROI는 정본 표 티어(20→25→30→45→60→70→100→110→125%)를
             그대로 씁니다. 아래에서 바꾸는 익절%는 시작회차(L0) 미리보기용이며, 물타기 drop·회차 TP
             표는 덮어쓰지 않습니다.
           </p>
