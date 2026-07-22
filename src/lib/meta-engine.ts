@@ -80,6 +80,11 @@ type BotCfg = {
   stopOnSl: boolean;
   /** MT5 계좌 레버 — 시작로트 증거금/$ 환산 */
   brokerLeverage?: number;
+  /**
+   * true: 종목/전체 OFF 등으로 신규 진입·물타기·재진입 금지.
+   * 열린 바스켓의 익절·손절만 관리 (토글 스팸으로 포지션이 방치되는 사고 방지).
+   */
+  manageOnly?: boolean;
 };
 
 type BasketRow = {
@@ -109,6 +114,46 @@ function positionsForSymbol(
   return positions.filter(
     (p) => symbolsMatch(p.symbol, symbol) && (!direction || p.direction === direction),
   );
+}
+
+/** 신규 진입·물타기·익절후재진입 허용 여부 (틱 중 토글 반영) */
+async function canOpenNewRisk(
+  accountId: string,
+  symbol: string,
+  direction: "BUY" | "SELL",
+) {
+  const [account, bots] = await Promise.all([
+    prisma.brokerAccount.findUnique({
+      where: { id: accountId },
+      select: { botEnabled: true },
+    }),
+    prisma.symbolBot.findMany({
+      where: { accountId, symbol },
+      select: { enabled: true, direction: true, dualDirection: true },
+    }),
+  ]);
+  if (!account?.botEnabled) return false;
+  return bots.some((b) => {
+    if (!b.enabled) return false;
+    if (b.dualDirection) return true;
+    return (b.direction === "SELL" ? "SELL" : "BUY") === direction;
+  });
+}
+
+/** 손절후중지 / 익절후미반복 — dualDirection 행까지 함께 끔 */
+async function disableSymbolBotSide(
+  accountId: string,
+  symbol: string,
+  direction: "BUY" | "SELL",
+) {
+  await prisma.symbolBot.updateMany({
+    where: {
+      accountId,
+      symbol,
+      OR: [{ direction }, { dualDirection: true }],
+    },
+    data: { enabled: false },
+  });
 }
 
 /** 웹 수동청산 API 등에서만 사용. 엔진 고스트 감지에서는 호출하지 않음. */
@@ -192,7 +237,7 @@ async function healGhostBaskets(
     `[engine] healed ${stillGhost.length} ghost basket(s) account=${accountId} — bot stays ON`,
   );
   // Keep botEnabled. Do not call stopBotAfterExternalClose.
-  return false;
+  return true;
 }
 
 /**
@@ -217,6 +262,8 @@ async function closeBasketTp(opts: {
   tpMoney: number;
   pnlSum: number;
   floatingRoi: number;
+  /** manageOnly / 토글 OFF 시 재진입 금지 */
+  allowReentry?: boolean;
 }) {
   const {
     accountId,
@@ -234,6 +281,7 @@ async function closeBasketTp(opts: {
     tpMoney,
     pnlSum,
     floatingRoi,
+    allowReentry = true,
   } = opts;
 
   const closeRes = await closePositionsBySymbolDirection(metaId, symbol, direction);
@@ -276,12 +324,16 @@ async function closeBasketTp(opts: {
     },
   });
 
-  if (!repeatEnabled) {
-    await prisma.symbolBot.updateMany({
-      where: { accountId, symbol },
-      data: { enabled: false },
-    });
+  if (!repeatEnabled || !allowReentry) {
+    if (!repeatEnabled) {
+      await disableSymbolBotSide(accountId, symbol, direction);
+    }
     return { closed: true as const, reentered: false as const };
+  }
+
+  // 틱 도중 사용자가 전체/종목을 끈 경우 재진입 금지
+  if (!(await canOpenNewRisk(accountId, symbol, direction))) {
+    return { closed: true as const, reentered: false as const, note: "reentry_blocked_toggle" };
   }
 
   // 같은 틱에서 시작 포지션 재진입 (다음 틱 의존 시 엔진 공백으로 재시작 누락 가능)
@@ -419,10 +471,20 @@ async function runSymbolTableDca(
     });
   }
 
-  if (basket?.tradingPaused) return { ok: true as const, note: "paused", symbol };
+  if (basket?.tradingPaused) {
+    // 레거시 pause: 신규·물타기만 막고 익절·손절은 반드시 계속
+    cfg = { ...cfg, manageOnly: true };
+  }
 
   if (!basket || basket.legs.length === 0) {
     if (ourPositions.length > 0) return { ok: true as const, note: "external", symbol };
+    // 종목/전체 OFF: 신규 진입 금지 (열린 바스켓만 TP/SL 관리)
+    if (cfg.manageOnly) {
+      return { ok: true as const, note: "manage_only_no_entry", symbol };
+    }
+    if (!(await canOpenNewRisk(accountId, symbol, direction))) {
+      return { ok: true as const, note: "toggle_off_no_entry", symbol };
+    }
     const lots = levelLots(0);
     const order = await placeMarketOrder({
       metaApiAccountId: metaId,
@@ -551,6 +613,7 @@ async function runSymbolTableDca(
       // 기록용: MetaAPI 포지션 수익(수수료·스왑 포함). 익절 판정은 위에서 tpPnl.pnl 사용.
       pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
+      allowReentry: !cfg.manageOnly,
     });
     if (!tpClose.closed) {
       return {
@@ -629,10 +692,7 @@ async function runSymbolTableDca(
       data: { slCount: { increment: 1 } },
     });
     if (cfg.stopOnSl) {
-      await prisma.symbolBot.updateMany({
-        where: { accountId, symbol },
-        data: { enabled: false },
-      });
+      await disableSymbolBotSide(accountId, symbol, direction);
     }
     return {
       ok: true as const,
@@ -648,6 +708,24 @@ async function runSymbolTableDca(
 
   // 물타기: 순수 바스켓 마진 ROI ≤ -표 drop% (가격 로직 없음). drop 은 20/40/…/350.
   // 한 틱(평가)당 최대 1회차만 추가 → 다음 틱에서 avg/margin/ROI 재계산 (바이낸스 안전주문식).
+  // manageOnly / 토글 OFF 시 물타기 금지 (열린 바스켓은 익절·손절만).
+  if (cfg.manageOnly) {
+    await prisma.basket.update({
+      where: { id: basket.id },
+      data: { unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0) },
+    });
+    return {
+      ok: true as const,
+      action: "manage_hold",
+      symbol,
+      profit,
+      floatingRoi,
+      tpMoney: liveUsd.takeProfitUsd,
+      stopLossUsd: liveUsd.stopLossUsd,
+      spreadPct: spr,
+    };
+  }
+
   let filled = basket.filledLevel;
   let actions = 0;
   const maxPerTick = 1;
@@ -662,6 +740,10 @@ async function runSymbolTableDca(
     });
     lastDca = dcaHit;
     if (!dcaHit.hit) break;
+
+    if (!(await canOpenNewRisk(accountId, symbol, direction))) {
+      break;
+    }
 
     const lots = levelLots(next);
     const order = await placeMarketOrder({
@@ -810,10 +892,19 @@ async function runSymbolDca(
     });
   }
 
-  if (basket?.tradingPaused) return { ok: true as const, note: "paused", symbol };
+  if (basket?.tradingPaused) {
+    // 레거시 pause: 신규·물타기만 막고 익절·손절은 반드시 계속
+    cfg = { ...cfg, manageOnly: true };
+  }
 
   if (!basket || basket.legs.length === 0) {
     if (ourPositions.length > 0) return { ok: true as const, note: "external", symbol };
+    if (cfg.manageOnly) {
+      return { ok: true as const, note: "manage_only_no_entry", symbol };
+    }
+    if (!(await canOpenNewRisk(accountId, symbol, direction))) {
+      return { ok: true as const, note: "toggle_off_no_entry", symbol };
+    }
     const lots = lotsAtLevel(cfg.startLots, cfg.entryMultiplier, 0, logic);
     const order = await placeMarketOrder({
       metaApiAccountId: metaId,
@@ -914,6 +1005,7 @@ async function runSymbolDca(
       tpMoney: tpDecision.tpMoney,
       pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
+      allowReentry: !cfg.manageOnly,
     });
     if (!tpClose.closed) {
       return {
@@ -979,10 +1071,7 @@ async function runSymbolDca(
       },
     });
     if (cfg.stopOnSl) {
-      await prisma.symbolBot.updateMany({
-        where: { accountId, symbol },
-        data: { enabled: false },
-      });
+      await disableSymbolBotSide(accountId, symbol, direction);
     }
     return {
       ok: true as const,
@@ -991,6 +1080,22 @@ async function runSymbolDca(
       stopLossUsd: slDecision.stopLossUsd,
       floatingPnl: tpPnl.apiProfit,
       floatingRoi,
+    };
+  }
+
+  if (cfg.manageOnly) {
+    await prisma.basket.update({
+      where: { id: basket.id },
+      data: { unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0) },
+    });
+    return {
+      ok: true as const,
+      action: "manage_hold",
+      symbol,
+      profit,
+      floatingRoi,
+      tpMoney: liveUsd.takeProfitUsd,
+      stopLossUsd: liveUsd.stopLossUsd,
     };
   }
 
@@ -1004,6 +1109,22 @@ async function runSymbolDca(
       dropRoiPct: needRoi,
     });
     if (dcaHit.hit) {
+      if (!(await canOpenNewRisk(accountId, symbol, direction))) {
+        await prisma.basket.update({
+          where: { id: basket.id },
+          data: { unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0) },
+        });
+        return {
+          ok: true as const,
+          action: "hold",
+          symbol,
+          note: "toggle_off_no_dca",
+          profit,
+          floatingRoi,
+          tpMoney: liveUsd.takeProfitUsd,
+          stopLossUsd: liveUsd.stopLossUsd,
+        };
+      }
       const order = await placeMarketOrder({
         metaApiAccountId: metaId,
         symbol,
@@ -1107,12 +1228,20 @@ async function runDcaTickInner(accountId: string) {
     where: { id: accountId },
     include: {
       config: true,
-      symbolBots: { where: { enabled: true } },
+      // enabled=false 종목도 열린 바스켓이 있으면 TP/SL 관리 필요
+      symbolBots: true,
       baskets: { where: { status: "open" }, include: { legs: true } },
     },
   });
-  if (!account?.metaApiAccountId || !account.botEnabled) {
+  if (!account?.metaApiAccountId) {
     return { skipped: true as const };
+  }
+
+  const masterOn = !!account.botEnabled;
+  const hasOpenBaskets = account.baskets.length > 0;
+  // 전체 OFF + 열린 포지션 없음 → 틱 스킵
+  if (!masterOn && !hasOpenBaskets) {
+    return { skipped: true as const, reason: "bot_off" };
   }
   // Bot ON + cloud cold: recover here too (not only in runAllBots).
   // Previously status==="undeployed" skipped the whole tick → trading looked "stopped".
@@ -1140,8 +1269,14 @@ async function runDcaTickInner(accountId: string) {
         where: { id: account.id },
         data: {
           status: "connected",
-          botStoppedAt: null,
-          statusMessage: "클라우드 재활성화 · 봇 실행 중",
+          ...(masterOn
+            ? {
+                botStoppedAt: null,
+                statusMessage: "클라우드 재활성화 · 봇 실행 중",
+              }
+            : {
+                statusMessage: "클라우드 재활성화 · 열린 포지션 익절·손절 관리 중",
+              }),
         },
       });
     }
@@ -1169,17 +1304,33 @@ async function runDcaTickInner(accountId: string) {
       mode: "live",
       status: "connected",
       startingBalance: account.startingBalance > 0 ? account.startingBalance : snap.balance,
-      statusMessage: "클라우드 연결 · 봇 실행 중",
+      statusMessage: masterOn
+        ? "클라우드 연결 · 봇 실행 중"
+        : "봇 중지 · 열린 포지션 익절·손절만 관리",
     },
   });
 
   // Ghost baskets: DB만 정리. 봇 전체 중지는 절대 하지 않음.
-  await healGhostBaskets(account.id, metaId, account.baskets, snap.positions, {
-    skip: cloudJustRecovered,
-    margin: snap.margin,
-    equity: snap.equity,
-    balance: snap.balance,
-  });
+  const healedGhost = await healGhostBaskets(
+    account.id,
+    metaId,
+    account.baskets,
+    snap.positions,
+    {
+      skip: cloudJustRecovered,
+      margin: snap.margin,
+      equity: snap.equity,
+      balance: snap.balance,
+    },
+  );
+
+  let openBaskets = account.baskets;
+  if (healedGhost) {
+    openBaskets = await prisma.basket.findMany({
+      where: { accountId: account.id, status: "open" },
+      include: { legs: true },
+    });
+  }
 
   const lastEq = lastEquitySnapAt.get(account.id) || 0;
   if (Date.now() - lastEq > 60_000) {
@@ -1189,10 +1340,15 @@ async function runDcaTickInner(accountId: string) {
     });
   }
 
-  let bots: BotCfg[] = account.symbolBots.map((b) => ({
+  const lev = snap.leverage > 0 ? snap.leverage : MT5_BROKER_LEVERAGE_DEFAULT;
+  const mapBotRow = (
+    b: (typeof account.symbolBots)[number],
+    manageOnly: boolean,
+    directionOverride?: string,
+  ): BotCfg => ({
     symbol: b.symbol,
     logic: b.logic,
-    direction: b.direction,
+    direction: directionOverride ?? b.direction,
     dualDirection: (b as { dualDirection?: boolean }).dualDirection ?? false,
     entryCount: b.entryCount,
     entryMultiplier: b.entryMultiplier,
@@ -1205,10 +1361,102 @@ async function runDcaTickInner(accountId: string) {
     stopLossUsd: b.stopLossUsd ?? 0,
     stopLossEnabled: b.stopLossEnabled,
     stopOnSl: b.stopOnSl,
-    brokerLeverage: snap.leverage > 0 ? snap.leverage : MT5_BROKER_LEVERAGE_DEFAULT,
-  }));
+    brokerLeverage: lev,
+    manageOnly,
+  });
 
-  if (bots.length === 0 && account.config) {
+  const botByKey = new Map(
+    account.symbolBots.map((b) => [`${b.symbol}|${b.direction === "SELL" ? "SELL" : "BUY"}`, b]),
+  );
+
+  // 활성 봇 + 열린 바스켓(꺼진 종목 포함) 전부 틱 대상
+  const needed = new Map<string, { manageOnly: boolean }>();
+  for (const b of account.symbolBots) {
+    if (!b.enabled) continue;
+    const dir = b.direction === "SELL" ? "SELL" : "BUY";
+    if (b.dualDirection) {
+      needed.set(`${b.symbol}|BUY`, { manageOnly: !masterOn });
+      needed.set(`${b.symbol}|SELL`, { manageOnly: !masterOn });
+    } else {
+      needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+    }
+  }
+  for (const basket of openBaskets) {
+    const dir = basket.direction === "SELL" ? "SELL" : "BUY";
+    const key = `${basket.symbol}|${dir}`;
+    const row = botByKey.get(key);
+    const manageOnly = !masterOn || !row?.enabled;
+    const prev = needed.get(key);
+    if (!prev) {
+      needed.set(key, { manageOnly });
+    } else if (manageOnly) {
+      // 열린 바스켓이 있으면 OFF여도 manageOnly 유지
+      needed.set(key, { manageOnly: true });
+    }
+  }
+
+  // MT5에만 남은 포지션(DB 바스켓 없음)도 익절·손절 관리 대상에 포함
+  for (const p of snap.positions) {
+    const dir = (p.direction === "SELL" ? "SELL" : "BUY") as "BUY" | "SELL";
+    let matchedKey: string | null = null;
+    for (const key of needed.keys()) {
+      const [sym, d] = key.split("|");
+      if (d === dir && symbolsMatch(sym, p.symbol)) {
+        matchedKey = key;
+        break;
+      }
+    }
+    if (matchedKey) continue;
+    const row = account.symbolBots.find(
+      (b) =>
+        symbolsMatch(b.symbol, p.symbol) &&
+        (b.dualDirection || (b.direction === "SELL" ? "SELL" : "BUY") === dir),
+    );
+    const key = `${row?.symbol || p.symbol}|${dir}`;
+    needed.set(key, { manageOnly: true });
+  }
+
+  let bots: BotCfg[] = [];
+  for (const [key, { manageOnly }] of needed) {
+    const [symbol, direction] = key.split("|") as [string, string];
+    let row = botByKey.get(key);
+    if (!row) {
+      // dualDirection 단일 행이 BUY|SELL 둘 다 커버하는 경우
+      row = account.symbolBots.find(
+        (b) =>
+          b.symbol === symbol &&
+          ((b as { dualDirection?: boolean }).dualDirection ||
+            (b.direction === "SELL" ? "SELL" : "BUY") === direction),
+      );
+    }
+    if (row) {
+      bots.push({ ...mapBotRow(row, manageOnly, direction), dualDirection: false });
+      continue;
+    }
+    // 바스켓만 있고 SymbolBot 행이 없으면 기본 설정으로 관리만
+    const c = account.config;
+    bots.push({
+      symbol,
+      logic: "dubai_bruno_313",
+      direction,
+      entryCount: c?.entryCount ?? 314,
+      entryMultiplier: c?.entryMultiplier ?? 1,
+      entryIntervalPct: c?.entryIntervalPct ?? 5,
+      takeProfitPct: c?.takeProfitPct ?? 20,
+      takeProfitUsd: 0,
+      startLots: c?.startLots || c?.baseLots || 0.01,
+      repeatEnabled: false,
+      stopLossPct: c?.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
+      stopLossUsd: 0,
+      stopLossEnabled: c?.stopLossEnabled ?? true,
+      stopOnSl: c?.stopOnSl ?? true,
+      brokerLeverage: lev,
+      manageOnly: true,
+    });
+  }
+
+  // 레거시: SymbolBot 없고 config만 있을 때 (마스터 ON)
+  if (bots.length === 0 && account.config && masterOn) {
     const c = account.config;
     bots = [
       {
@@ -1226,30 +1474,46 @@ async function runDcaTickInner(accountId: string) {
         stopLossUsd: 0,
         stopLossEnabled: c.stopLossEnabled,
         stopOnSl: c.stopOnSl,
-        brokerLeverage: snap.leverage > 0 ? snap.leverage : MT5_BROKER_LEVERAGE_DEFAULT,
+        brokerLeverage: lev,
+        manageOnly: false,
       },
     ];
+  }
+
+  if (bots.length === 0) {
+    return { ok: true as const, results: [], note: "no_bots" };
   }
 
   // 심볼명 사전 해석 (XAU→GOLD 등) — 진입 전 캐시 워밍
   await Promise.all(bots.map((b) => resolveBrokerSymbol(metaId, b.symbol)));
 
-  // 양방향(dualDirection) 봇은 BUY·SELL 각각 실행 → 한 종목에 롱/숏 바스켓 동시 운용.
-  const runs: BotCfg[] = [];
-  for (const bot of bots) {
-    if (bot.dualDirection) {
-      runs.push({ ...bot, direction: "BUY", dualDirection: false });
-      runs.push({ ...bot, direction: "SELL", dualDirection: false });
-    } else {
-      runs.push(bot);
-    }
-  }
+  // dualDirection은 위에서 BUY/SELL로 이미 펼쳤음
+  const runs = bots;
 
   // 동일 계좌 증거금 레이스 방지: 순차 처리 (TP→SL→DCA 순서는 심볼 내부)
   const results = [];
+  let liveBaskets = openBaskets;
+  let livePositions = snap.positions;
   for (const bot of runs) {
     try {
-      results.push(await runSymbolDca(account.id, metaId, bot, account.baskets, snap.positions));
+      const r = await runSymbolDca(account.id, metaId, bot, liveBaskets, livePositions);
+      results.push(r);
+      const action =
+        r && typeof r === "object" && "action" in r
+          ? String((r as { action?: string }).action || "")
+          : "";
+      // 주문/청산 후 스냅·바스켓 갱신 → 다음 종목 꼬임 방지
+      if (action === "tp" || action === "sl" || action === "entry" || action === "dca") {
+        const fresh = await fetchSnapshot(metaId);
+        if (fresh.ok) {
+          livePositions = fresh.positions;
+          snap = fresh;
+        }
+        liveBaskets = await prisma.basket.findMany({
+          where: { accountId: account.id, status: "open" },
+          include: { legs: true },
+        });
+      }
     } catch (e) {
       results.push({
         ok: false as const,
@@ -1266,7 +1530,10 @@ async function runDcaTickInner(accountId: string) {
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: {
-        statusMessage: `봇 실행 중 · 일부 종목 오류: ${failNotes[0]}`.slice(0, 180),
+        statusMessage: `${masterOn ? "봇 실행 중" : "포지션 관리 중"} · 일부 종목 오류: ${failNotes[0]}`.slice(
+          0,
+          180,
+        ),
       },
     });
   }
@@ -1324,17 +1591,51 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
 
   const accounts = await prisma.brokerAccount.findMany({
     where: {
-      botEnabled: true,
       metaApiAccountId: { not: null },
       status: { in: ["connected", "undeployed"] },
       user: {
         OR: [{ role: "admin" }, { approvalStatus: "approved" }],
       },
+      // 전체 OFF여도 열린 바스켓이 있으면 익절·손절 관리 틱 필요
+      OR: [
+        { botEnabled: true },
+        { baskets: { some: { status: "open" } } },
+      ],
     },
     // Round-robin fairness: oldest tick lock / oldest update first
     orderBy: [{ tickLockedAt: "asc" }, { updatedAt: "asc" }],
     select: { id: true, status: true, metaApiAccountId: true },
   });
+
+  // DB 바스켓이 없어도 equity≠balance(부동손익)면 관리 틱에 포함
+  const seen = new Set(accounts.map((a) => a.id));
+  const maybeFloating = await prisma.brokerAccount.findMany({
+    where: {
+      botEnabled: false,
+      metaApiAccountId: { not: null },
+      status: { in: ["connected", "undeployed"] },
+      user: {
+        OR: [{ role: "admin" }, { approvalStatus: "approved" }],
+      },
+      id: { notIn: [...seen] },
+    },
+    select: {
+      id: true,
+      status: true,
+      metaApiAccountId: true,
+      equity: true,
+      balance: true,
+    },
+  });
+  for (const a of maybeFloating) {
+    if (Math.abs(a.equity - a.balance) > 1) {
+      accounts.push({
+        id: a.id,
+        status: a.status,
+        metaApiAccountId: a.metaApiAccountId,
+      });
+    }
+  }
   const results: Array<Record<string, unknown>> = [];
   let deferred = 0;
   for (const a of accounts) {

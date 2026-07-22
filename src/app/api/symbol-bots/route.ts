@@ -19,6 +19,7 @@ import {
   tableLogicMeta,
 } from "@/lib/table-logics";
 import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
+import { withAccountToggleLock } from "@/lib/toggle-lock";
 import type { Prisma } from "@prisma/client";
 
 /** 313차 전체 회차(L0 포함 = 314) — 표에서 파생 (하드코딩 999 금지) */
@@ -276,169 +277,188 @@ export async function PUT(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: zodErrorKo(parsed.error) }, { status: 400 });
   }
-  const body = parsed.data;
-  const admin = await requireAdmin();
-  const isAdmin = !!admin.user;
 
-  // End users may only set preset / lots / toggles — never ROI%, ladder, TP/SL $
-  if (!isAdmin) {
-    delete body.takeProfitPct;
-    delete body.stopLossPct;
-    delete body.takeProfitUsd;
-    delete body.stopLossUsd;
-    delete body.entryIntervalPct;
-    delete body.entryMultiplier;
-    delete body.entryCount;
-  }
+  return withAccountToggleLock(account.id, async () => {
+    const body = parsed.data;
+    const admin = await requireAdmin();
+    const isAdmin = !!admin.user;
 
-  const logic =
-    body.logic && isLogicId(body.logic) ? body.logic : undefined;
-  const resolvedLogic = logic ?? "dubai_bruno_313";
-  const meta = tableLogicMeta(resolvedLogic);
-  const levels = getTableLevels(resolvedLogic);
-  const defaultMult = defaultEntryMultiplier(resolvedLogic);
-  const editorDefaults = defaultEditorPayload(resolvedLogic);
+    // End users may only set preset / lots / toggles — never ROI%, ladder, TP/SL $
+    if (!isAdmin) {
+      delete body.takeProfitPct;
+      delete body.stopLossPct;
+      delete body.takeProfitUsd;
+      delete body.stopLossUsd;
+      delete body.entryIntervalPct;
+      delete body.entryMultiplier;
+      delete body.entryCount;
+    }
 
-  const createLots = body.startLots ?? editorDefaults.startLots ?? 0.01;
-  const createTpPct =
-    body.takeProfitPct ?? editorDefaults.takeProfitPct ?? meta.firstTpRoi ?? 20;
-  const createSlPct =
-    body.stopLossPct ?? editorDefaults.stopLossPct ?? DCA1000_DEFAULT_SL_ROI;
-  const createUsd = resolveTpSlUsd({
-    symbol: body.symbol,
-    startLots: createLots,
-    takeProfitUsd: body.takeProfitUsd,
-    stopLossUsd: body.stopLossUsd,
-    takeProfitPct: createTpPct,
-    stopLossPct: createSlPct,
-  });
+    const logic =
+      body.logic && isLogicId(body.logic) ? body.logic : undefined;
+    const resolvedLogic = logic ?? "dubai_bruno_313";
+    const meta = tableLogicMeta(resolvedLogic);
+    const levels = getTableLevels(resolvedLogic);
+    const defaultMult = defaultEntryMultiplier(resolvedLogic);
+    const editorDefaults = defaultEditorPayload(resolvedLogic);
 
-  const direction = body.direction ?? "BUY";
-  let bot = await prisma.symbolBot.upsert({
-    where: {
-      accountId_symbol_direction: {
+    const createLots = body.startLots ?? editorDefaults.startLots ?? 0.01;
+    const createTpPct =
+      body.takeProfitPct ?? editorDefaults.takeProfitPct ?? meta.firstTpRoi ?? 20;
+    const createSlPct =
+      body.stopLossPct ?? editorDefaults.stopLossPct ?? DCA1000_DEFAULT_SL_ROI;
+    const createUsd = resolveTpSlUsd({
+      symbol: body.symbol,
+      startLots: createLots,
+      takeProfitUsd: body.takeProfitUsd,
+      stopLossUsd: body.stopLossUsd,
+      takeProfitPct: createTpPct,
+      stopLossPct: createSlPct,
+    });
+
+    const direction = body.direction ?? "BUY";
+    let bot = await prisma.symbolBot.upsert({
+      where: {
+        accountId_symbol_direction: {
+          accountId: account.id,
+          symbol: body.symbol,
+          direction,
+        },
+      },
+      create: {
         accountId: account.id,
         symbol: body.symbol,
+        enabled: body.enabled ?? true,
+        logic: resolvedLogic,
         direction,
+        dualDirection: body.dualDirection ?? false,
+        entryCount: body.entryCount ?? meta.count,
+        entryMultiplier: body.entryMultiplier ?? defaultMult,
+        entryIntervalPct: body.entryIntervalPct ?? 5,
+        takeProfitPct: createTpPct,
+        takeProfitUsd: createUsd.takeProfitUsd,
+        startLots: createLots,
+        repeatEnabled: body.repeatEnabled ?? true,
+        stopLossPct: createSlPct,
+        stopLossUsd: createUsd.stopLossUsd,
+        stopLossEnabled: body.stopLossEnabled ?? true,
+        stopOnSl: body.stopOnSl ?? true,
       },
-    },
-    create: {
-      accountId: account.id,
-      symbol: body.symbol,
-      enabled: body.enabled ?? true,
-      logic: resolvedLogic,
-      direction,
-      dualDirection: body.dualDirection ?? false,
-      entryCount: body.entryCount ?? meta.count,
-      entryMultiplier: body.entryMultiplier ?? defaultMult,
-      entryIntervalPct: body.entryIntervalPct ?? 5,
-      takeProfitPct: createTpPct,
-      takeProfitUsd: createUsd.takeProfitUsd,
-      startLots: createLots,
-      repeatEnabled: body.repeatEnabled ?? true,
-      stopLossPct: createSlPct,
-      stopLossUsd: createUsd.stopLossUsd,
-      stopLossEnabled: body.stopLossEnabled ?? true,
-      stopOnSl: body.stopOnSl ?? true,
-    },
-    update: {
-      ...(logic
-        ? {
-            logic,
-            entryCount: body.entryCount ?? levels.length,
-            // 마틴으로 바꿀 때 배수 미지정이면 기본 2배
-            ...(body.entryMultiplier == null && isMartinLogic(logic)
-              ? { entryMultiplier: 2 }
-              : {}),
-            // 프리셋 변경 시 사용자 요청 ROI/$ 무시하고 표 기본값 적용
-            ...(!isAdmin
-              ? {
-                  entryMultiplier: defaultEntryMultiplier(logic),
-                  entryCount: levels.length,
-                  takeProfitPct: createTpPct,
-                  stopLossPct: createSlPct,
-                  takeProfitUsd: createUsd.takeProfitUsd,
-                  stopLossUsd: createUsd.stopLossUsd,
-                  stopLossEnabled: true,
-                }
-              : {}),
-          }
-        : {}),
-      ...(body.enabled != null ? { enabled: body.enabled } : {}),
-      ...(body.direction ? { direction: body.direction } : {}),
-      ...(body.dualDirection != null ? { dualDirection: body.dualDirection } : {}),
-      ...(body.entryMultiplier != null ? { entryMultiplier: body.entryMultiplier } : {}),
-      ...(body.entryIntervalPct != null ? { entryIntervalPct: body.entryIntervalPct } : {}),
-      ...(body.takeProfitPct != null ? { takeProfitPct: body.takeProfitPct } : {}),
-      ...(body.takeProfitUsd != null ? { takeProfitUsd: body.takeProfitUsd } : {}),
-      ...(body.startLots != null ? { startLots: body.startLots } : {}),
-      ...(body.repeatEnabled != null ? { repeatEnabled: body.repeatEnabled } : {}),
-      ...(body.stopLossPct != null ? { stopLossPct: body.stopLossPct } : {}),
-      ...(body.stopLossUsd != null ? { stopLossUsd: body.stopLossUsd } : {}),
-      ...(body.stopLossEnabled != null ? { stopLossEnabled: body.stopLossEnabled } : {}),
-      ...(body.stopOnSl != null ? { stopOnSl: body.stopOnSl } : {}),
-    },
-  });
-
-  // startLots/ROI 변경 시 USD 미지정이면 재계산해 저장
-  if (
-    (body.startLots != null || body.takeProfitPct != null || body.stopLossPct != null || (!isAdmin && logic)) &&
-    (body.takeProfitUsd == null || !isAdmin) &&
-    (body.stopLossUsd == null || !isAdmin)
-  ) {
-    const usd = resolveTpSlUsd({
-      symbol: bot.symbol,
-      startLots: bot.startLots,
-      takeProfitPct: bot.takeProfitPct,
-      stopLossPct: bot.stopLossPct > 0 ? bot.stopLossPct : DCA1000_DEFAULT_SL_ROI,
+      update: {
+        ...(logic
+          ? {
+              logic,
+              entryCount: body.entryCount ?? levels.length,
+              // 마틴으로 바꿀 때 배수 미지정이면 기본 2배
+              ...(body.entryMultiplier == null && isMartinLogic(logic)
+                ? { entryMultiplier: 2 }
+                : {}),
+              // 프리셋 변경 시 사용자 요청 ROI/$ 무시하고 표 기본값 적용
+              ...(!isAdmin
+                ? {
+                    entryMultiplier: defaultEntryMultiplier(logic),
+                    entryCount: levels.length,
+                    takeProfitPct: createTpPct,
+                    stopLossPct: createSlPct,
+                    takeProfitUsd: createUsd.takeProfitUsd,
+                    stopLossUsd: createUsd.stopLossUsd,
+                    stopLossEnabled: true,
+                  }
+                : {}),
+            }
+          : {}),
+        ...(body.enabled != null ? { enabled: body.enabled } : {}),
+        ...(body.direction ? { direction: body.direction } : {}),
+        ...(body.dualDirection != null ? { dualDirection: body.dualDirection } : {}),
+        ...(body.entryMultiplier != null ? { entryMultiplier: body.entryMultiplier } : {}),
+        ...(body.entryIntervalPct != null ? { entryIntervalPct: body.entryIntervalPct } : {}),
+        ...(body.takeProfitPct != null ? { takeProfitPct: body.takeProfitPct } : {}),
+        ...(body.takeProfitUsd != null ? { takeProfitUsd: body.takeProfitUsd } : {}),
+        ...(body.startLots != null ? { startLots: body.startLots } : {}),
+        ...(body.repeatEnabled != null ? { repeatEnabled: body.repeatEnabled } : {}),
+        ...(body.stopLossPct != null ? { stopLossPct: body.stopLossPct } : {}),
+        ...(body.stopLossUsd != null ? { stopLossUsd: body.stopLossUsd } : {}),
+        ...(body.stopLossEnabled != null ? { stopLossEnabled: body.stopLossEnabled } : {}),
+        ...(body.stopOnSl != null ? { stopOnSl: body.stopOnSl } : {}),
+      },
     });
-    bot = await prisma.symbolBot.update({
-      where: { id: bot.id },
-      data: { takeProfitUsd: usd.takeProfitUsd, stopLossUsd: usd.stopLossUsd },
-    });
-  }
 
-  // Keep StrategyLogic override in sync so engine lots/TP/SL match /bot edits
-  const logicId = bot.logic;
-  const existing = await prisma.strategyLogic.findUnique({
-    where: { accountId_logicId: { accountId: account.id, logicId } },
-  });
-  if (existing) {
-    const prev = (existing.payload || {}) as Record<string, unknown>;
-    const nextPayload: Record<string, unknown> = {
-      ...prev,
-      mode: (prev.mode as "bulk" | "levels") || (isMartinLogic(logicId) ? "levels" : "bulk"),
-      ...(body.startLots != null ? { startLots: bot.startLots } : {}),
-      ...(body.takeProfitPct != null ? { takeProfitPct: bot.takeProfitPct } : {}),
-      ...(body.stopLossPct != null ? { stopLossPct: bot.stopLossPct } : {}),
-      ...(body.takeProfitUsd != null || body.startLots != null
-        ? { takeProfitUsd: bot.takeProfitUsd }
-        : {}),
-      ...(body.stopLossUsd != null || body.startLots != null
-        ? { stopLossUsd: bot.stopLossUsd }
-        : {}),
-    };
-    if (Array.isArray(prev.levels) && body.startLots != null) {
-      const rows = prev.levels as Array<{ lots: number; profit: number; drop: number }>;
-      if (rows.length > 0) {
-        const ratio = bot.startLots / Math.max(0.01, rows[0].lots || 0.01);
-        nextPayload.levels = rows.map((r, i) => ({
-          ...r,
-          lots: i === 0 ? bot.startLots : Math.max(0.01, Math.round(r.lots * ratio * 100) / 100),
-        }));
+    // startLots/ROI 변경 시 USD 미지정이면 재계산해 저장
+    if (
+      (body.startLots != null || body.takeProfitPct != null || body.stopLossPct != null || (!isAdmin && logic)) &&
+      (body.takeProfitUsd == null || !isAdmin) &&
+      (body.stopLossUsd == null || !isAdmin)
+    ) {
+      const usd = resolveTpSlUsd({
+        symbol: bot.symbol,
+        startLots: bot.startLots,
+        takeProfitPct: bot.takeProfitPct,
+        stopLossPct: bot.stopLossPct > 0 ? bot.stopLossPct : DCA1000_DEFAULT_SL_ROI,
+      });
+      bot = await prisma.symbolBot.update({
+        where: { id: bot.id },
+        data: { takeProfitUsd: usd.takeProfitUsd, stopLossUsd: usd.stopLossUsd },
+      });
+    }
+
+    // Keep StrategyLogic override in sync so engine lots/TP/SL match /bot edits
+    const logicId = bot.logic;
+    const existing = await prisma.strategyLogic.findUnique({
+      where: { accountId_logicId: { accountId: account.id, logicId } },
+    });
+    if (existing) {
+      const prev = (existing.payload || {}) as Record<string, unknown>;
+      const nextPayload: Record<string, unknown> = {
+        ...prev,
+        mode: (prev.mode as "bulk" | "levels") || (isMartinLogic(logicId) ? "levels" : "bulk"),
+        ...(body.startLots != null ? { startLots: bot.startLots } : {}),
+        ...(body.takeProfitPct != null ? { takeProfitPct: bot.takeProfitPct } : {}),
+        ...(body.stopLossPct != null ? { stopLossPct: bot.stopLossPct } : {}),
+        ...(body.takeProfitUsd != null || body.startLots != null
+          ? { takeProfitUsd: bot.takeProfitUsd }
+          : {}),
+        ...(body.stopLossUsd != null || body.startLots != null
+          ? { stopLossUsd: bot.stopLossUsd }
+          : {}),
+      };
+      if (Array.isArray(prev.levels) && body.startLots != null) {
+        const rows = prev.levels as Array<{ lots: number; profit: number; drop: number }>;
+        if (rows.length > 0) {
+          const ratio = bot.startLots / Math.max(0.01, rows[0].lots || 0.01);
+          nextPayload.levels = rows.map((r, i) => ({
+            ...r,
+            lots: i === 0 ? bot.startLots : Math.max(0.01, Math.round(r.lots * ratio * 100) / 100),
+          }));
+        }
+      }
+      await prisma.strategyLogic.update({
+        where: { id: existing.id },
+        data: { payload: nextPayload as Prisma.InputJsonValue },
+      });
+    }
+
+    let openBasketHint: string | undefined;
+    if (body.enabled === false) {
+      const open = await prisma.basket.count({
+        where: {
+          accountId: account.id,
+          symbol: bot.symbol,
+          direction: bot.direction,
+          status: "open",
+        },
+      });
+      if (open > 0) {
+        openBasketHint = "열린 포지션은 익절·손절만 계속 관리합니다 (신규·물타기 중지).";
       }
     }
-    await prisma.strategyLogic.update({
-      where: { id: existing.id },
-      data: { payload: nextPayload as Prisma.InputJsonValue },
-    });
-  }
 
-  return NextResponse.json({
-    ok: true,
-    bot: isAdmin
-      ? bot
-      : redactSymbolBot(bot as unknown as Record<string, unknown>),
+    return NextResponse.json({
+      ok: true,
+      bot: isAdmin
+        ? bot
+        : redactSymbolBot(bot as unknown as Record<string, unknown>),
+      ...(openBasketHint ? { note: openBasketHint } : {}),
+    });
   });
 }
 

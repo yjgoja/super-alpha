@@ -16,6 +16,8 @@ export async function undeployIdleAccounts(idleHours = IDLE_BOT_HOURS) {
       metaApiAccountId: { not: null },
       botEnabled: false,
       status: { in: ["connected"] },
+      // 열린 바스켓이 있으면 절대 undeploy 금지 (익절·손절 관리 중)
+      baskets: { none: { status: "open" } },
       OR: [
         { botStoppedAt: { lte: cutoff } },
         // never started bot after link — use lastSyncAt / createdAt

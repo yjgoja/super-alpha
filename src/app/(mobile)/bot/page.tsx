@@ -100,47 +100,63 @@ export default function BotPage() {
   }
 
   async function toggleMaster() {
-    if (!requireLinked()) return;
+    if (!requireLinked() || busy) return;
     setBusy(true);
     setMsg("");
-    const res = await fetch("/api/bot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: !botEnabled }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (!res.ok) {
-      setMsg(data.error || "실패");
-      return;
+    try {
+      const res = await fetch("/api/bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !botEnabled }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.error || "실패");
+        return;
+      }
+      setBotEnabled(!!data.botEnabled);
+      setMsg(
+        data.botEnabled
+          ? "전체 시작: 켜 둔 종목만 매매합니다. 클라우드 API가 활성화되었습니다."
+          : Number(data.openBaskets) > 0
+            ? `전체 중지: 신규·물타기는 멈춥니다. 열린 포지션 ${data.openBaskets}건은 익절·손절만 계속 관리합니다.`
+            : "전체 중지: 모든 종목 매매가 멈춥니다. 24시간 미사용 시 클라우드가 자동 중지되어 비용이 나가지 않습니다.",
+      );
+    } finally {
+      setBusy(false);
     }
-    setBotEnabled(!!data.botEnabled);
-    setMsg(
-      data.botEnabled
-        ? "전체 시작: 켜 둔 종목만 매매합니다. 클라우드 API가 활성화되었습니다."
-        : "전체 중지: 모든 종목 매매가 멈춥니다. 24시간 미사용 시 클라우드가 자동 중지되어 비용이 나가지 않습니다.",
-    );
   }
 
   async function setSymbolEnabled(bot: Bot, enabled: boolean) {
+    if (busy) return;
     if (enabled && !requireLinked()) return;
     setBusy(true);
     setMsg("");
-    await fetch("/api/symbol-bots", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol: bot.symbol, direction: bot.direction, enabled }),
-    });
-    setBusy(false);
-    const label = `${bot.symbol} ${bot.direction}`;
-    setMsg(
-      enabled
-        ? botEnabled
-          ? `${label} 켜짐 (전체 가동 중)`
-          : `${label} 켜짐 — 전체 시작을 눌러야 실제 매매됩니다`
-        : `${label} 꺼짐`,
-    );
-    await load();
+    try {
+      const res = await fetch("/api/symbol-bots", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: bot.symbol, direction: bot.direction, enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const label = `${bot.symbol} ${bot.direction}`;
+      if (!res.ok) {
+        setMsg(data.error || `${label} 변경 실패`);
+        return;
+      }
+      setMsg(
+        enabled
+          ? botEnabled
+            ? `${label} 켜짐 (전체 가동 중)`
+            : `${label} 켜짐 — 전체 시작을 눌러야 실제 매매됩니다`
+          : data.note
+            ? `${label} 꺼짐 · ${data.note}`
+            : `${label} 꺼짐`,
+      );
+      await load();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveEdit() {
