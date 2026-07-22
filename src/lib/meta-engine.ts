@@ -403,25 +403,15 @@ async function runSymbolTableDca(
   );
   const ourPositions = positionsForSymbol(positions, symbol, direction);
 
-  // MT5 PC 등에서 수동 청산 → 고스트 바스켓. 재진입하지 않고 봇 중지
+  // Ghost basket (DB open, MT5 empty): do NOT stop here.
+  // Account-level detectAndStopOnExternalClose has margin/2-tick guards.
+  // Unguarded stop here caused false "manual close" shutdowns on MetaAPI lag.
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
-    await prisma.basket.update({
-      where: { id: basket.id },
-      data: {
-        status: "closed",
-        lastExitAt: new Date(),
-        unrealizedPnl: 0,
-      },
-    });
-    await stopBotAfterExternalClose(
-      accountId,
-      "MT5 수동 청산 감지 · 자동매매 전체 중지됨",
-    );
     return {
       ok: true as const,
-      action: "external_close",
+      action: "ghost_pending",
       symbol,
-      note: "mt5_manual_close",
+      note: "await_external_close_confirm",
     };
   }
 
@@ -796,20 +786,13 @@ async function runSymbolDca(
   );
   const ourPositions = positionsForSymbol(positions, symbol, direction);
 
+  // Same as table-logic path: never stop master bot from a single empty snapshot.
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
-    await prisma.basket.update({
-      where: { id: basket.id },
-      data: { status: "closed", lastExitAt: new Date(), unrealizedPnl: 0 },
-    });
-    await stopBotAfterExternalClose(
-      accountId,
-      "MT5 수동 청산 감지 · 자동매매 전체 중지됨",
-    );
     return {
       ok: true as const,
-      action: "external_close",
+      action: "ghost_pending",
       symbol,
-      note: "mt5_manual_close",
+      note: "await_external_close_confirm",
     };
   }
 
@@ -1130,7 +1113,9 @@ async function runDcaTickInner(accountId: string) {
   if (!account?.metaApiAccountId || !account.botEnabled) {
     return { skipped: true as const };
   }
-  if (account.status !== "connected") {
+  // Bot ON + cloud cold: recover here too (not only in runAllBots).
+  // Previously status==="undeployed" skipped the whole tick → trading looked "stopped".
+  if (account.status !== "connected" && account.status !== "undeployed") {
     return { skipped: true as const, reason: "not_connected" };
   }
 
@@ -1138,7 +1123,10 @@ async function runDcaTickInner(accountId: string) {
   let snap = await fetchSnapshot(metaId);
   let cloudJustRecovered = false;
   // Bot ON but MetaAPI cloud cold/undeployed → redeploy once (never leave live money unmonitored)
-  if (!snap.ok && isCloudColdError(snap.message || "")) {
+  if (
+    (!snap.ok && isCloudColdError(snap.message || "")) ||
+    account.status === "undeployed"
+  ) {
     const waitMs = Math.max(
       8_000,
       Number(process.env.ENGINE_CLOUD_WAIT_MS || 45_000),
@@ -1162,6 +1150,7 @@ async function runDcaTickInner(accountId: string) {
       where: { id: account.id },
       data: {
         statusMessage: snap.message,
+        // Keep botEnabled; only mark cloud cold — next tick will redeploy.
         ...(isCloudColdError(snap.message || "")
           ? { status: "undeployed" }
           : {}),
