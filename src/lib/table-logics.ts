@@ -1,12 +1,50 @@
 import martin9Json from "./presets/martin9-levels.json";
-import martin10Json from "./presets/martin10-levels.json";
-import martin11Json from "./presets/martin11-levels.json";
-import martin12Json from "./presets/martin12-levels.json";
 import dubai313Json from "./presets/dubai313-levels.json";
 import type { Dca1000Level } from "./dca1000";
+import { DCA1000_DEFAULT_SL_ROI } from "./dca1000";
 import { normalizeLogicId } from "./strategies";
 
 type LevelsFile = { leverageBase?: number; levels: Dca1000Level[] };
+
+/** MT5 1:500 XAU 기준 차트 방어폭 프리셋 (익절 ROI 20% 고정) */
+export type Martin9DefensePreset = {
+  chartPct: number;
+  /** 기본 표 drop × scale */
+  dropScale: number;
+  stopLossPct: number;
+  takeProfitPct: number;
+};
+
+export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
+  martin_9_65: {
+    chartPct: 6.5,
+    dropScale: 9.741,
+    stopLossPct: 2191.7,
+    takeProfitPct: 20,
+  },
+  martin_9_35: {
+    chartPct: 3.5,
+    dropScale: 5.201,
+    stopLossPct: 1170.3,
+    takeProfitPct: 20,
+  },
+  martin_9_068: {
+    chartPct: 0.68,
+    dropScale: 1,
+    stopLossPct: 225,
+    takeProfitPct: 20,
+  },
+};
+
+export function getMartin9Defense(logic: string): Martin9DefensePreset | null {
+  const id = normalizeLogicId(logic);
+  return MARTIN9_DEFENSE[id] ?? null;
+}
+
+export function isMartin9Logic(logic: string) {
+  const id = normalizeLogicId(logic);
+  return id === "martin_9" || id.startsWith("martin_9_");
+}
 
 /** 에디터·엔진용 회차 (lots 명시 가능) */
 export type StrategyLevelRow = {
@@ -47,23 +85,17 @@ function buildLevels(file: LevelsFile): Dca1000Level[] {
 }
 
 export const TABLE_LOGIC_IDS = [
-  "martin_9",
-  "martin_10",
-  "martin_11",
-  "martin_12",
+  "martin_9_65",
+  "martin_9_35",
+  "martin_9_068",
   "dubai_bruno_313",
   "custom",
 ] as const;
 
 export type TableLogicId = (typeof TABLE_LOGIC_IDS)[number];
 
-const DEFAULT_TABLE_LOGIC: Exclude<TableLogicId, "custom"> = "dubai_bruno_313";
-
-const TABLE_FILES: Record<Exclude<TableLogicId, "custom">, LevelsFile> = {
+const TABLE_FILES: Record<"martin_9" | "dubai_bruno_313", LevelsFile> = {
   martin_9: martin9Json as LevelsFile,
-  martin_10: martin10Json as LevelsFile,
-  martin_11: martin11Json as LevelsFile,
-  martin_12: martin12Json as LevelsFile,
   dubai_bruno_313: dubai313Json as LevelsFile,
 };
 
@@ -79,7 +111,8 @@ export function isBulkLogic(logic: string) {
 }
 
 export function isMartinLogic(logic: string) {
-  return logic === "custom" || /^martin_\d+$/i.test(logic);
+  const id = normalizeLogicId(logic);
+  return id === "custom" || isMartin9Logic(id) || /^martin_\d+$/i.test(id);
 }
 
 export function isLevelsEditableLogic(logic: string) {
@@ -89,19 +122,33 @@ export function isLevelsEditableLogic(logic: string) {
 /** 마틴게일 9차 → 최대 9회차 (L0~L8) */
 export function martinMaxLevels(logic: string): number {
   if (logic === "custom") return 12;
+  if (isMartin9Logic(logic)) return 9;
   const m = logic.match(/martin_(\d+)/i);
   if (!m) return 12;
   return Math.max(2, Math.min(30, Number(m[1])));
 }
 
 export function defaultEntryMultiplier(logic: string): number {
-  return isMartinLogic(logic) && logic !== "custom" ? 2 : 1;
+  return isMartinLogic(logic) && normalizeLogicId(logic) !== "custom" ? 2 : 1;
+}
+
+function roundDrop(n: number) {
+  if (n <= 0) return 0;
+  if (n < 10) return Math.round(n * 10) / 10;
+  return Math.round(n);
+}
+
+function tableFileKey(logic: string): "martin_9" | "dubai_bruno_313" {
+  const id = normalizeLogicId(logic);
+  if (isMartin9Logic(id)) return "martin_9";
+  if (id === "dubai_bruno_313") return "dubai_bruno_313";
+  return "dubai_bruno_313";
 }
 
 /**
  * 표 로직 회차 로트.
  * - explicitLots 있으면 그 값 사용
- * - DCA/두바이: size 비율 × startLots
+ * - DCA/313차: size 비율 × startLots
  * - 마틴: startLots × 배수^회차
  */
 export function lotsForLogicLevel(
@@ -148,20 +195,26 @@ function presetFileLevels(logic: string): Dca1000Level[] {
       drop: i === 0 ? 0 : 10 * i,
     }));
   }
-  const id =
-    isTableLogic(normalized) && normalized !== "custom" ? normalized : DEFAULT_TABLE_LOGIC;
-  if (!LEVELS_CACHE[id]) {
-    LEVELS_CACHE[id] = buildLevels(TABLE_FILES[id as Exclude<TableLogicId, "custom">]);
+
+  const fileKey = tableFileKey(normalized);
+  const cacheKey = isMartin9Logic(normalized) ? normalized : fileKey;
+  if (!LEVELS_CACHE[cacheKey]) {
+    const built = buildLevels(TABLE_FILES[fileKey]);
+    if (isMartin9Logic(normalized)) {
+      const defense = getMartin9Defense(normalized);
+      const scale = defense?.dropScale ?? 1;
+      const tp = defense?.takeProfitPct ?? 20;
+      const n = martinMaxLevels(normalized);
+      LEVELS_CACHE[cacheKey] = built.slice(0, n).map((lv, i) => ({
+        size: Math.round(10 * Math.pow(2, i) * 100) / 100,
+        profit: tp,
+        drop: i === 0 ? 0 : roundDrop(lv.drop * scale),
+      }));
+    } else {
+      LEVELS_CACHE[cacheKey] = built;
+    }
   }
-  const full = LEVELS_CACHE[id]!;
-  if (isMartinLogic(id)) {
-    const n = martinMaxLevels(id);
-    return full.slice(0, n).map((lv, i) => ({
-      ...lv,
-      size: Math.round(10 * Math.pow(2, i) * 100) / 100,
-    }));
-  }
-  return full;
+  return LEVELS_CACHE[cacheKey]!;
 }
 
 export function getTableLevels(logic: string, entryMultiplier?: number): Dca1000Level[] {
@@ -222,22 +275,24 @@ export function applyBulkPayload(
 export function getTableLeverage(logic: string): number {
   const normalized = normalizeLogicId(logic);
   if (normalized === "custom") return 20;
-  const id =
-    isTableLogic(normalized) && normalized !== "custom" ? normalized : DEFAULT_TABLE_LOGIC;
-  return TABLE_FILES[id].leverageBase || 20;
+  return TABLE_FILES[tableFileKey(normalized)].leverageBase || 20;
 }
 
 export function tableLogicMeta(logic: string) {
   const levels = getTableLevels(logic);
+  const defense = getMartin9Defense(logic);
   return {
     count: levels.length,
     dcaRows: Math.max(0, levels.length - 1),
-    firstTpRoi: levels[0]?.profit ?? 20,
+    firstTpRoi: levels[0]?.profit ?? defense?.takeProfitPct ?? 20,
     lastDropRoi: levels[levels.length - 1]?.drop ?? 0,
+    chartDefensePct: defense?.chartPct ?? null,
+    stopLossPct: defense?.stopLossPct ?? null,
   };
 }
 
 export function defaultEditorPayload(logic: string): StrategyPayload {
+  const defense = getMartin9Defense(logic);
   if (isBulkLogic(logic)) {
     const meta = tableLogicMeta(logic);
     return {
@@ -245,7 +300,7 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
       leverageBase: getTableLeverage(logic),
       startLots: 0.01,
       takeProfitPct: meta.firstTpRoi || 20,
-      stopLossPct: 225,
+      stopLossPct: DCA1000_DEFAULT_SL_ROI,
       takeProfitUsd: 0,
       stopLossUsd: 0,
     };
@@ -254,8 +309,8 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
     mode: "levels",
     leverageBase: getTableLeverage(logic),
     startLots: 0.01,
-    takeProfitPct: 20,
-    stopLossPct: 225,
+    takeProfitPct: defense?.takeProfitPct ?? 20,
+    stopLossPct: defense?.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
     takeProfitUsd: 0,
     stopLossUsd: 0,
     levels: presetToEditorRows(logic, 0.01, 2),

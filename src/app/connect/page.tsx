@@ -1,18 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { FIXED_MT5_SERVER } from "@/lib/dca";
 
-export default function ConnectPage() {
+function friendlyConnectError(raw: unknown): string {
+  const text = typeof raw === "string" ? raw : "";
+  if (!text) return "계좌 연결 신청에 실패했습니다. 잠시 후 다시 시도하세요.";
+  if (
+    /fetch failed|network|econnreset|enotfound|etimedout|socket|undici|timeout|503|502/i.test(
+      text,
+    ) ||
+    (/^[A-Za-z0-9\s.,'"_:/\-()]+$/.test(text) && !/[가-힣]/.test(text))
+  ) {
+    return "연결이 잠시 불안정합니다. 다시 한 번 시도해 주세요.";
+  }
+  return text;
+}
+
+function ConnectForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const reapply = params.get("reapply") === "1";
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [approvalPending, setApprovalPending] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -26,35 +43,58 @@ export default function ConnectPage() {
         router.replace("/admin");
         return;
       }
-      if (me.approvalStatus && me.approvalStatus !== "approved") {
+      if (me.approvalStatus === "rejected") {
         router.replace("/pending");
         return;
       }
-      if (me.account?.metaApiAccountId) {
+      if (me.approvalStatus && me.approvalStatus !== "approved") {
+        setApprovalPending(true);
+        setChecking(false);
+        return;
+      }
+      const st = me.account?.status as string | undefined;
+      const linked = Boolean(me.account?.metaApiAccountId);
+      const canReapply =
+        reapply ||
+        st === "failed" ||
+        st === "pending_registration" ||
+        st === "provisioning";
+      if (linked && !canReapply) {
         router.replace("/home");
         return;
       }
+      if (me.account?.login) setLogin(String(me.account.login).replace(/\D/g, ""));
       setChecking(false);
     })();
-  }, [router]);
+  }, [router, reapply]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
-    const res = await fetch("/api/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login, password, server: FIXED_MT5_SERVER }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error || "연결 실패");
-      return;
+    try {
+      const res = await fetch("/api/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          login,
+          password,
+          server: FIXED_MT5_SERVER,
+          reapply: reapply || true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(friendlyConnectError(data.error));
+        return;
+      }
+      setDone(true);
+      setTimeout(() => router.push("/home"), 1500);
+    } catch {
+      setError("연결이 잠시 불안정합니다. 다시 한 번 시도해 주세요.");
+    } finally {
+      setLoading(false);
     }
-    setDone(true);
-    setTimeout(() => router.push("/home"), 1200);
   }
 
   if (checking) {
@@ -69,22 +109,36 @@ export default function ConnectPage() {
     <main className="sa-shell flex min-h-screen items-center justify-center py-10">
       <form onSubmit={onSubmit} className="sa-panel w-full max-w-lg sa-rise">
         <div className="flex items-center justify-between">
-          <Link href="/" className="font-display text-2xl">
+          <Link href="/home" className="font-display text-2xl">
             Super Alpha
           </Link>
-          <span className="sa-badge sa-badge-live">MetaAPI 검증</span>
+          <span className="sa-badge sa-badge-live">연동 신청</span>
         </div>
 
-        <h1 className="mt-6 text-2xl font-semibold">MT5 실계좌 연결</h1>
+        <h1 className="mt-6 text-2xl font-semibold">
+          {reapply ? "실계좌 다시 연결 신청" : "MT5 실계좌 연결 신청"}
+        </h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          MetaAPI가 ZeroMarkets-1 브로커에 직접 로그인해 계좌·비밀번호가 맞는지
-          확인합니다. 틀리면 등록되지 않습니다.
+          계좌·비밀번호를 제출하면 관리자 승인 후 연동됩니다. 비밀번호가 틀리면 승인
+          단계에서 거절되니 정확히 입력하세요.
         </p>
 
-        {done ? (
+        {approvalPending ? (
+          <div className="mt-8 rounded-2xl border border-[var(--gold)]/40 bg-[rgba(201,162,39,0.08)] p-5">
+            <div className="font-display text-2xl text-[var(--gold)]">관리자 승인 대기</div>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              먼저 회원 승인이 필요합니다. 승인 후 실계좌 연결을 신청하세요.
+            </p>
+            <Link href="/home" className="sa-btn sa-btn-ghost mt-6 inline-flex">
+              홈으로
+            </Link>
+          </div>
+        ) : done ? (
           <div className="mt-8 rounded-2xl border border-[var(--accent)]/40 bg-[rgba(200,245,66,0.08)] p-5">
-            <div className="font-display text-2xl text-[var(--accent)]">실계좌 검증 완료</div>
-            <p className="mt-2 text-sm text-[var(--muted)]">대시보드로 이동합니다…</p>
+            <div className="font-display text-2xl text-[var(--accent)]">연동 신청 완료</div>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              관리자 승인 대기 중입니다. 홈으로 이동합니다…
+            </p>
           </div>
         ) : (
           <div className="mt-6 space-y-4">
@@ -118,11 +172,25 @@ export default function ConnectPage() {
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>
-              {loading ? "브로커 검증 중… (최대 1분)" : "실계좌 검증 후 연결"}
+              {loading ? "신청 중…" : "연동 신청하기"}
             </button>
           </div>
         )}
       </form>
     </main>
+  );
+}
+
+export default function ConnectPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="sa-shell flex min-h-screen items-center justify-center py-10">
+          <p className="text-sm text-[var(--muted)]">확인 중…</p>
+        </main>
+      }
+    >
+      <ConnectForm />
+    </Suspense>
   );
 }

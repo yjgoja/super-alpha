@@ -144,7 +144,7 @@ export async function finalizeAllProvisioning() {
 }
 
 /**
- * Admin approve: create cloud immediately, save id, short poll, then return pending if needed.
+ * Admin approve: verify MT5 password via MetaAPI, then undeploy to save cost.
  */
 export async function runAdminProvision(accountId: string) {
   const account = await prisma.brokerAccount.findUnique({ where: { id: accountId } });
@@ -158,59 +158,83 @@ export async function runAdminProvision(accountId: string) {
 
   await prisma.brokerAccount.update({
     where: { id: account.id },
-    data: { status: "provisioning", statusMessage: "클라우드 계좌 확인 중…" },
+    data: { status: "provisioning", statusMessage: "비밀번호·브로커 검증 중…" },
   });
 
-  // Always resolve existing MetaAPI account by MT5 login first
-  let metaId = await ensureCorrectMetaId(account);
+  const { verifyMt5Credentials } = await import("./metaapi");
+  const verified = await verifyMt5Credentials({
+    login: account.login,
+    password: account.syncToken,
+    server: account.server,
+    reuseAccountId: account.metaApiAccountId,
+  });
 
-  if (!metaId || !looksLikeUuid(metaId)) {
-    const started = await startCloudAccount({
-      login: account.login,
-      password: account.syncToken,
-      server: account.server,
+  if (!verified.ok) {
+    await prisma.brokerAccount.update({
+      where: { id: account.id },
+      data: {
+        status: "failed",
+        statusMessage: verified.message,
+        metaApiAccountId: null,
+        botEnabled: false,
+      },
     });
-    if (!started.ok) {
-      await prisma.brokerAccount.update({
-        where: { id: account.id },
-        data: { status: "failed", statusMessage: started.message },
-      });
-      return { ok: false as const, error: started.message };
+    return { ok: false as const, error: verified.message };
+  }
+
+  const metaId = String(verified.metaApiAccountId);
+
+  // If verify returned empty balances (snapshot missed), force a live read before undeploy
+  let balance = verified.balance;
+  let equity = verified.equity;
+  if (!(balance > 0 || equity > 0)) {
+    const { ensureCloudLive, undeployAccount } = await import("./metaapi");
+    const live = await ensureCloudLive(metaId, 60000);
+    if (live.ok && live.snap) {
+      balance = live.snap.balance;
+      equity = live.snap.equity;
     }
-    metaId = String(started.metaApiAccountId);
+    try {
+      await undeployAccount(metaId);
+    } catch {
+      /* ignore */
+    }
   } else {
-    await deployAccount(metaId).catch(() => null);
+    try {
+      const { undeployAccount } = await import("./metaapi");
+      await undeployAccount(metaId);
+    } catch {
+      /* ignore */
+    }
   }
 
   await prisma.brokerAccount.update({
     where: { id: account.id },
     data: {
       metaApiAccountId: metaId,
-      status: "provisioning",
-      statusMessage: "브로커 연결 확인 중…",
+      status: "undeployed",
+      mode: "live",
+      balance,
+      equity,
+      startingBalance:
+        account.startingBalance > 0 ? account.startingBalance : balance > 0 ? balance : account.startingBalance,
+      lastSyncAt: new Date(),
+      botEnabled: false,
+      botStoppedAt: new Date(),
+      statusMessage:
+        balance > 0 || equity > 0
+          ? "연동 완료 · 잔고 동기화됨 · 클라우드 대기(비용 절감). 봇을 시작하면 API가 활성화됩니다."
+          : "연동 완료 · 클라우드 대기. 잔고는 봇 시작 시 동기화됩니다.",
     },
   });
 
-  for (let i = 0; i < 5; i++) {
-    const fin = await finalizeProvisionIfReady(account.id);
-    if (fin.done) {
-      if (fin.status === "failed") {
-        return { ok: false as const, error: fin.message || "연동에 실패했습니다." };
-      }
-      return {
-        ok: true as const,
-        pending: false,
-        message: "계좌 연동이 완료되었습니다. 대시보드에서 실계좌가 동기화됩니다.",
-        status: fin.status,
-      };
-    }
-    await new Promise((r) => setTimeout(r, 2500));
-  }
-
   return {
     ok: true as const,
-    pending: true,
-    message: "브로커 연결 확인 중입니다. 화면이 자동으로 갱신됩니다.",
-    status: "provisioning",
+    pending: false,
+    message:
+      balance > 0 || equity > 0
+        ? `계좌 연동 완료 · 평가금액 $${equity.toFixed(2)}`
+        : "계좌 연동이 완료되었습니다. 잔고는 봇 시작 시 동기화됩니다.",
+    status: "undeployed" as const,
   };
 }

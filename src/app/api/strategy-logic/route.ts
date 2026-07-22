@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireApprovedUser } from "@/lib/access";
+import { requireApprovedUser, requireAdmin } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { resolveTpSlUsd } from "@/lib/dca1000";
+import { DCA1000_DEFAULT_SL_ROI, resolveTpSlUsd } from "@/lib/dca1000";
 import { isLogicId } from "@/lib/strategies";
+import { publicLogicLabel, isPresetLogicId } from "@/lib/strategy-public";
 import {
   defaultEditorPayload,
   isBulkLogic,
@@ -23,7 +24,7 @@ async function getAccount(userId: string) {
 const levelSchema = z.object({
   lots: z.number().positive().max(100),
   profit: z.number().min(1).max(500),
-  drop: z.number().min(0).max(1000),
+  drop: z.number().min(0).max(5000),
 });
 
 const putSchema = z.object({
@@ -36,7 +37,7 @@ const putSchema = z.object({
       leverageBase: z.number().positive().max(100).optional(),
       startLots: z.number().positive().max(100).optional(),
       takeProfitPct: z.number().min(1).max(500).optional(),
-      stopLossPct: z.number().min(0).max(1000).optional(),
+      stopLossPct: z.number().min(0).max(5000).optional(),
       takeProfitUsd: z.number().min(0.01).max(1_000_000).optional(),
       stopLossUsd: z.number().min(0).max(1_000_000).optional(),
       levels: z.array(levelSchema).max(60).optional(),
@@ -59,7 +60,7 @@ export async function GET(req: Request) {
   const account = await getAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
-  const logicId = new URL(req.url).searchParams.get("logic") || "martin_9";
+  const logicId = new URL(req.url).searchParams.get("logic") || "martin_9_65";
   if (!isLogicId(logicId) && logicId !== "custom") {
     return NextResponse.json({ error: "알 수 없는 로직입니다." }, { status: 400 });
   }
@@ -77,7 +78,7 @@ export async function GET(req: Request) {
   const payload = (saved?.payload as StrategyPayload | null) || defaults;
   const startLots = payload.startLots ?? resolved.startLots ?? 0.01;
   const tpPct = payload.takeProfitPct ?? resolved.takeProfitPct ?? defaults.takeProfitPct ?? 20;
-  const slPct = payload.stopLossPct ?? resolved.stopLossPct ?? defaults.stopLossPct ?? 225;
+  const slPct = payload.stopLossPct ?? resolved.stopLossPct ?? defaults.stopLossPct ?? DCA1000_DEFAULT_SL_ROI;
   const usd = resolveTpSlUsd({
     symbol: "XAUUSD",
     startLots,
@@ -95,6 +96,22 @@ export async function GET(req: Request) {
       profit: lv.profit,
       drop: i === 0 ? 0 : lv.drop,
     }));
+  }
+
+  const admin = await requireAdmin();
+  const isAdmin = !!admin.user;
+
+  // End users: public summary only — no levels / ROI% / drop / TP-SL $
+  if (!isAdmin) {
+    return NextResponse.json({
+      logicId,
+      name: publicLogicLabel(logicId),
+      hasOverride: !!saved,
+      locked: isPresetLogicId(logicId),
+      summary: { locked: true },
+      payload: { mode: "bulk" },
+      resolved: { locked: true },
+    });
   }
 
   return NextResponse.json({
@@ -127,6 +144,13 @@ export async function PUT(req: Request) {
   const gate = await requireApprovedUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
+  }
+  // Strategy table editing is admin-only (IP protection)
+  if (gate.user.role !== "admin") {
+    return NextResponse.json(
+      { error: "전략 세부 파라미터는 변경할 수 없습니다." },
+      { status: 403 },
+    );
   }
   const account = await getAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
@@ -191,7 +215,7 @@ export async function PUT(req: Request) {
     takeProfitUsd: payload.takeProfitUsd,
     stopLossUsd: payload.stopLossUsd,
     takeProfitPct: payload.takeProfitPct ?? 20,
-    stopLossPct: payload.stopLossPct ?? 225,
+    stopLossPct: payload.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
   });
   payload.takeProfitUsd = usdResolved.takeProfitUsd;
   payload.stopLossUsd = usdResolved.stopLossUsd;

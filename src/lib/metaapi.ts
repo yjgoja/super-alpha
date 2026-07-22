@@ -994,7 +994,8 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
 /** Zero Markets 등 브로커별 심볼명 후보 */
 const SYMBOL_ALIASES: Record<string, string[]> = {
   EURUSD: ["EURUSD", "EURUSDm", "EURUSD.", "EURUSD#"],
-  GBPUSD: ["GBPUSD", "GBPUSDm", "GBPUSD."],
+  GBPUSD: ["GBPUSD", "GBPUSDm", "GBPUSD.", "GBPUSD#"],
+  AUDUSD: ["AUDUSD", "AUDUSDm", "AUDUSD.", "AUDUSD#"],
   USDJPY: ["USDJPY", "USDJPYm", "USDJPY."],
   XAUUSD: ["XAUUSD", "GOLD", "XAUUSDm", "XAUUSD.", "XAUUSD#", "XAUUSD.a", "GOLD.a"],
   XAUEUR: ["XAUEUR", "GOLDEUR"],

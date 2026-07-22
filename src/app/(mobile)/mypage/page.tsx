@@ -2,10 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { AccountLinkBadge } from "@/components/ConnectPrompt";
 
 export default function MyPage() {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [login, setLogin] = useState("");
+  const [linked, setLinked] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState<string>("approved");
+  const [accountStatus, setAccountStatus] = useState<string | null>(null);
   const [totalPnl, setTotalPnl] = useState(0);
   const [totalTrades, setTotalTrades] = useState(0);
 
@@ -16,10 +21,18 @@ export default function MyPage() {
         window.location.href = "/login";
         return;
       }
+      if (meRes.status === 403) {
+        window.location.href = "/pending";
+        return;
+      }
       const me = await meRes.json().catch(() => ({}));
       const pnl = await pnlRes.json().catch(() => ({}));
+      setName(me.name || "");
       setEmail(me.email || "");
-      setLogin(pnl.account?.login || "");
+      setLogin(pnl.account?.login || me.account?.login || "");
+      setLinked(Boolean(me.linked));
+      setApprovalStatus(me.approvalStatus || "pending");
+      setAccountStatus(me.account?.status || null);
       setTotalPnl(pnl.totalPnl || 0);
       setTotalTrades(pnl.totalTrades || 0);
     })();
@@ -39,8 +52,20 @@ export default function MyPage() {
       <section className="m-card" style={{ marginBottom: "0.85rem" }}>
         <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>계정</div>
         <div style={{ fontWeight: 700, fontSize: "1.05rem", marginTop: "0.3rem" }}>
-          {email || "—"}
+          {name || email || "—"}
+          {(name || email) && (
+            <AccountLinkBadge
+              linked={linked}
+              approvalStatus={approvalStatus}
+              accountStatus={accountStatus}
+            />
+          )}
         </div>
+        {email && name && (
+          <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.35rem" }}>
+            {email}
+          </div>
+        )}
         {login && (
           <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.35rem" }}>
             MT5 {login}

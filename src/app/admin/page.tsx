@@ -257,6 +257,10 @@ export default function AdminPage() {
   const pendingServers = users.filter((u) =>
     u.accounts.some((a) => a.status === "pending_registration" || a.status === "provisioning"),
   );
+  const pendingMembers = users.filter(
+    (u) => u.role !== "admin" && u.approvalStatus === "pending",
+  );
+  const approveCount = pendingServers.length + pendingMembers.length;
 
   return (
     <main className="sa-shell py-8">
@@ -281,7 +285,7 @@ export default function AdminPage() {
               onClick={() => setTab(k)}
             >
               {label}
-              {k === "approve" && pendingServers.length > 0 ? ` (${pendingServers.length})` : ""}
+              {k === "approve" && approveCount > 0 ? ` (${approveCount})` : ""}
             </button>
           ))}
           <button
@@ -431,18 +435,17 @@ export default function AdminPage() {
       )}
 
       {tab === "approve" && (
-        <section className="sa-panel mt-6">
-          <h2 className="text-lg font-semibold">계좌 연동 승인 대기</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            승인 시 MetaAPI 검증 후 즉시 undeploy합니다. 봇을 24시간 이상 안 돌리면 클라우드가 자동 중지되고, 다시 시작하면 활성화됩니다.
-          </p>
-          <div className="mt-4 space-y-3">
-            {pendingServers.length === 0 && (
-              <p className="text-sm text-[var(--muted)]">대기 없음</p>
-            )}
-            {pendingServers.map((u) => {
-              const a = u.accounts[0];
-              return (
+        <section className="sa-panel mt-6 space-y-8">
+          <div>
+            <h2 className="text-lg font-semibold">회원 승인 대기</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              가입 회원입니다. 승인한 뒤 실계좌 연동 신청을 받을 수 있습니다.
+            </p>
+            <div className="mt-4 space-y-3">
+              {pendingMembers.length === 0 && (
+                <p className="text-sm text-[var(--muted)]">대기 없음</p>
+              )}
+              {pendingMembers.map((u) => (
                 <div
                   key={u.id}
                   className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--line)] p-4"
@@ -452,39 +455,96 @@ export default function AdminPage() {
                       {u.email}
                     </button>
                     <div className="mt-1 text-sm text-[var(--muted)]">
-                      Account <strong className="text-[var(--ink)]">{a.login}</strong> ·{" "}
-                      {a.server}
+                      {u.name || "-"} · {new Date(u.createdAt).toLocaleString("ko-KR")}
                     </div>
-                    <div className="mt-1 text-xs text-[var(--warn)]">
-                      {a.status}
-                      {a.statusMessage ? ` · ${a.statusMessage}` : ""}
-                    </div>
+                    <div className="mt-1 text-xs text-[var(--warn)]">approval · pending</div>
                   </div>
                   <div className="flex gap-2">
                     <button
                       className="sa-btn sa-btn-primary text-xs py-2 px-3"
-                      disabled={busy === a.id}
-                      onClick={() => patch({ accountId: a.id, action: "provision" }, a.id)}
+                      disabled={busy === `ap-${u.id}`}
+                      onClick={() =>
+                        patch({ userId: u.id, approvalStatus: "approved" }, `ap-${u.id}`)
+                      }
                     >
-                      {busy === a.id
-                        ? "연동 중…"
-                        : a.status === "provisioning"
-                          ? "상태 확인/재시도"
-                          : "승인"}
+                      회원 승인
                     </button>
                     <button
                       className="sa-btn sa-btn-ghost text-xs py-2 px-3"
-                      disabled={busy === `r-${a.id}`}
+                      disabled={busy === `rj-${u.id}`}
                       onClick={() =>
-                        patch({ accountId: a.id, action: "reject_account" }, `r-${a.id}`)
+                        patch({ userId: u.id, approvalStatus: "rejected" }, `rj-${u.id}`)
                       }
                     >
                       거절
                     </button>
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h2 className="text-lg font-semibold">계좌 연동 승인 대기</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              회원이 제출한 MT5 계좌입니다. 승인 시 비밀번호를 MetaAPI로 검증합니다. 틀리면
+              실패 처리되어 회원이 다시 신청해야 합니다.
+            </p>
+            <div className="mt-4 space-y-3">
+              {pendingServers.length === 0 && (
+                <p className="text-sm text-[var(--muted)]">대기 없음</p>
+              )}
+              {pendingServers.map((u) => {
+                const a = u.accounts[0];
+                return (
+                  <div
+                    key={u.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--line)] p-4"
+                  >
+                    <div>
+                      <button className="font-medium text-[var(--gold)]" onClick={() => openDetail(u.id)}>
+                        {u.email}
+                      </button>
+                      <div className="mt-1 text-sm text-[var(--muted)]">
+                        Account <strong className="text-[var(--ink)]">{a.login}</strong> ·{" "}
+                        {a.server}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--warn)]">
+                        {a.status}
+                        {a.statusMessage ? ` · ${a.statusMessage}` : ""}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        className="sa-btn sa-btn-primary text-xs py-2 px-3"
+                        disabled={busy === a.id || u.approvalStatus !== "approved"}
+                        title={
+                          u.approvalStatus !== "approved"
+                            ? "먼저 회원 승인이 필요합니다"
+                            : undefined
+                        }
+                        onClick={() => patch({ accountId: a.id, action: "provision" }, a.id)}
+                      >
+                        {busy === a.id
+                          ? "연동 중…"
+                          : a.status === "provisioning"
+                            ? "상태 확인/재시도"
+                            : "연동 승인"}
+                      </button>
+                      <button
+                        className="sa-btn sa-btn-ghost text-xs py-2 px-3"
+                        disabled={busy === `r-${a.id}`}
+                        onClick={() =>
+                          patch({ accountId: a.id, action: "reject_account" }, `r-${a.id}`)
+                        }
+                      >
+                        거절
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
@@ -496,8 +556,9 @@ export default function AdminPage() {
             <thead>
               <tr>
                 <th>이메일</th>
+                <th>회원상태</th>
                 <th>MT5</th>
-                <th>상태</th>
+                <th>연동</th>
                 <th>Equity</th>
                 <th>처리</th>
               </tr>
@@ -514,6 +575,32 @@ export default function AdminPage() {
                       <div className="text-xs text-[var(--muted)]">
                         {u.role} · {new Date(u.createdAt).toLocaleDateString("ko-KR")}
                       </div>
+                    </td>
+                    <td>
+                      <span
+                        className={`text-xs ${
+                          u.approvalStatus === "approved"
+                            ? "text-[var(--ok)]"
+                            : u.approvalStatus === "rejected"
+                              ? "text-[var(--danger)]"
+                              : "text-[var(--warn)]"
+                        }`}
+                      >
+                        {u.approvalStatus}
+                      </span>
+                      {u.approvalStatus === "pending" && u.role !== "admin" && (
+                        <div className="mt-1 flex gap-1">
+                          <button
+                            className="sa-btn sa-btn-primary text-xs py-1 px-2"
+                            disabled={busy === `ap-${u.id}`}
+                            onClick={() =>
+                              patch({ userId: u.id, approvalStatus: "approved" }, `ap-${u.id}`)
+                            }
+                          >
+                            승인
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="text-[var(--muted)]">{a ? a.login : "-"}</td>
                     <td>

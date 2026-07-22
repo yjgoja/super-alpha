@@ -637,7 +637,11 @@ export function summarizeDca1000(levels = DCA1000_LEVELS) {
   };
 }
 
-/** Default coin-futures SL ROI% for 1000-step logic (표 기준) */
+/**
+ * Default basket-ROI SL% for DCA ladder logic.
+ * 소형 계좌 보호: 225%에서 조기 손절 (525% 풀사다리는 과레버리지 위험).
+ * 회차 상한(entryCount)과 함께 바스켓 크기를 계좌에 맞게 제한한다.
+ */
 export const DCA1000_DEFAULT_SL_ROI = 225;
 export const DCA1000_REF_LOTS = 0.01;
 
@@ -645,6 +649,7 @@ export const DCA1000_REF_LOTS = 0.01;
 export const MT5_DEFAULT_SPREAD_ABS: Record<string, number> = {
   EURUSD: 0.00028,
   GBPUSD: 0.0003,
+  AUDUSD: 0.00032,
   USDJPY: 0.03,
   XAUUSD: 0.4,
   XAUEUR: 0.4,
@@ -658,6 +663,7 @@ export const MT5_DEFAULT_SPREAD_ABS: Record<string, number> = {
 export const MT5_REF_MID: Record<string, number> = {
   EURUSD: 1.085,
   GBPUSD: 1.27,
+  AUDUSD: 0.66,
   USDJPY: 155,
   XAUUSD: 4080,
   XAUEUR: 2150,
@@ -672,6 +678,7 @@ export const MT5_REF_MID: Record<string, number> = {
 export const MT5_CONTRACT_SIZE: Record<string, number> = {
   EURUSD: 100_000,
   GBPUSD: 100_000,
+  AUDUSD: 100_000,
   USDJPY: 100_000,
   XAUUSD: 100,
   XAUEUR: 100,
@@ -686,6 +693,7 @@ export const MT5_CONTRACT_SIZE: Record<string, number> = {
 export const MT5_POINT: Record<string, number> = {
   EURUSD: 0.00001,
   GBPUSD: 0.00001,
+  AUDUSD: 0.00001,
   USDJPY: 0.001,
   XAUUSD: 0.01,
   XAUEUR: 0.01,
@@ -741,7 +749,7 @@ export type Dca1000Defense = {
   spreadPoints: number;
   refMid: number;
   symbol: string;
-  /** 참고: 마진 ROI를 가격%로 환산 (SL_ROI/브로커레버). 엔진은 ROI로 판정 */
+  /** 코인선물 기준 평단 대비 손절 가격% (SL_ROI/표레버). 엔진은 ROI로 판정 */
   slTriggerPricePct: number;
 };
 
@@ -769,52 +777,53 @@ export function calcDca1000Defense(opts?: {
   const spreadInfo = resolveMt5Spread(opts?.symbol, opts?.spreadAbs);
   const mid0 = opts?.refMid ?? spreadInfo.mid;
   const sprAbs = opts?.spreadAbs ?? spreadInfo.spreadAbs;
-  const half = sprAbs / 2;
-  const ask0 = mid0 + half;
-  const bid0 = mid0 - half;
   const sprPct = mid0 > 0 ? (sprAbs / mid0) * 100 : 0;
-  // 참고: 마진ROI를 브로커레버 차트%로 환산 (엔진 트리거 아님)
-  const slFactor = slRoi / (brokerLev * 100);
-  const slTriggerPricePct = slRoi / brokerLev;
+  // 코인선물 기준 방어폭 — 가격경로 시뮬레이션 (코인 툴과 소수점까지 일치).
+  // 바스켓 마진 ROI = 표레버 × (P-평단)/평단 (평단 기준 증거금, 바이낸스식).
+  // 수량 = 명목/체결가 (코인선물처럼 주문당 명목 고정). 평단 = 명목가중 VWAP.
+  //  BUY  물타기: p = avg × (1 - drop/(100·lev)),  손절: avg × (1 - slRoi/(100·lev))
+  //  SELL 물타기: p = avg × (1 + drop/(100·lev)),  손절: avg × (1 + slRoi/(100·lev))
+  const slAvgFactor = slRoi / (lev * 100);
+  const slTriggerPricePct = slRoi / lev; // 평단 대비 손절 가격%
 
   let totalSize = 0;
-  let sumAsk = 0;
-  let sumBid = 0;
   let totalLots = 0;
-  let sumLotAsk = 0;
-  let sumLotBid = 0;
+  // 명목가중 평단(시작가=1 기준 비율) — 롱/숏 경로
+  let sumQtyPLong = 0;
+  let sumQtyLong = 0;
+  let avgRatioLong = 1;
+  let sumQtyPShort = 0;
+  let sumQtyShort = 0;
+  let avgRatioShort = 1;
+  // 로트가중 평단(절대가) — MT5 증거금 분모용 (BUY 경로 기준)
+  let sumLotMid = 0;
 
   for (let i = 0; i < levels.length; i++) {
     const lv = levels[i];
     const drop = i === 0 ? 0 : lv.drop;
-    // 물타기 체결가 경로: 표 drop ROI → 표레버 가격% (참고 시뮬)
-    const adverse = drop / Math.max(1, lev) / 100;
-    const ask = ask0 * (1 - adverse);
-    const bid = bid0 * (1 + adverse);
+    const dFactor = drop / (Math.max(1, lev) * 100);
+    const pLong = i === 0 ? 1 : avgRatioLong * (1 - dFactor);
+    const pShort = i === 0 ? 1 : avgRatioShort * (1 + dFactor);
+    const qLong = lv.size / pLong;
+    const qShort = lv.size / pShort;
+    sumQtyPLong += qLong * pLong;
+    sumQtyLong += qLong;
+    avgRatioLong = sumQtyPLong / sumQtyLong;
+    sumQtyPShort += qShort * pShort;
+    sumQtyShort += qShort;
+    avgRatioShort = sumQtyPShort / sumQtyShort;
     const lots = lotsFromSize(lv.size, startLots);
     totalSize += lv.size;
-    sumAsk += lv.size * ask;
-    sumBid += lv.size * bid;
     totalLots += lots;
-    sumLotAsk += lots * ask;
-    sumLotBid += lots * bid;
+    sumLotMid += lots * pLong * mid0;
   }
 
-  const avgAsk = totalSize > 0 ? sumAsk / totalSize : ask0;
-  const avgBid = totalSize > 0 ? sumBid / totalSize : bid0;
-  const avgLotAsk = totalLots > 0 ? sumLotAsk / totalLots : ask0;
-  const avgLotBid = totalLots > 0 ? sumLotBid / totalLots : bid0;
-  const basketAvg = (avgLotAsk + avgLotBid) / 2;
+  const basketAvg = totalLots > 0 ? sumLotMid / totalLots : mid0;
 
-  // BUY/SELL 차트 참고폭 (마진ROI → 브로커레버 가격%)
-  const buySlBid = avgAsk * (1 - slFactor);
-  const buySlMid = buySlBid + half;
-  const spotLongPct = mid0 > 0 ? Math.max(0, ((mid0 - buySlMid) / mid0) * 100) : 0;
-
-  const sellSlAsk = avgBid * (1 + slFactor);
-  const sellSlMid = sellSlAsk - half;
-  const spotShortPct = mid0 > 0 ? Math.max(0, ((sellSlMid - mid0) / mid0) * 100) : 0;
-
+  const buySlRatio = avgRatioLong * (1 - slAvgFactor);
+  const spotLongPct = Math.max(0, (1 - buySlRatio) * 100);
+  const sellSlRatio = avgRatioShort * (1 + slAvgFactor);
+  const spotShortPct = Math.max(0, (sellSlRatio - 1) * 100);
   const roiDefensePct = (spotLongPct + spotShortPct) / 2;
 
   // 표 마진 손절금(레거시): Size/표레버 × SL_ROI% × 로트스케일
@@ -843,8 +852,8 @@ export function calcDca1000Defense(opts?: {
     estimatedSlAmount: round2(mt5CashSlAmount),
     tableMarginSlAmount: round2(tableMarginSlAmount),
     mt5CashSlAmount: round2(mt5CashSlAmount),
-    avgEntryLong: round4(avgAsk / ask0),
-    avgEntryShort: round4(avgBid / bid0),
+    avgEntryLong: round4(avgRatioLong),
+    avgEntryShort: round4(avgRatioShort),
     spreadPct: round4(sprPct),
     spreadAbs: sprAbs,
     spreadPoints: spreadInfo.spreadPoints,

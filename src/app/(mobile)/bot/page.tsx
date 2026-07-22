@@ -1,25 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
-import {
-  DCA1000_DEFAULT_DEFENSE,
-  DCA1000_DEFAULT_SL_ROI,
-  calcDca1000Defense,
-  resolveTpSlUsd,
-} from "@/lib/dca1000";
-import type { Dca1000Level } from "@/lib/dca1000";
-import {
-  getTableLevels,
-  isMartinLogic,
-  martinMaxLevels,
-  previewMartinLots,
-  tableLogicMeta,
-} from "@/lib/table-logics";
-import { brokerGateRedirect } from "@/lib/post-login";
-
-/** 표 기본 익절 ROI% — $ 환산용 (코인: 마진×ROI%) */
-const DEFAULT_TP_ROI = 20;
+import { PUBLIC_LOGIC_OPTIONS, publicLogicLabel } from "@/lib/strategy-public";
+import { SYMBOL_GROUPS, normalizeLogicId } from "@/lib/strategies";
+import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
 
 type Bot = {
   id: string;
@@ -27,20 +11,11 @@ type Bot = {
   enabled: boolean;
   logic: string;
   direction: string;
-  entryCount: number;
-  entryMultiplier: number;
-  entryIntervalPct: number;
-  takeProfitPct: number;
-  takeProfitUsd: number;
   startLots: number;
   repeatEnabled: boolean;
-  stopLossPct: number;
-  stopLossUsd: number;
-  stopLossEnabled: boolean;
   stopOnSl: boolean;
+  logicLabel?: string;
 };
-
-type Group = { id: string; name: string; symbols: readonly string[] };
 
 const LOT_SCALES = [2, 3, 5, 10] as const;
 
@@ -48,49 +23,8 @@ function roundLots(n: number) {
   return Math.max(0.01, Math.round(n * 100) / 100);
 }
 
-function fmtNum(n: number, d = 2) {
-  return n.toLocaleString("en-US", {
-    minimumFractionDigits: d,
-    maximumFractionDigits: d,
-  });
-}
-
-function DefenseCard({
-  defense,
-  takeProfitUsd,
-  stopLossUsd,
-}: {
-  defense: ReturnType<typeof calcDca1000Defense>;
-  takeProfitUsd: number;
-  stopLossUsd: number;
-}) {
-  return (
-    <div className="m-calc-box">
-      <div className="m-calc-title">계산결과</div>
-      <div className="m-calc-row">
-        <span>현재(시작회차) 익절$</span>
-        <strong style={{ color: "var(--ok, #0a7)" }}>+${fmtNum(takeProfitUsd)}</strong>
-      </div>
-      <div className="m-calc-row">
-        <span>현재(시작회차) 손절$</span>
-        <strong style={{ color: "var(--danger)" }}>-${fmtNum(stopLossUsd)}</strong>
-      </div>
-      <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-        <span>전체 회차 채웠을 때 예상 손절금</span>
-        <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
-      </div>
-      <p style={{ margin: "0.35rem 0 0", fontSize: "0.68rem", color: "var(--muted)", lineHeight: 1.4 }}>
-        익절·손절 모두 바스켓 증거금×ROI%(바이낸스식). 회차·로트가 늘수록 커집니다. 위는 L0 기준,
-        아래는 전체 회차 소진 시 마진 ROI 손절 참고값입니다.
-      </p>
-    </div>
-  );
-}
-
 export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
-  const [logicLevels, setLogicLevels] = useState<Record<string, Dca1000Level[]>>({});
-  const [groups, setGroups] = useState<Group[]>([...SYMBOL_GROUPS]);
   const [botEnabled, setBotEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -98,104 +32,54 @@ export default function BotPage() {
   const [draft, setDraft] = useState<Partial<Bot>>({});
   const [addSymbol, setAddSymbol] = useState("GBPUSD");
   const [ready, setReady] = useState(false);
+  const [linked, setLinked] = useState(false);
+  const [approved, setApproved] = useState(true);
+  const [showConnect, setShowConnect] = useState(false);
+  const [promptMode, setPromptMode] = useState<"connect" | "approval">("connect");
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
+  const editingBot = useMemo(() => bots.find((b) => b.id === edit) || null, [bots, edit]);
   const availableGroups = useMemo(
     () =>
-      groups
-        .map((g) => ({
-          ...g,
-          symbols: g.symbols.filter((s) => !used.has(s)),
-        }))
-        .filter((g) => g.symbols.length > 0),
-    [groups, used],
+      SYMBOL_GROUPS.map((g) => ({
+        ...g,
+        symbols: g.symbols.filter((s) => !used.has(s)),
+      })).filter((g) => g.symbols.length > 0),
+    [used],
   );
   const availableSymbols = useMemo(
     () => availableGroups.flatMap((g) => [...g.symbols]),
     [availableGroups],
   );
-  const featuredAddSymbols = useMemo(() => {
-    const prefer = ["GBPUSD", "AUDUSD", "EURUSD", "XAUUSD"];
-    const rest = availableSymbols.filter((s) => !prefer.includes(s));
-    return [...prefer.filter((s) => availableSymbols.includes(s)), ...rest];
-  }, [availableSymbols]);
 
   useEffect(() => {
-    if (featuredAddSymbols.length === 0) return;
-    if (!featuredAddSymbols.includes(addSymbol)) {
-      setAddSymbol(featuredAddSymbols[0]!);
+    if (availableSymbols.length === 0) return;
+    if (!(availableSymbols as string[]).includes(addSymbol)) {
+      setAddSymbol(availableSymbols[0]!);
     }
-  }, [featuredAddSymbols, addSymbol]);
-
-  const defense = useMemo(() => {
-    if (!edit) return DCA1000_DEFAULT_DEFENSE;
-    const logic = (draft.logic as string) || "dubai_bruno_313";
-    const sl =
-      draft.stopLossEnabled === false
-        ? 0
-        : Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
-    const mult = Number(draft.entryMultiplier ?? (isMartinLogic(logic) ? 2 : 1));
-    const saved = logicLevels[logic];
-    const levels = saved && saved.length > 0 ? saved : getTableLevels(logic, mult);
-    return calcDca1000Defense({
-      stopLossRoiPct: sl > 0 ? sl : DCA1000_DEFAULT_SL_ROI,
-      startLots: Number(draft.startLots ?? 0.01),
-      levels,
-      symbol: edit,
-    });
-  }, [
-    edit,
-    draft.logic,
-    draft.stopLossPct,
-    draft.stopLossEnabled,
-    draft.startLots,
-    draft.entryMultiplier,
-    logicLevels,
-  ]);
-
-  const martinPreview = useMemo(() => {
-    const logic = (draft.logic as string) || "";
-    if (!isMartinLogic(logic)) return [];
-    const n = martinMaxLevels(logic);
-    const start = Number(draft.startLots ?? 0.01);
-    const mult = Number(draft.entryMultiplier ?? 2);
-    return previewMartinLots(start, mult, n);
-  }, [draft.logic, draft.startLots, draft.entryMultiplier]);
-
-  const usdPreview = useMemo(() => {
-    if (!edit) return null;
-    // L0 미리보기: pct 파생 (저장 고정$ 무시 — 엔진도 회차 라이브 스케일)
-    return resolveTpSlUsd({
-      symbol: edit,
-      startLots: Number(draft.startLots ?? 0.01),
-      takeProfitPct: Number(draft.takeProfitPct ?? DEFAULT_TP_ROI),
-      stopLossPct: Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
-    });
-  }, [edit, draft.startLots, draft.takeProfitPct, draft.stopLossPct]);
+  }, [availableSymbols, addSymbol]);
 
   const load = useCallback(async () => {
-    const [botsRes, statsRes] = await Promise.all([
+    const [botsRes, statsRes, meRes] = await Promise.all([
       fetch("/api/symbol-bots"),
       fetch("/api/stats"),
+      fetch("/api/me"),
     ]);
-    if (botsRes.status === 401 || statsRes.status === 401) {
+    if (botsRes.status === 401 || statsRes.status === 401 || meRes.status === 401) {
       window.location.href = "/login";
       return;
     }
     const botsData = await botsRes.json();
     const statsData = await statsRes.json();
-    const gate = brokerGateRedirect({
-      role: statsData.role,
-      metaApiAccountId: statsData.account?.metaApiAccountId,
-    });
-    if (gate) {
-      window.location.href = gate;
+    const me = await meRes.json().catch(() => ({}));
+    if (me.approvalStatus === "rejected") {
+      window.location.href = "/pending";
       return;
     }
     setBots(botsData.bots || []);
-    if (botsData.logicLevels) setLogicLevels(botsData.logicLevels);
-    if (botsData.options?.groups) setGroups(botsData.options.groups);
-    setBotEnabled(!!statsData.account.botEnabled);
+    setBotEnabled(!!statsData.account?.botEnabled);
+    setLinked(isMt5Linked(statsData.account));
+    setApproved(me.role === "admin" || me.approvalStatus === "approved");
     setReady(true);
   }, []);
 
@@ -203,7 +87,20 @@ export default function BotPage() {
     load();
   }, [load]);
 
+  function requireLinked() {
+    if (!approved) {
+      setPromptMode("approval");
+      setShowConnect(true);
+      return false;
+    }
+    if (linked) return true;
+    setPromptMode("connect");
+    setShowConnect(true);
+    return false;
+  }
+
   async function toggleMaster() {
+    if (!requireLinked()) return;
     setBusy(true);
     setMsg("");
     const res = await fetch("/api/bot", {
@@ -226,74 +123,48 @@ export default function BotPage() {
   }
 
   async function setSymbolEnabled(bot: Bot, enabled: boolean) {
+    if (enabled && !requireLinked()) return;
     setBusy(true);
     setMsg("");
     await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol: bot.symbol, enabled }),
+      body: JSON.stringify({ symbol: bot.symbol, direction: bot.direction, enabled }),
     });
     setBusy(false);
+    const label = `${bot.symbol} ${bot.direction}`;
     setMsg(
       enabled
         ? botEnabled
-          ? `${bot.symbol} 켜짐 (전체 가동 중)`
-          : `${bot.symbol} 켜짐 — 전체 시작을 눌러야 실제 매매됩니다`
-        : `${bot.symbol} 꺼짐`,
+          ? `${label} 켜짐 (전체 가동 중)`
+          : `${label} 켜짐 — 전체 시작을 눌러야 실제 매매됩니다`
+        : `${label} 꺼짐`,
     );
     await load();
   }
 
   async function saveEdit() {
-    if (!edit) return;
+    if (!editingBot) return;
     setBusy(true);
     setMsg("");
-    const logic = (draft.logic as string) || "dubai_bruno_313";
-    const meta = tableLogicMeta(logic);
+    const logic = normalizeLogicId((draft.logic as string) || "dubai_bruno_313");
     const lots = Number(draft.startLots ?? 0.01);
-    const tpUsd = Number(draft.takeProfitUsd ?? 0);
-    const slUsd = Number(draft.stopLossUsd ?? 0);
-    const mult = isMartinLogic(logic)
-      ? Math.max(1.01, Number(draft.entryMultiplier ?? 2))
-      : 1;
     if (!(lots > 0) || lots > 100) {
       setBusy(false);
       setMsg("시작 로트는 0.01~100 사이여야 합니다.");
       return;
     }
-    if (!(tpUsd >= 0.01) || tpUsd > 1_000_000) {
-      setBusy(false);
-      setMsg("익절 $는 0.01~1000000 사이여야 합니다.");
-      return;
-    }
-    if (!(slUsd >= 0) || slUsd > 1_000_000) {
-      setBusy(false);
-      setMsg("손절 $는 0~1000000 사이여야 합니다.");
-      return;
-    }
-    const derived = resolveTpSlUsd({
-      symbol: edit,
-      startLots: lots,
-      takeProfitPct: Number(draft.takeProfitPct ?? DEFAULT_TP_ROI),
-      stopLossPct: Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
-    });
+    // 세부 ROI·물타기·익절$는 서버 프리셋이 적용 — 클라이언트에서 보내지 않음
     const res = await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        symbol: edit,
+        symbol: editingBot.symbol,
         logic,
-        direction: draft.direction,
-        startLots: Math.max(0.01, Math.round(lots * 100) / 100),
-        takeProfitUsd: derived.takeProfitUsd,
-        stopLossUsd: derived.stopLossUsd,
-        takeProfitPct: derived.takeProfitPct,
-        stopLossPct: derived.stopLossPct,
-        stopLossEnabled: derived.stopLossUsd > 0 && draft.stopLossEnabled !== false,
+        direction: editingBot.direction,
+        startLots: roundLots(lots),
         repeatEnabled: draft.repeatEnabled,
         stopOnSl: draft.stopOnSl,
-        entryCount: meta.count,
-        entryMultiplier: mult,
       }),
     });
     setBusy(false);
@@ -308,186 +179,137 @@ export default function BotPage() {
   }
 
   async function addBot(symbol = addSymbol) {
+    if (!requireLinked()) return;
     if (!symbol || used.has(symbol)) {
       setMsg("이미 추가된 종목이거나 선택할 종목이 없습니다.");
       return;
     }
     setBusy(true);
     setMsg("");
-    const meta = tableLogicMeta("dubai_bruno_313");
-    const res = await fetch("/api/symbol-bots", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        symbol,
-        enabled: false,
-        logic: "dubai_bruno_313",
-        entryCount: meta.count,
-        entryMultiplier: 1,
-        startLots: 0.01,
-        ...(() => {
-          const usd = resolveTpSlUsd({
-            symbol,
-            startLots: 0.01,
-            takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
-            stopLossPct: DCA1000_DEFAULT_SL_ROI,
-          });
-          return {
-            takeProfitPct: usd.takeProfitPct,
-            stopLossPct: usd.stopLossPct,
-            takeProfitUsd: usd.takeProfitUsd,
-            stopLossUsd: usd.stopLossUsd,
-          };
-        })(),
-        stopLossEnabled: true,
-        repeatEnabled: true,
-        stopOnSl: true,
-      }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setMsg(data.error || `${symbol} 추가 실패`);
-      return;
+    let ok = true;
+    for (const direction of ["BUY", "SELL"] as const) {
+      const res = await fetch("/api/symbol-bots", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          direction,
+          enabled: false,
+          logic: "dubai_bruno_313",
+          startLots: 0.01,
+          repeatEnabled: true,
+          stopOnSl: true,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMsg(data.error || `${symbol} 추가 실패`);
+        ok = false;
+        break;
+      }
     }
-    setMsg(`${symbol} 추가됨 (사용 중지 상태 · 켜서 사용)`);
+    setBusy(false);
+    if (!ok) return;
+    setMsg(`${symbol} BUY·SELL 봇 추가됨 (사용 중지 상태 · 켜서 사용)`);
     await load();
   }
 
   function openEdit(bot: Bot) {
-    setEdit(bot.symbol);
-    const logic = bot.logic || "dubai_bruno_313";
-    const meta = tableLogicMeta(logic);
-    const savedMult = Number(bot.entryMultiplier || 0);
-    const tpPct = bot.takeProfitPct > 5 ? bot.takeProfitPct : meta.firstTpRoi || DEFAULT_TP_ROI;
-    const slPct = bot.stopLossPct > 0 ? bot.stopLossPct : DCA1000_DEFAULT_SL_ROI;
-    const usd = resolveTpSlUsd({
-      symbol: bot.symbol,
-      startLots: bot.startLots,
-      takeProfitUsd: bot.takeProfitUsd,
-      stopLossUsd: bot.stopLossUsd,
-      takeProfitPct: tpPct,
-      stopLossPct: slPct,
-    });
+    setEdit(bot.id);
     setDraft({
-      logic,
+      logic: normalizeLogicId(bot.logic || "dubai_bruno_313"),
       direction: bot.direction,
-      takeProfitPct: tpPct,
-      stopLossPct: slPct,
-      takeProfitUsd: usd.takeProfitUsd,
-      stopLossUsd: usd.stopLossUsd,
       startLots: bot.startLots,
-      entryMultiplier: isMartinLogic(logic)
-        ? savedMult > 1
-          ? savedMult
-          : 2
-        : 1,
       repeatEnabled: bot.repeatEnabled,
-      stopLossEnabled: bot.stopLossEnabled || usd.stopLossUsd > 0,
       stopOnSl: bot.stopOnSl,
     });
   }
 
   function scaleLots(mult: number) {
-    setDraft((d) => {
-      const startLots = roundLots((d.startLots ?? 0.01) * mult);
-      const usd = resolveTpSlUsd({
-        symbol: edit || "EURUSD",
-        startLots,
-        takeProfitPct: Number(d.takeProfitPct ?? DEFAULT_TP_ROI),
-        stopLossPct: Number(d.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
-      });
-      return {
-        ...d,
-        startLots,
-        takeProfitUsd: usd.takeProfitUsd,
-        stopLossUsd: usd.stopLossUsd,
-      };
-    });
-  }
-
-  function setStartLots(lots: number) {
-    setDraft((d) => {
-      const startLots = Number(lots);
-      const usd = resolveTpSlUsd({
-        symbol: edit || "EURUSD",
-        startLots,
-        takeProfitPct: Number(d.takeProfitPct ?? DEFAULT_TP_ROI),
-        stopLossPct: Number(d.stopLossPct ?? DCA1000_DEFAULT_SL_ROI),
-      });
-      return {
-        ...d,
-        startLots,
-        takeProfitUsd: usd.takeProfitUsd,
-        stopLossUsd: usd.stopLossUsd,
-      };
-    });
+    setDraft((d) => ({
+      ...d,
+      startLots: roundLots((d.startLots ?? 0.01) * mult),
+    }));
   }
 
   const dir = ((draft.direction as string) || "BUY") as string;
 
   return (
     <>
-      <header className="m-topbar">
-        <h1>봇</h1>
+      <header className="m-topbar sm-home-top">
+        <div className="sm-brand">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/sa-logo.png"
+            alt="Super Alpha"
+            className="sm-brand-logo"
+          />
+          <div>
+            <div className="sm-brand-name">SUPER ALPHA</div>
+            <div className="sm-brand-sub">봇</div>
+          </div>
+        </div>
       </header>
 
-      <section className="m-card" style={{ marginBottom: "0.85rem" }}>
+      <ConnectPrompt
+        open={showConnect}
+        onClose={() => setShowConnect(false)}
+        mode={promptMode}
+      />
+
+      <section id="bot-add-symbol" className="m-card" style={{ marginBottom: "0.85rem" }}>
         <div style={{ fontWeight: 650, marginBottom: "0.35rem" }}>종목 추가</div>
         <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginBottom: "0.75rem" }}>
-          GBPUSD · AUDUSD 등 아직 없는 종목을 고른 뒤 추가합니다.
+          아직 없는 종목을 고른 뒤 추가합니다.
         </div>
         {!ready ? (
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--muted)" }}>불러오는 중…</p>
-        ) : featuredAddSymbols.length === 0 ? (
+        ) : availableSymbols.length === 0 ? (
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--muted)" }}>
-            추가할 수 있는 종목이 없습니다.
+            추가할 수 있는 종목이 없습니다. 이미 EUR / GBP / AUD / XAU가 모두 등록되어 있습니다.
           </p>
         ) : (
           <div style={{ display: "grid", gap: "0.75rem" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-              {featuredAddSymbols.slice(0, 12).map((s) => {
-                const on = addSymbol === s;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    className="sa-btn"
-                    disabled={busy}
-                    onClick={() => setAddSymbol(s)}
-                    style={{
-                      borderRadius: 12,
-                      padding: "0.55rem 0.85rem",
-                      border: on
-                        ? "1px solid var(--gold)"
-                        : "1px solid rgba(255,255,255,0.12)",
-                      background: on ? "rgba(232,195,106,0.16)" : "rgba(255,255,255,0.04)",
-                      color: on ? "var(--gold)" : "var(--ink)",
-                      fontWeight: 650,
-                    }}
-                  >
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-            {featuredAddSymbols.length > 12 ? (
-              <select
-                className="sa-select"
-                value={addSymbol}
-                onChange={(e) => setAddSymbol(e.target.value)}
-              >
-                {availableGroups.map((g) => (
-                  <optgroup key={g.id} label={g.name}>
-                    {g.symbols.map((s) => (
-                      <option key={s} value={s}>
+            {availableGroups.map((g) => (
+              <div key={g.id}>
+                <div
+                  style={{
+                    fontSize: "0.72rem",
+                    color: "var(--muted)",
+                    marginBottom: "0.4rem",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  {g.name}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                  {g.symbols.map((s) => {
+                    const on = addSymbol === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        className="sa-btn"
+                        disabled={busy}
+                        onClick={() => setAddSymbol(s)}
+                        style={{
+                          borderRadius: 12,
+                          padding: "0.55rem 0.85rem",
+                          border: on
+                            ? "1px solid var(--gold)"
+                            : "1px solid rgba(255,255,255,0.12)",
+                          background: on ? "rgba(232,195,106,0.16)" : "rgba(255,255,255,0.04)",
+                          color: on ? "var(--gold)" : "var(--ink)",
+                          fontWeight: 650,
+                        }}
+                      >
                         {s}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
             <button
               type="button"
               className="sa-btn sa-btn-primary"
@@ -559,7 +381,7 @@ export default function BotPage() {
             종목별 설정
           </div>
           <p style={{ margin: "0 0 0.65rem", fontSize: "0.75rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            종목을 켜 두면 전체 시작 시 그 심볼만 매매합니다.
+            종목을 켜 두면 전체 시작 시 그 심볼만 매매합니다. 익절·손절·회차 조건은 선택한 프리셋이 엔진에서 처리합니다.
             {!botEnabled && bots.some((b) => b.enabled) ? (
               <span style={{ color: "var(--gold)" }}> (지금: 종목 켜짐 · 전체 정지)</span>
             ) : null}
@@ -574,6 +396,15 @@ export default function BotPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
                         <strong style={{ fontSize: "1.05rem" }}>{bot.symbol}</strong>
+                        <span
+                          className="m-chip"
+                          style={{
+                            color: bot.direction === "SELL" ? "var(--danger)" : "var(--ok, #0a7)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {bot.direction === "SELL" ? "SELL 매도" : "BUY 매수"}
+                        </span>
                         <span className={`m-chip${bot.enabled ? " is-on" : ""}`}>
                           {bot.enabled ? "켜짐" : "꺼짐"}
                         </span>
@@ -584,34 +415,8 @@ export default function BotPage() {
                         ) : null}
                       </div>
                       <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.35rem" }}>
-                        {logicLabel(bot.logic)} · {bot.direction} ·{" "}
-                        {isMartinLogic(bot.logic)
-                          ? `시작 ${bot.startLots} · ×${
-                              bot.entryMultiplier > 1 ? bot.entryMultiplier : 2
-                            }`
-                          : `${bot.startLots} lot`}
-                      </div>
-                      <div style={{ fontSize: "0.78rem", marginTop: "0.2rem" }}>
-                        {(() => {
-                          const u = resolveTpSlUsd({
-                            symbol: bot.symbol,
-                            startLots: bot.startLots,
-                            takeProfitPct: bot.takeProfitPct || DEFAULT_TP_ROI,
-                            stopLossPct: bot.stopLossPct || DCA1000_DEFAULT_SL_ROI,
-                          });
-                          return (
-                            <>
-                              <span style={{ color: "var(--ok, #0a7)" }}>
-                                시작회차 익절 +${fmtNum(u.takeProfitUsd)}
-                              </span>
-                              {" · "}
-                              <span style={{ color: "var(--danger)" }}>
-                                손절 -${fmtNum(u.stopLossUsd)}
-                              </span>
-                              <span style={{ color: "var(--muted)" }}> (회차↑면 증가)</span>
-                            </>
-                          );
-                        })()}
+                        {bot.logicLabel || publicLogicLabel(bot.logic)} · {bot.direction} · 시작{" "}
+                        {bot.startLots} lot
                       </div>
                     </div>
                     <button
@@ -657,79 +462,68 @@ export default function BotPage() {
                     </button>
                   </div>
 
-                  {edit === bot.symbol ? (
+                  {edit === bot.id ? (
                     <div style={{ marginTop: "1rem", display: "grid", gap: "0.75rem" }}>
                       <div>
-                        <span className="sa-label">로직</span>
+                        <span className="sa-label">로직 프리셋</span>
                         <select
                           className="sa-select"
-                          value={(draft.logic as string) || bot.logic || "dubai_bruno_313"}
-                          onChange={(e) => {
-                            const logic = e.target.value;
-                            const meta = tableLogicMeta(logic);
-                            const usd = resolveTpSlUsd({
-                              symbol: bot.symbol,
-                              startLots: Number(draft.startLots ?? bot.startLots),
-                              takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
-                              stopLossPct: Number(
-                                draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
-                              ),
-                            });
+                          value={normalizeLogicId(
+                            (draft.logic as string) || bot.logic || "dubai_bruno_313",
+                          )}
+                          onChange={(e) =>
                             setDraft((d) => ({
                               ...d,
-                              logic,
-                              takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
-                              takeProfitUsd: usd.takeProfitUsd,
-                              stopLossUsd: usd.stopLossUsd,
-                              entryMultiplier: isMartinLogic(logic) ? 2 : 1,
-                            }));
-                          }}
+                              logic: e.target.value,
+                            }))
+                          }
                         >
-                          {LOGIC_OPTIONS.map((l) => (
+                          {PUBLIC_LOGIC_OPTIONS.filter((l) => l.id !== "custom").map((l) => (
                             <option key={l.id} value={l.id}>
                               {l.name}
                             </option>
                           ))}
                         </select>
                         <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
-                          {LOGIC_OPTIONS.find((l) => l.id === ((draft.logic as string) || bot.logic))
-                            ?.desc || ""}
+                          {PUBLIC_LOGIC_OPTIONS.find(
+                            (l) =>
+                              l.id ===
+                              normalizeLogicId(
+                                (draft.logic as string) || bot.logic || "",
+                              ),
+                          )?.desc || ""}
                         </p>
                       </div>
 
                       <div>
-                        <span className="sa-label">방향</span>
+                        <span className="sa-label">방향 (봇 고정)</span>
                         <div className="sa-dir">
-                          <button
-                            type="button"
-                            className={dir === "BUY" ? "is-on" : ""}
-                            onClick={() => setDraft((d) => ({ ...d, direction: "BUY" }))}
-                          >
+                          <button type="button" className={dir === "BUY" ? "is-on" : ""} disabled>
                             BUY (매수)
                           </button>
-                          <button
-                            type="button"
-                            className={dir === "SELL" ? "is-on" : ""}
-                            onClick={() => setDraft((d) => ({ ...d, direction: "SELL" }))}
-                          >
+                          <button type="button" className={dir === "SELL" ? "is-on" : ""} disabled>
                             SELL (매도)
                           </button>
                         </div>
+                        <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
+                          BUY봇·SELL봇은 별도로 설정합니다.
+                        </p>
                       </div>
 
                       <div>
-                        <span className="sa-label">
-                          {isMartinLogic((draft.logic as string) || bot.logic)
-                            ? "시작 계약수 (1회차 로트)"
-                            : "회차당 계약수 (로트)"}
-                        </span>
+                        <span className="sa-label">시작 로트</span>
                         <input
                           className="sa-input"
                           type="number"
                           step="0.01"
                           min="0.01"
                           value={draft.startLots ?? bot.startLots}
-                          onChange={(e) => setStartLots(Number(e.target.value))}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              startLots: Number(e.target.value),
+                            }))
+                          }
                         />
                         <div className="m-scale-row">
                           {LOT_SCALES.map((m) => (
@@ -744,129 +538,6 @@ export default function BotPage() {
                           ))}
                         </div>
                       </div>
-
-                      {isMartinLogic((draft.logic as string) || bot.logic) ? (
-                        <div>
-                          <span className="sa-label">단계별 배수 (마틴게일)</span>
-                          <input
-                            className="sa-input"
-                            type="number"
-                            step="0.1"
-                            min="1.01"
-                            max="10"
-                            value={draft.entryMultiplier ?? 2}
-                            onChange={(e) =>
-                              setDraft((d) => ({
-                                ...d,
-                                entryMultiplier: Number(e.target.value),
-                              }))
-                            }
-                          />
-                          <p
-                            style={{
-                              margin: "0.4rem 0 0",
-                              fontSize: "0.72rem",
-                              color: "var(--muted)",
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            회차 로트 = 시작로트 × 배수^회차. 예: 0.01 · 배수 2 → 0.01 / 0.02 / 0.04 / …
-                          </p>
-                          <div
-                            style={{
-                              marginTop: "0.55rem",
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fill, minmax(4.6rem, 1fr))",
-                              gap: "0.35rem",
-                              fontSize: "0.72rem",
-                            }}
-                          >
-                            {martinPreview.map((row) => (
-                              <div
-                                key={row.level}
-                                style={{
-                                  padding: "0.35rem 0.4rem",
-                                  borderRadius: 8,
-                                  background: "var(--surface-2, rgba(0,0,0,0.04))",
-                                  textAlign: "center",
-                                }}
-                              >
-                                <div style={{ color: "var(--muted)" }}>L{row.level}</div>
-                                <strong>{fmtNum(row.lots, 2)}</strong>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem" }}>
-                        <label>
-                          <span className="sa-label">시작회차 익절 $</span>
-                          <input
-                            className="sa-input"
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            value={usdPreview?.takeProfitUsd ?? draft.takeProfitUsd ?? bot.takeProfitUsd ?? ""}
-                            onChange={(e) => {
-                              const tpUsd = Number(e.target.value);
-                              const margin = usdPreview?.marginUsd ?? 0;
-                              const pct =
-                                margin > 0 && tpUsd > 0
-                                  ? Math.round((tpUsd / margin) * 100 * 100) / 100
-                                  : Number(draft.takeProfitPct ?? DEFAULT_TP_ROI);
-                              setDraft((d) => ({
-                                ...d,
-                                takeProfitUsd: tpUsd,
-                                takeProfitPct: pct,
-                              }));
-                            }}
-                          />
-                        </label>
-                        <label>
-                          <span className="sa-label">시작회차 손절 $</span>
-                          <input
-                            className="sa-input"
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={usdPreview?.stopLossUsd ?? draft.stopLossUsd ?? bot.stopLossUsd ?? ""}
-                            onChange={(e) => {
-                              const slUsd = Number(e.target.value);
-                              // 마진 ROI: slUsd = margin × (pct/100)
-                              const margin = usdPreview?.marginUsd ?? 0;
-                              const pct =
-                                margin > 0 && slUsd > 0
-                                  ? Math.round((slUsd / margin) * 100 * 100) / 100
-                                  : Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI);
-                              setDraft((d) => ({
-                                ...d,
-                                stopLossUsd: slUsd,
-                                stopLossPct: pct,
-                                stopLossEnabled: slUsd > 0,
-                              }));
-                            }}
-                          />
-                        </label>
-                      </div>
-                      <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                        엔진은{" "}
-                        <strong style={{ color: "var(--ink)" }}>
-                          바스켓 마진 ROI(바이낸스식)
-                        </strong>
-                        로 익절·손절합니다. 시작회차 기준 ≈ 익절 +$
-                        {fmtNum(usdPreview?.takeProfitUsd ?? 0)} / 손절 −$
-                        {fmtNum(usdPreview?.stopLossUsd ?? 0)} (증거금×익절
-                        {fmtNum(Number(draft.takeProfitPct ?? DEFAULT_TP_ROI), 0)}% · 증거금×손절
-                        {fmtNum(Number(draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI), 0)}%). 회차↑면
-                        목표$도 증가.
-                      </p>
-
-                      <DefenseCard
-                        defense={defense}
-                        takeProfitUsd={usdPreview?.takeProfitUsd ?? 0}
-                        stopLossUsd={usdPreview?.stopLossUsd ?? 0}
-                      />
 
                       <div className="m-toggle-list">
                         <button
@@ -922,7 +593,7 @@ export default function BotPage() {
                       style={{ width: "100%", marginTop: "0.75rem", borderRadius: 12 }}
                       onClick={() => openEdit(bot)}
                     >
-                      전략 · 로직 상세 설정
+                      프리셋 · 로트 설정
                     </button>
                   )}
                 </article>

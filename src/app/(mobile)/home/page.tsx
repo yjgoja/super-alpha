@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { brokerGateRedirect } from "@/lib/post-login";
+import { AccountLinkBadge } from "@/components/ConnectPrompt";
+import { SharePnlSheet } from "@/components/SharePnlSheet";
 import { padDailyPnl, withCumulative, type DayPnl } from "@/lib/pnl-period";
 
 function fmt(n: number) {
@@ -19,48 +20,149 @@ export default function HomePage() {
   const [totalTrades, setTotalTrades] = useState(0);
   const [equity, setEquity] = useState(0);
   const [dailyPnl, setDailyPnl] = useState(0);
+  const [dailyReturnPct, setDailyReturnPct] = useState(0);
+  const [totalReturnPct, setTotalReturnPct] = useState(0);
+  const [shareOpen, setShareOpen] = useState(false);
   const [tip, setTip] = useState<{ date: string; pnl: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasAccount, setHasAccount] = useState(true);
+  const [displayName, setDisplayName] = useState("");
+  const [linked, setLinked] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState<string>("approved");
+  const [accountStatus, setAccountStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const [pnlRes, statsRes] = await Promise.all([
-        fetch("/api/pnl", { cache: "no-store" }),
-        fetch("/api/stats", { cache: "no-store" }),
+    let stopped = false;
+    let linkedNow = false;
+
+    function applyPnl(pnl: {
+      days?: DayPnl[];
+      account?: unknown;
+      totalPnl?: number;
+      totalTrades?: number;
+    }) {
+      const rawDays: DayPnl[] = Array.isArray(pnl.days) ? pnl.days : [];
+      const padded =
+        rawDays.length === 0 && !pnl.account ? [] : padDailyPnl(rawDays);
+      setDays(padded);
+      setTotalPnl(pnl.totalPnl || 0);
+      setTotalTrades(pnl.totalTrades || 0);
+      if (pnl.account || rawDays.length > 0) setHasAccount(true);
+    }
+
+    function applyStats(stats: {
+      account?: {
+        equity?: number;
+        dailyPnl?: number;
+        dailyReturnPct?: number;
+        totalReturnPct?: number;
+        status?: string;
+        metaApiAccountId?: string | null;
+      } | null;
+    }) {
+      if (!stats.account) return;
+      setEquity(stats.account.equity || 0);
+      setDailyPnl(stats.account.dailyPnl || 0);
+      setDailyReturnPct(Number(stats.account.dailyReturnPct) || 0);
+      setTotalReturnPct(Number(stats.account.totalReturnPct) || 0);
+      setAccountStatus(stats.account.status || null);
+      setHasAccount(true);
+      if (stats.account.metaApiAccountId) linkedNow = true;
+    }
+
+    /** 1) Hero first — DB only (me + summary stats) */
+    async function loadHero() {
+      const [statsRes, meRes] = await Promise.all([
+        fetch("/api/stats?summary=1", { cache: "no-store" }),
+        fetch("/api/me", { cache: "no-store" }),
       ]);
-      if (pnlRes.status === 401 || statsRes.status === 401) {
+      if (statsRes.status === 401 || meRes.status === 401) {
         window.location.href = "/login";
         return;
       }
-      if (statsRes.status === 403) {
+      if (meRes.status === 403) {
         window.location.href = "/pending";
         return;
       }
       const stats = await statsRes.json().catch(() => ({}));
-      const gate = brokerGateRedirect({
-        role: stats.role,
-        metaApiAccountId: stats.account?.metaApiAccountId,
-      });
-      if (gate) {
-        window.location.href = gate;
-        return;
+      const me = await meRes.json().catch(() => ({}));
+      if (stopped) return;
+      applyStats(stats);
+      setDisplayName(me.name || me.email || "");
+      linkedNow = Boolean(me.linked ?? stats.account?.metaApiAccountId);
+      setLinked(linkedNow);
+      setApprovalStatus(me.approvalStatus || "pending");
+      if (me.account?.status && !stats.account?.status) {
+        setAccountStatus(me.account.status);
       }
-      const pnl = await pnlRes.json().catch(() => ({}));
-      const rawDays: DayPnl[] = Array.isArray(pnl.days) ? pnl.days : [];
-      // Client pad: always 5 consecutive KST days even if API regresses / caches old payload
-      const padded =
-        rawDays.length === 0 && !pnl.account
-          ? []
-          : padDailyPnl(rawDays);
-      setHasAccount(Boolean(pnl.account) || rawDays.length > 0);
-      setDays(padded);
-      setTotalPnl(pnl.totalPnl || 0);
-      setTotalTrades(pnl.totalTrades || 0);
-      setEquity(stats.account?.equity || 0);
-      setDailyPnl(stats.account?.dailyPnl || 0);
       setLoading(false);
+    }
+
+    /** 2) Chart from DB (fast) */
+    async function loadPnlFast() {
+      try {
+        const res = await fetch("/api/pnl", { cache: "no-store" });
+        if (res.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        const pnl = await res.json().catch(() => ({}));
+        if (!stopped) applyPnl(pnl);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    /** 3) Live equity/today — MetaAPI snapshot (no full history) */
+    async function refreshLive() {
+      if (stopped || document.visibilityState === "hidden" || !linkedNow) return;
+      try {
+        const res = await fetch("/api/stats?live=1", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (!stopped && data.account) applyStats(data);
+      } catch {
+        /* ignore transient */
+      }
+    }
+
+    /** One-shot chart/history sync from MetaAPI (background) */
+    async function refreshPnlOnce() {
+      if (stopped || !linkedNow) return;
+      try {
+        const res = await fetch("/api/pnl?refresh=1", { cache: "no-store" });
+        if (!res.ok) return;
+        const pnl = await res.json().catch(() => ({}));
+        if (!stopped) applyPnl(pnl);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    (async () => {
+      await loadHero();
+      if (stopped) return;
+      await loadPnlFast();
+      if (stopped) return;
+      if (linkedNow) {
+        refreshLive();
+        refreshPnlOnce();
+      }
     })();
+
+    const id = setInterval(() => {
+      refreshLive();
+    }, 15_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refreshLive();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
 
   const cumulative = useMemo(() => withCumulative(days), [days]);
@@ -96,17 +198,47 @@ export default function HomePage() {
     <>
       <header className="m-topbar sm-home-top">
         <div className="sm-brand">
-          <span className="sm-brand-mark">SA</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/sa-logo.png"
+            alt="Super Alpha"
+            className="sm-brand-logo"
+          />
           <div>
             <div className="sm-brand-name">SUPER ALPHA</div>
-            <div className="sm-brand-sub">트레이딩 PNL</div>
+            <div className="sm-brand-sub">
+              {displayName ? (
+                <>
+                  {displayName}
+                  <AccountLinkBadge
+                    linked={linked}
+                    approvalStatus={approvalStatus}
+                    accountStatus={accountStatus}
+                  />
+                </>
+              ) : (
+                "트레이딩 PNL"
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       <section className="m-card sm-hero sa-rise" style={{ marginBottom: "0.85rem" }}>
-        <div className="sm-hero-label">평가금액</div>
-        <div className="sm-hero-equity">${fmt(equity)}</div>
+        <div className="sm-hero-top">
+          <div>
+            <div className="sm-hero-label">평가금액</div>
+            <div className="sm-hero-equity">${fmt(equity)}</div>
+          </div>
+          <button
+            type="button"
+            className="sm-share-btn"
+            disabled={loading || !hasAccount}
+            onClick={() => setShareOpen(true)}
+          >
+            공유
+          </button>
+        </div>
         <div className="sm-hero-row">
           <div>
             <div className="sm-hero-k">오늘 손익</div>
@@ -128,6 +260,12 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <SharePnlSheet
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        today={{ returnPct: dailyReturnPct, pnlUsd: dailyPnl }}
+      />
 
       <div className="m-seg" style={{ marginBottom: "0.85rem" }}>
         <button

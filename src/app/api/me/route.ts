@@ -23,6 +23,7 @@ export async function GET() {
   });
 
   const hasBrokerAccount = !!account;
+  const linked = Boolean(account?.metaApiAccountId);
   return NextResponse.json({
     id: user.id,
     email: user.email,
@@ -30,6 +31,7 @@ export async function GET() {
     role: user.role,
     approvalStatus: user.approvalStatus,
     hasBrokerAccount,
+    linked,
     account: account
       ? {
           id: account.id,

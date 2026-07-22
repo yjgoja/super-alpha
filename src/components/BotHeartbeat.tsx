@@ -3,31 +3,37 @@
 import { useEffect } from "react";
 
 /**
- * While the app is open and bot is ON, soft-sync equity and run a user-scoped tick.
- * Optional supplement only — GHA bot-tick loop (~1/min) and local engine (~2s) own trading.
- * Closing the browser must NOT stop TP/DCA; those paths are server-side.
- * Does NOT rebuild baskets (that used to desync DCA levels).
+ * While the app is open:
+ * - linked account → live equity/position sync (?live=1)
+ * - bot ON → soft tick POST
  */
 export function BotHeartbeat() {
   useEffect(() => {
     let stopped = false;
+    let busy = false;
 
     async function tick() {
-      if (stopped || document.visibilityState === "hidden") return;
+      if (stopped || busy || document.visibilityState === "hidden") return;
+      busy = true;
       try {
-        const res = await fetch("/api/stats");
+        const res = await fetch("/api/stats", { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
+        if (data.account?.metaApiAccountId) {
+          await fetch("/api/stats?live=1", { cache: "no-store" });
+        }
         if (data.account?.botEnabled) {
           await fetch("/api/stats", { method: "POST" });
         }
       } catch {
         /* ignore */
+      } finally {
+        busy = false;
       }
     }
 
     tick();
-    const id = setInterval(tick, 10_000);
+    const id = setInterval(tick, 12_000);
     const onVis = () => {
       if (document.visibilityState === "visible") tick();
     };

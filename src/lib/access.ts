@@ -35,6 +35,9 @@ export async function requireApprovedUser() {
   const res = await requireUser();
   if (!res.user) return res;
   if (res.user.role === "admin") return { error: null, status: 200 as const, user: res.user };
+  if (!res.user.emailVerifiedAt) {
+    return { error: "email_unverified" as const, status: 403 as const, user: null };
+  }
   if (res.user.approvalStatus === "rejected") {
     return { error: "rejected" as const, status: 403 as const, user: null };
   }

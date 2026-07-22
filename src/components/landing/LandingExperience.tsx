@@ -3,10 +3,11 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { LandingHeroFallback } from "./LandingHeroFallback";
 
 const LandingCanvas = dynamic(
   () => import("./LandingCanvas").then((m) => m.LandingCanvas),
-  { ssr: false, loading: () => <div className="lp-canvas-fallback" aria-hidden /> },
+  { ssr: false, loading: () => null },
 );
 
 function usePrefersReducedMotion() {
@@ -29,119 +30,126 @@ export function LandingExperience() {
   return (
     <div className="lp-root">
       <div className="lp-noise" aria-hidden />
-      <div className="lp-vignette" aria-hidden />
 
       <header className="lp-nav">
         <Link href="/" className="lp-nav-brand">
-          Super Alpha
+          Super<span>Alpha</span>
         </Link>
+        <nav className="lp-nav-links" aria-label="주요 메뉴">
+          <a href="#engine">엔진</a>
+          <a href="#flow">연결</a>
+          <a href="#start">시작</a>
+        </nav>
         <nav className="lp-nav-actions">
-          <Link href="/login" className="lp-link">
+          <Link href="/login" className="lp-btn lp-btn-muted">
             로그인
           </Link>
-          <Link href="/login?mode=register" className="lp-btn lp-btn-solid">
-            시작하기
+          <Link href="/login?mode=register" className="lp-btn lp-btn-white">
+            회원가입
           </Link>
         </nav>
       </header>
 
       <section className="lp-hero">
-        <div className="lp-hero-stage" aria-hidden>
-          <LandingCanvas reduced={reduced} />
-          <div className="lp-hero-fade" />
-        </div>
-
         <div className="lp-hero-copy">
-          <p className="lp-kicker">
-            <span className="lp-pulse" />
-            Cloud engine · Zero install
-          </p>
           <h1 className="lp-brand">
             Super
             <br />
             Alpha
           </h1>
+          <p className="lp-headline">MT5 클라우드 퀀트 자동매매</p>
           <p className="lp-lead">
-            EA 설치도, VPS도 필요 없습니다.
-            <br />
-            계좌 세 칸이면 자동매매가 클라우드에서 돌아갑니다.
+            메타트레이더5 계좌만 연결하면, 슈퍼알파 퀀트매매·퀀트트레이딩 엔진이
+            EA·VPS 없이 초단위로 돌아갑니다.
           </p>
           <div className="lp-cta">
-            <Link href="/login?mode=register" className="lp-btn lp-btn-solid lp-btn-lg">
-              무료로 엔진 켜기
+            <Link href="/login?mode=register" className="lp-btn lp-btn-white lp-btn-lg">
+              무료로 시작하기
             </Link>
-            <a href="#proof" className="lp-btn lp-btn-ghost lp-btn-lg">
-              왜 다른지 보기
-            </a>
           </div>
+        </div>
+
+        <div className="lp-hero-stage" aria-hidden>
+          <LandingHeroFallback />
+          {!reduced ? <LandingCanvas reduced={false} /> : null}
         </div>
       </section>
 
-      <section id="proof" className="lp-proof">
-        <div className="lp-proof-inner">
-          <p className="lp-section-kicker">Why Super Alpha</p>
+      <section id="engine" className="lp-section">
+        <div className="lp-section-inner">
+          <p className="lp-section-kicker">슈퍼알파 · MT5</p>
           <h2 className="lp-section-title">
-            복잡한 세팅은 우리가 지고,
+            PC를 꺼도
             <br />
-            당신은 시작만 하세요
+            엔진은 멈주지 않습니다
           </h2>
+          <p className="lp-section-lead">
+            메타트레이더5 자동매매프로그램을 클라우드에서 실행합니다. 설치·차트
+            붙이기·서버 관리 없이, 퀀트 프리셋만 고르면 됩니다.
+          </p>
 
-          <div className="lp-marquee" aria-hidden>
-            <div className="lp-marquee-track">
-              {Array.from({ length: 2 }).map((_, k) => (
-                <div key={k} className="lp-marquee-row">
-                  {[
-                    "No EA install",
-                    "MT5 cloud sync",
-                    "2s tick engine",
-                    "DCA · TP · SL",
-                    "PC off = still live",
-                    "Login · Password · Server",
-                  ].map((t) => (
-                    <span key={`${k}-${t}`}>{t}</span>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="lp-bento">
-            <article className="lp-tile lp-tile-wide">
-              <span className="lp-tile-num">01</span>
-              <h3>설치 없는 연결</h3>
-              <p>
-                파일을 받고 컴파일하고 차트에 붙이는 과정이 없습니다. 로그인·비번·서버만
-                넣으면 MetaAPI 클라우드가 MT5에 붙습니다.
-              </p>
-            </article>
-            <article className="lp-tile">
-              <span className="lp-tile-num">02</span>
-              <h3>초단위 엔진</h3>
-              <p>
-                익절·물타기·손절이 클라우드에서 연속 실행됩니다. PC를 꺼도 엔진은 멈추지
-                않습니다.
-              </p>
-            </article>
-            <article className="lp-tile">
-              <span className="lp-tile-num">03</span>
-              <h3>전략은 표로</h3>
-              <p>
-                마틴게일·방어폭 프리셋을 고르면 끝. 복잡한 파라미터 지옥 없이 바로 가동합니다.
-              </p>
-            </article>
-          </div>
+          <ul className="lp-rows">
+            <li>
+              <strong>Zero install</strong>
+              <span>로그인·비번·서버 세 칸만 입력하면 MT5에 연결됩니다.</span>
+            </li>
+            <li>
+              <strong>Live tick</strong>
+              <span>클라우드 워커가 초단위로 포지션을 감시·실행합니다.</span>
+            </li>
+            <li>
+              <strong>Preset only</strong>
+              <span>복잡한 파라미터 대신, 검증된 퀀트 프리셋으로 가동합니다.</span>
+            </li>
+          </ul>
         </div>
       </section>
 
-      <section className="lp-close">
-        <div className="lp-close-card">
+      <section id="flow" className="lp-section lp-section-alt">
+        <div className="lp-section-inner lp-flow">
+          <div>
+            <p className="lp-section-kicker">How it works</p>
+            <h2 className="lp-section-title">
+              연결하면
+              <br />
+              다음 틱부터
+            </h2>
+          </div>
+          <ol className="lp-steps">
+            <li>
+              <em>01</em>
+              <div>
+                <strong>계좌 연결</strong>
+                <p>브로커 MT5 정보를 안전하게 등록</p>
+              </div>
+            </li>
+            <li>
+              <em>02</em>
+              <div>
+                <strong>프리셋 선택</strong>
+                <p>종목·방향·시작 로트만 설정</p>
+              </div>
+            </li>
+            <li>
+              <em>03</em>
+              <div>
+                <strong>엔진 가동</strong>
+                <p>클라우드가 24시간 자동매매</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="start" className="lp-close">
+        <div className="lp-close-inner">
           <h2>
-            지금 계좌를 연결하면,
+            Trade with the engine.
             <br />
-            다음 틱부터 엔진이 일합니다
+            Not the chart.
           </h2>
-          <p>데모로 먼저, 준비가 되면 실계좌로. 같은 화면, 같은 3칸.</p>
-          <Link href="/login?mode=register" className="lp-btn lp-btn-solid lp-btn-lg">
+          <p>데모로 먼저, 준비가 되면 실계좌로. 같은 화면, 같은 연결.</p>
+          <Link href="/login?mode=register" className="lp-btn lp-btn-white lp-btn-lg">
             Super Alpha 시작
           </Link>
         </div>
@@ -151,7 +159,7 @@ export function LandingExperience() {
         <span>© {new Date().getFullYear()} Super Alpha</span>
         <div className="lp-foot-links">
           <Link href="/login">로그인</Link>
-          <Link href="/login?mode=register">가입</Link>
+          <Link href="/login?mode=register">회원가입</Link>
         </div>
       </footer>
     </div>

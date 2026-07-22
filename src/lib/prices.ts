@@ -4,6 +4,8 @@ type Quote = { bid: number; ask: number };
 
 const FALLBACK: Record<string, Quote> = {
   EURUSD: { bid: 1.085, ask: 1.0853 },
+  GBPUSD: { bid: 1.27, ask: 1.2703 },
+  AUDUSD: { bid: 0.66, ask: 0.6603 },
   XAUUSD: { bid: 4080.2, ask: 4080.6 },
 };
 
@@ -15,9 +17,9 @@ function jitter(q: Quote, vol: number): Quote {
   return { bid: n - spread / 2, ask: n + spread / 2 };
 }
 
-async function fetchFrankfurter(): Promise<Quote | null> {
+async function fetchFrankfurter(from: "EUR" | "GBP" | "AUD"): Promise<Quote | null> {
   try {
-    const res = await fetch("https://api.frankfurter.app/latest?from=EUR&to=USD", {
+    const res = await fetch(`https://api.frankfurter.app/latest?from=${from}&to=USD`, {
       next: { revalidate: 0 },
       signal: AbortSignal.timeout(4000),
     });
@@ -25,7 +27,7 @@ async function fetchFrankfurter(): Promise<Quote | null> {
     const data = (await res.json()) as { rates?: { USD?: number } };
     const mid = data.rates?.USD;
     if (!mid || !Number.isFinite(mid)) return null;
-    const spread = 0.00028; // ~28 pts demo
+    const spread = from === "EUR" ? 0.00028 : from === "GBP" ? 0.0003 : 0.00032;
     return { bid: mid - spread / 2, ask: mid + spread / 2 };
   } catch {
     return null;
@@ -44,12 +46,22 @@ export async function refreshPrices(): Promise<Record<string, Quote>> {
     map[t.symbol] = { bid: t.bid, ask: t.ask };
   }
 
-  const eur = (await fetchFrankfurter()) ?? jitter(map.EURUSD ?? FALLBACK.EURUSD, 0.0004);
+  const [eurFx, gbpFx, audFx] = await Promise.all([
+    fetchFrankfurter("EUR"),
+    fetchFrankfurter("GBP"),
+    fetchFrankfurter("AUD"),
+  ]);
+
+  const eur = eurFx ?? jitter(map.EURUSD ?? FALLBACK.EURUSD, 0.0004);
+  const gbp = gbpFx ?? jitter(map.GBPUSD ?? FALLBACK.GBPUSD, 0.00045);
+  const aud = audFx ?? jitter(map.AUDUSD ?? FALLBACK.AUDUSD, 0.0005);
   const xauBase = map.XAUUSD ?? FALLBACK.XAUUSD;
   const xau = (await fetchGoldApprox()) ?? jitter(xauBase, 0.0012);
 
   const updates = [
     { symbol: "EURUSD", ...eur },
+    { symbol: "GBPUSD", ...gbp },
+    { symbol: "AUDUSD", ...aud },
     { symbol: "XAUUSD", ...xau },
   ];
 

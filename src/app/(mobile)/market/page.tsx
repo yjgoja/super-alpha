@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { brokerGateRedirect } from "@/lib/post-login";
+import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
 
 type Position = {
   id?: string;
@@ -41,8 +41,10 @@ function fmt(n: number, d = 2) {
 
 export default function MarketPage() {
   const [account, setAccount] = useState<Account | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [showConnect, setShowConnect] = useState(false);
 
   const loadFast = useCallback(async () => {
     const res = await fetch("/api/stats");
@@ -55,20 +57,17 @@ export default function MarketPage() {
       return;
     }
     const data = await res.json();
-    const gate = brokerGateRedirect({
-      role: data.role,
-      metaApiAccountId: data.account?.metaApiAccountId,
-    });
-    if (gate) {
-      window.location.href = gate;
-      return;
+    if (data.account) {
+      setAccount((prev) => ({
+        ...data.account,
+        livePositions: prev?.livePositions?.length
+          ? prev.livePositions
+          : data.account.livePositions || [],
+      }));
+    } else {
+      setAccount(null);
     }
-    setAccount((prev) => ({
-      ...data.account,
-      livePositions: prev?.livePositions?.length
-        ? prev.livePositions
-        : data.account.livePositions || [],
-    }));
+    setLoaded(true);
   }, []);
 
   const loadLive = useCallback(async () => {
@@ -109,15 +108,22 @@ export default function MarketPage() {
           }
         })
         .catch(() => null);
-    }, 12000);
+    }, 10_000);
     return () => {
       clearTimeout(live);
       clearInterval(id);
     };
   }, [loadFast, loadLive]);
 
+  function requireLinked() {
+    if (isMt5Linked(account)) return true;
+    setShowConnect(true);
+    return false;
+  }
+
   async function closeOne(positionId: string) {
     if (!positionId || busyId) return;
+    if (!requireLinked()) return;
     if (!window.confirm("이 포지션을 시장가로 청산할까요?")) return;
     setBusyId(positionId);
     setMsg("");
@@ -144,6 +150,7 @@ export default function MarketPage() {
 
   async function closeAll() {
     if (busyId) return;
+    if (!requireLinked()) return;
     const n = account?.livePositions?.length || 0;
     if (!n) return;
     if (!window.confirm(`열린 포지션 ${n}건을 모두 시장가로 청산할까요?`)) return;
@@ -178,13 +185,38 @@ export default function MarketPage() {
     }
   }
 
-  if (!account) {
+  if (!loaded) {
     return (
       <>
         <header className="m-topbar">
           <h1>마켓</h1>
         </header>
         <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>불러오는 중…</p>
+      </>
+    );
+  }
+
+  if (!account) {
+    return (
+      <>
+        <header className="m-topbar">
+          <h1>마켓</h1>
+        </header>
+        <section className="m-card" style={{ marginBottom: "0.85rem" }}>
+          <div style={{ fontWeight: 700 }}>실계좌 연동 전</div>
+          <p style={{ margin: "0.5rem 0 1rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+            포지션·청산은 MT5 실계좌 연결 후 이용할 수 있습니다.
+          </p>
+          <button
+            type="button"
+            className="sa-btn sa-btn-primary"
+            style={{ width: "100%", borderRadius: 12, padding: "0.75rem" }}
+            onClick={() => setShowConnect(true)}
+          >
+            실계좌 연결하기
+          </button>
+        </section>
+        <ConnectPrompt open={showConnect} onClose={() => setShowConnect(false)} />
       </>
     );
   }
@@ -207,6 +239,8 @@ export default function MarketPage() {
           {account.botEnabled ? "봇 실행중" : "봇 정지"}
         </span>
       </header>
+
+      <ConnectPrompt open={showConnect} onClose={() => setShowConnect(false)} />
 
       <section className="m-card sa-rise" style={{ marginBottom: "0.85rem" }}>
         <div style={{ color: "var(--muted)", fontSize: "0.8rem" }}>

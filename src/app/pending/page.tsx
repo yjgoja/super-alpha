@@ -2,19 +2,22 @@
 
 import Link from "next/link";
 
+/** Rejected accounts only — signup no longer waits on admin approval. */
 export default function PendingPage() {
   return (
     <main className="sa-shell flex min-h-screen items-center justify-center py-10">
-      <section className="sa-panel max-w-md text-center space-y-4">
-        <h1 className="text-xl font-semibold text-[var(--fg)]">승인 대기 중</h1>
-        <p className="text-sm text-[var(--muted)] leading-relaxed">
-          가입은 완료되었습니다. 관리자가 계정을 승인한 뒤 계좌 연결·봇을 사용할 수
-          있습니다.
-        </p>
-        <Link href="/login" className="inline-block text-[var(--gold)] text-sm underline">
-          로그인으로 돌아가기
+      <div className="sa-panel w-full max-w-md sa-rise">
+        <Link href="/" className="font-display text-2xl">
+          Super Alpha
         </Link>
-      </section>
+        <h1 className="mt-6 text-xl font-semibold text-[var(--fg)]">이용이 제한되었습니다</h1>
+        <p className="mt-3 text-sm text-[var(--muted)] leading-relaxed">
+          관리자에 의해 이용이 거절된 계정입니다. 문의가 필요하면 담당자에게 연락해 주세요.
+        </p>
+        <Link href="/login" className="sa-btn sa-btn-ghost mt-8 inline-flex">
+          로그인으로
+        </Link>
+      </div>
     </main>
   );
 }

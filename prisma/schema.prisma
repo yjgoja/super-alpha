@@ -8,14 +8,18 @@ datasource db {
 }
 
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
+  id             String    @id @default(cuid())
+  email          String    @unique
   passwordHash   String
   name           String?
-  role           String   @default("user") // user | admin
-  approvalStatus String   @default("pending") // pending | approved | rejected
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  role           String    @default("user") // user | admin
+  approvalStatus String    @default("pending") // pending | approved | rejected
+  /// null = 미인증 (신규 가입). 기존 회원은 마이그레이션에서 채움.
+  emailVerifiedAt DateTime?
+  emailVerifyTokenHash String?
+  emailVerifyExpiresAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   accounts BrokerAccount[]
 }
@@ -88,6 +92,8 @@ model SymbolBot {
   enabled          Boolean @default(true)
   logic            String  @default("dubai_bruno_313")
   direction        String  @default("BUY")
+  /// 양방향: 같은 종목에 BUY·SELL 바스켓을 동시에 운용
+  dualDirection    Boolean @default(false)
   entryCount       Int     @default(10)
   entryMultiplier  Float   @default(2)
   entryIntervalPct Float   @default(5)
@@ -104,7 +110,7 @@ model SymbolBot {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  @@unique([accountId, symbol])
+  @@unique([accountId, symbol, direction])
   @@index([accountId, enabled])
 }
 

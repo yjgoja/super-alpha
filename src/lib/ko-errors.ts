@@ -74,6 +74,8 @@ export function gateErrorKo(code: string | null | undefined) {
       return "관리자에 의해 이용이 거절된 계정입니다.";
     case "pending_approval":
       return "승인 대기 중입니다.";
+    case "email_unverified":
+      return "이메일 인증이 필요합니다. 메일함의 인증 링크를 클릭해 주세요.";
     default:
       return "요청을 처리할 수 없습니다.";
   }

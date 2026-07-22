@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
 
 export default function ManagePage() {
   const [login, setLogin] = useState("");
   const [server, setServer] = useState("");
   const [status, setStatus] = useState("");
   const [locked, setLocked] = useState(false);
+  const [linked, setLinked] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [showConnect, setShowConnect] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -16,20 +20,32 @@ export default function ManagePage() {
         window.location.href = "/login";
         return;
       }
-      const data = await res.json();
-      if (!data.account) {
-        window.location.href = data.role === "admin" ? "/admin" : "/connect";
+      if (res.status === 403) {
+        window.location.href = "/pending";
         return;
       }
-      setLogin(data.account.login);
-      setServer(data.account.server);
-      setStatus(data.account.statusMessage || data.account.status);
-      setLocked(
-        !!data.account.metaApiAccountId &&
-          ["connected", "undeployed", "provisioning", "pending_registration"].includes(
-            data.account.status,
-          ),
-      );
+      const data = await res.json();
+      if (data.role === "admin" && !data.account) {
+        window.location.href = "/admin";
+        return;
+      }
+      if (data.account) {
+        setLogin(data.account.login);
+        setServer(data.account.server);
+        setStatus(data.account.statusMessage || data.account.status);
+        setLinked(isMt5Linked(data.account));
+        setLocked(
+          !!data.account.metaApiAccountId &&
+            ["connected", "undeployed", "provisioning", "pending_registration"].includes(
+              data.account.status,
+            ),
+        );
+      } else {
+        setStatus("실계좌 연동 전");
+        setLinked(false);
+        setLocked(false);
+      }
+      setLoaded(true);
     })();
   }, []);
 
@@ -39,13 +55,15 @@ export default function ManagePage() {
         <h1>관리</h1>
       </header>
 
+      <ConnectPrompt open={showConnect} onClose={() => setShowConnect(false)} />
+
       <section className="m-card" style={{ marginBottom: "0.75rem" }}>
         <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>연동 계좌</div>
         <div style={{ fontWeight: 700, fontSize: "1.15rem", marginTop: "0.35rem" }}>
-          {login || "—"}
+          {loaded ? login || "미연결" : "—"}
         </div>
         <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>
-          {server}
+          {server || (linked ? "" : "MT5 실계좌를 연결하세요")}
         </div>
         <div style={{ fontSize: "0.8rem", marginTop: "0.65rem", color: "var(--gold)" }}>
           {status}
@@ -66,13 +84,28 @@ export default function ManagePage() {
             </div>
           </div>
         ) : (
-          <Link href="/connect" className="m-card" style={{ display: "block" }}>
+          <button
+            type="button"
+            className="m-card"
+            style={{ display: "block", textAlign: "left", cursor: "pointer", width: "100%" }}
+            onClick={() => setShowConnect(true)}
+          >
             <div style={{ fontWeight: 650 }}>계좌 연동</div>
             <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
               MT5 로그인 · 서버 등록
             </div>
-          </Link>
+          </button>
         )}
+        <Link
+          href="/connect?reapply=1"
+          className="m-card"
+          style={{ display: "block" }}
+        >
+          <div style={{ fontWeight: 650 }}>실계좌 다시 연결 신청</div>
+          <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+            비밀번호 오류·재신청 시 사용
+          </div>
+        </Link>
         <Link href="/manage/strategy" className="m-card" style={{ display: "block" }}>
           <div style={{ fontWeight: 650 }}>전략로직 상세설정</div>
           <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
