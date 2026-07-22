@@ -2,11 +2,15 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
+import { LandingFallbackScene } from "./LandingFallbackScene";
 
 const LandingCanvas = dynamic(
   () => import("./LandingCanvas").then((m) => m.LandingCanvas),
-  { ssr: false, loading: () => <div className="lp-canvas-fallback" aria-hidden /> },
+  {
+    ssr: false,
+    loading: () => <LandingFallbackScene />,
+  },
 );
 
 function usePrefersReducedMotion() {
@@ -23,11 +27,33 @@ function usePrefersReducedMotion() {
   return reduced;
 }
 
+class CanvasErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(err: unknown) {
+    console.error("[LandingCanvas]", err);
+  }
+
+  render() {
+    if (this.state.failed) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
 export function LandingExperience() {
   const reduced = usePrefersReducedMotion();
+  // build stamp — 캐시 무효화 / 최신 랜딩 배포 확인용
+  const buildStamp = "landing-latest-20260722";
 
   return (
-    <div className="lp-root">
+    <div className="lp-root" data-landing={buildStamp}>
       <div className="lp-noise" aria-hidden />
       <div className="lp-vignette" aria-hidden />
 
@@ -47,7 +73,13 @@ export function LandingExperience() {
 
       <section className="lp-hero">
         <div className="lp-hero-stage" aria-hidden>
-          <LandingCanvas reduced={reduced} />
+          {reduced ? (
+            <LandingFallbackScene reduced />
+          ) : (
+            <CanvasErrorBoundary fallback={<LandingFallbackScene />}>
+              <LandingCanvas reduced={false} />
+            </CanvasErrorBoundary>
+          )}
           <div className="lp-hero-fade" />
         </div>
 
@@ -88,20 +120,22 @@ export function LandingExperience() {
 
           <div className="lp-marquee" aria-hidden>
             <div className="lp-marquee-track">
-              {Array.from({ length: 2 }).map((_, k) => (
-                <div key={k} className="lp-marquee-row">
-                  {[
-                    "No EA install",
-                    "MT5 cloud sync",
-                    "2s tick engine",
-                    "DCA · TP · SL",
-                    "PC off = still live",
-                    "Login · Password · Server",
-                  ].map((t) => (
-                    <span key={`${k}-${t}`}>{t}</span>
-                  ))}
-                </div>
-              ))}
+              <div className="lp-marquee-row">
+                <span>No EA install</span>
+                <span>MT5 cloud sync</span>
+                <span>2s tick engine</span>
+                <span>DCA · TP · SL</span>
+                <span>PC off = still live</span>
+                <span>Login · Password · Server</span>
+              </div>
+              <div className="lp-marquee-row">
+                <span>No EA install</span>
+                <span>MT5 cloud sync</span>
+                <span>2s tick engine</span>
+                <span>DCA · TP · SL</span>
+                <span>PC off = still live</span>
+                <span>Login · Password · Server</span>
+              </div>
             </div>
           </div>
 
@@ -110,23 +144,23 @@ export function LandingExperience() {
               <span className="lp-tile-num">01</span>
               <h3>설치 없는 연결</h3>
               <p>
-                파일을 받고 컴파일하고 차트에 붙이는 과정이 없습니다. 로그인·비번·서버만
-                넣으면 MetaAPI 클라우드가 MT5에 붙습니다.
+                파일을 받고 컴파일하고 차트에 붙이는 과정이 없습니다. 로그인·비번·서버만 넣으면
+                MetaAPI 클라우드가 MT5에 붙습니다.
               </p>
             </article>
             <article className="lp-tile">
               <span className="lp-tile-num">02</span>
               <h3>초단위 엔진</h3>
               <p>
-                익절·물타기·손절이 클라우드에서 연속 실행됩니다. PC를 꺼도 엔진은 멈추지
-                않습니다.
+                익절·물타기·손절이 클라우드에서 연속 실행됩니다. PC를 꺼도 엔진은 멈추지 않습니다.
               </p>
             </article>
             <article className="lp-tile">
               <span className="lp-tile-num">03</span>
               <h3>전략은 표로</h3>
               <p>
-                알파지속·안정·균형·공격 로직 중 고르면 끝. 복잡한 파라미터 지옥 없이 바로 가동합니다.
+                알파지속·안정·균형·공격 로직 중 고르면 끝. 복잡한 파라미터 지옥 없이 바로
+                가동합니다.
               </p>
             </article>
           </div>

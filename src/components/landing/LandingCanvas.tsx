@@ -106,10 +106,15 @@ function DustField() {
   const count = 280;
   const positions = useMemo(() => {
     const arr = new Float32Array(count * 3);
+    // 결정적 분포 — render purity / SSR hydration 안정
     for (let i = 0; i < count; i++) {
-      arr[i * 3] = (Math.random() - 0.5) * 10;
-      arr[i * 3 + 1] = (Math.random() - 0.5) * 6;
-      arr[i * 3 + 2] = (Math.random() - 0.5) * 6;
+      const n = i + 1;
+      const a = (n * 12.9898) % 1;
+      const b = (n * 78.233) % 1;
+      const c = (n * 37.719) % 1;
+      arr[i * 3] = (a - 0.5) * 10;
+      arr[i * 3 + 1] = (b - 0.5) * 6;
+      arr[i * 3 + 2] = (c - 0.5) * 6;
     }
     return arr;
   }, []);

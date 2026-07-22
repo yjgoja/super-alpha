@@ -138,6 +138,208 @@
     radial-gradient(ellipse at 30% 70%, rgba(79, 209, 197, 0.1), transparent 45%);
 }
 
+/* —— CSS 3D fallback stage (WebGL 로딩/실패/저사양) —— */
+.lp-stage {
+  position: absolute;
+  inset: 0 -8% 8% -4%;
+  z-index: 0;
+  perspective: 1100px;
+  perspective-origin: 65% 40%;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 60% 35%, rgba(232, 195, 106, 0.18), transparent 55%),
+    radial-gradient(ellipse at 30% 70%, rgba(79, 209, 197, 0.1), transparent 45%);
+}
+
+.lp-world {
+  position: absolute;
+  inset: 8% 0 0;
+  transform-style: preserve-3d;
+  transform-origin: 60% 45%;
+  transition: transform 0.05s linear;
+  animation: lp-float 9s ease-in-out infinite;
+}
+
+@keyframes lp-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -14px;
+  }
+}
+
+.lp-grid {
+  position: absolute;
+  left: 5%;
+  right: -5%;
+  bottom: 6%;
+  height: 58%;
+  transform: rotateX(72deg) translateZ(-40px);
+  transform-origin: center bottom;
+  background:
+    linear-gradient(rgba(232, 195, 106, 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 195, 106, 0.14) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 20%, transparent 75%);
+  opacity: 0.7;
+}
+
+.lp-ring {
+  position: absolute;
+  left: 52%;
+  top: 38%;
+  border: 1px solid rgba(232, 195, 106, 0.28);
+  border-radius: 50%;
+  transform-style: preserve-3d;
+}
+
+.lp-ring-a {
+  width: min(52vw, 420px);
+  height: min(52vw, 420px);
+  margin: calc(min(52vw, 420px) / -2) 0 0 calc(min(52vw, 420px) / -2);
+  animation: lp-spin 28s linear infinite;
+  box-shadow: inset 0 0 40px rgba(232, 195, 106, 0.08);
+}
+
+.lp-ring-b {
+  width: min(38vw, 300px);
+  height: min(38vw, 300px);
+  margin: calc(min(38vw, 300px) / -2) 0 0 calc(min(38vw, 300px) / -2);
+  border-color: rgba(79, 209, 197, 0.35);
+  transform: rotateX(68deg) rotateZ(20deg);
+  animation: lp-spin-rev 22s linear infinite;
+}
+
+.lp-ring-c {
+  width: min(24vw, 190px);
+  height: min(24vw, 190px);
+  margin: calc(min(24vw, 190px) / -2) 0 0 calc(min(24vw, 190px) / -2);
+  border-color: rgba(243, 245, 247, 0.12);
+  transform: rotateX(55deg) rotateZ(-12deg);
+  animation: lp-spin 16s linear infinite;
+}
+
+@keyframes lp-spin {
+  to {
+    transform: rotateX(70deg) rotateZ(360deg);
+  }
+}
+
+@keyframes lp-spin-rev {
+  to {
+    transform: rotateX(68deg) rotateZ(-340deg);
+  }
+}
+
+.lp-crystal {
+  position: absolute;
+  left: 54%;
+  top: 28%;
+  width: 88px;
+  height: 88px;
+  transform-style: preserve-3d;
+  transform: translate(-50%, -50%) rotateX(-18deg) rotateY(-28deg);
+  animation: lp-crystal 7s ease-in-out infinite;
+}
+
+@keyframes lp-crystal {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) rotateX(-18deg) rotateY(-28deg) translateZ(40px);
+  }
+  50% {
+    transform: translate(-50%, -50%) rotateX(-10deg) rotateY(18deg) translateZ(56px);
+  }
+}
+
+.lp-crystal-face {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(245, 215, 142, 0.55);
+  background: linear-gradient(
+    145deg,
+    rgba(245, 215, 142, 0.35),
+    rgba(232, 195, 106, 0.08) 45%,
+    rgba(79, 209, 197, 0.12)
+  );
+  backdrop-filter: blur(2px);
+}
+
+.lp-crystal-front {
+  transform: translateZ(28px);
+}
+
+.lp-crystal-left {
+  transform: rotateY(-90deg) translateZ(28px);
+  opacity: 0.75;
+}
+
+.lp-crystal-right {
+  transform: rotateY(90deg) translateZ(28px);
+  opacity: 0.65;
+}
+
+.lp-crystal-top {
+  transform: rotateX(90deg) translateZ(28px);
+  opacity: 0.85;
+}
+
+.lp-crystal-core {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-landing-display), var(--font-display), Georgia, serif;
+  font-size: 2.4rem;
+  color: var(--lp-gold2);
+  text-shadow: 0 0 28px rgba(232, 195, 106, 0.55);
+  transform: translateZ(40px);
+}
+
+.lp-ribbon {
+  position: absolute;
+  left: 8%;
+  right: 2%;
+  top: 34%;
+  width: min(72%, 640px);
+  height: auto;
+  transform: rotateX(18deg) rotateY(-8deg) translateZ(20px);
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
+}
+
+.lp-nodes circle {
+  fill: var(--lp-gold2);
+  filter: drop-shadow(0 0 8px rgba(232, 195, 106, 0.8));
+}
+
+.lp-platform {
+  position: absolute;
+  left: 42%;
+  bottom: 14%;
+  width: min(48%, 380px);
+  height: 28px;
+  transform-style: preserve-3d;
+  transform: translateX(-20%) rotateX(78deg) rotateZ(-8deg);
+}
+
+.lp-platform-top {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(232, 195, 106, 0.35), transparent);
+  box-shadow: 0 0 40px rgba(232, 195, 106, 0.25);
+}
+
+.lp-platform-edge {
+  position: absolute;
+  inset: 100% 8% auto;
+  height: 14px;
+  background: rgba(232, 195, 106, 0.12);
+  transform: rotateX(-90deg);
+  transform-origin: top;
+}
+
 .lp-hero-fade {
   position: absolute;
   inset: 0;
@@ -409,6 +611,22 @@
     opacity: 0.95;
   }
 
+  .lp-stage {
+    inset: -2% -20% 18% -18%;
+  }
+
+  .lp-crystal {
+    width: 72px;
+    height: 72px;
+    left: 58%;
+    top: 26%;
+  }
+
+  .lp-ribbon {
+    top: 38%;
+    width: min(88%, 640px);
+  }
+
   .lp-hero-fade {
     background:
       linear-gradient(180deg, rgba(4, 6, 10, 0.2) 20%, rgba(4, 6, 10, 0.92) 78%),
@@ -427,7 +645,12 @@
 @media (prefers-reduced-motion: reduce) {
   .lp-hero-copy,
   .lp-marquee-track,
-  .lp-pulse {
+  .lp-pulse,
+  .lp-world,
+  .lp-crystal,
+  .lp-ring-a,
+  .lp-ring-b,
+  .lp-ring-c {
     animation: none !important;
   }
 }
