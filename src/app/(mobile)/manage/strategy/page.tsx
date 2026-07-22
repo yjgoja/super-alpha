@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LOGIC_OPTIONS } from "@/lib/strategies";
+import { LOGIC_OPTIONS, PRIMARY_LOGIC_OPTIONS } from "@/lib/strategies";
 import {
   MT5_REF_MID,
   calcDca1000Defense,
@@ -271,17 +271,57 @@ export default function StrategyLogicPage() {
       <section className="m-card" style={{ marginBottom: "0.75rem", display: "grid", gap: "0.65rem" }}>
         <label>
           <span className="sa-label">로직</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.55rem" }}>
+            {PRIMARY_LOGIC_OPTIONS.map((l) => {
+              const on = logicId === l.id;
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  className="sa-btn"
+                  disabled={busy}
+                  onClick={() => setLogicId(l.id)}
+                  style={{
+                    borderRadius: 12,
+                    padding: "0.5rem 0.75rem",
+                    border: on ? "1px solid var(--gold)" : "1px solid rgba(255,255,255,0.12)",
+                    background: on ? "rgba(232,195,106,0.16)" : "rgba(255,255,255,0.04)",
+                    color: on ? "var(--gold)" : "var(--ink)",
+                    fontWeight: 650,
+                    fontSize: "0.82rem",
+                  }}
+                >
+                  {l.name}
+                </button>
+              );
+            })}
+          </div>
           <select
             className="sa-select"
             value={logicId}
             disabled={busy}
             onChange={(e) => setLogicId(e.target.value)}
           >
-            {LOGIC_OPTIONS.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
+            <optgroup label="알파 전략 4">
+              {PRIMARY_LOGIC_OPTIONS.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="기타">
+              {LOGIC_OPTIONS.filter(
+                (l) =>
+                  l.id !== "dubai_bruno_313" &&
+                  l.id !== "martin_9" &&
+                  l.id !== "martin_10" &&
+                  l.id !== "martin_11",
+              ).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </optgroup>
           </select>
           <p style={{ margin: "0.35rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
             {LOGIC_OPTIONS.find((l) => l.id === logicId)?.desc}

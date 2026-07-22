@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
+import { LOGIC_OPTIONS, PRIMARY_LOGIC_OPTIONS, SYMBOL_GROUPS, logicLabel } from "@/lib/strategies";
 import {
   DCA1000_DEFAULT_DEFENSE,
   DCA1000_DEFAULT_SL_ROI,
@@ -78,6 +78,10 @@ function DefenseCard({
       <div className="m-calc-row" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
         <span>전체 회차 채웠을 때 예상 손절금</span>
         <strong>${fmtNum(defense.estimatedSlAmount)}</strong>
+      </div>
+      <div className="m-calc-row">
+        <span>차트 방어폭</span>
+        <strong>{fmtNum(defense.roiDefensePct)}%</strong>
       </div>
       <p style={{ margin: "0.35rem 0 0", fontSize: "0.68rem", color: "var(--muted)", lineHeight: 1.4 }}>
         익절·손절 모두 바스켓 증거금×ROI%(바이낸스식). 회차·로트가 늘수록 커집니다. 위는 L0 기준,
@@ -678,6 +682,61 @@ export default function BotPage() {
                     <div style={{ marginTop: "1rem", display: "grid", gap: "0.75rem" }}>
                       <div>
                         <span className="sa-label">로직</span>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "0.4rem",
+                            marginBottom: "0.55rem",
+                          }}
+                        >
+                          {PRIMARY_LOGIC_OPTIONS.map((l) => {
+                            const cur = (draft.logic as string) || bot.logic || "dubai_bruno_313";
+                            const on = cur === l.id;
+                            return (
+                              <button
+                                key={l.id}
+                                type="button"
+                                className="sa-btn"
+                                disabled={busy}
+                                onClick={() => {
+                                  const meta = tableLogicMeta(l.id);
+                                  const usd = resolveTpSlUsd({
+                                    symbol: bot.symbol,
+                                    startLots: Number(draft.startLots ?? bot.startLots),
+                                    takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
+                                    stopLossPct: Number(
+                                      draft.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
+                                    ),
+                                  });
+                                  setDraft((d) => ({
+                                    ...d,
+                                    logic: l.id,
+                                    takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
+                                    takeProfitUsd: usd.takeProfitUsd,
+                                    stopLossUsd: usd.stopLossUsd,
+                                    entryMultiplier: isMartinLogic(l.id) ? 2 : 1,
+                                  }));
+                                }}
+                                style={{
+                                  borderRadius: 12,
+                                  padding: "0.5rem 0.75rem",
+                                  border: on
+                                    ? "1px solid var(--gold)"
+                                    : "1px solid rgba(255,255,255,0.12)",
+                                  background: on
+                                    ? "rgba(232,195,106,0.16)"
+                                    : "rgba(255,255,255,0.04)",
+                                  color: on ? "var(--gold)" : "var(--ink)",
+                                  fontWeight: 650,
+                                  fontSize: "0.82rem",
+                                }}
+                              >
+                                {l.name}
+                              </button>
+                            );
+                          })}
+                        </div>
                         <select
                           className="sa-select"
                           value={(draft.logic as string) || bot.logic || "dubai_bruno_313"}
@@ -702,11 +761,26 @@ export default function BotPage() {
                             }));
                           }}
                         >
-                          {LOGIC_OPTIONS.map((l) => (
-                            <option key={l.id} value={l.id}>
-                              {l.name}
-                            </option>
-                          ))}
+                          <optgroup label="알파 전략 4">
+                            {PRIMARY_LOGIC_OPTIONS.map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="기타">
+                            {LOGIC_OPTIONS.filter(
+                              (l) =>
+                                l.id !== "dubai_bruno_313" &&
+                                l.id !== "martin_9" &&
+                                l.id !== "martin_10" &&
+                                l.id !== "martin_11",
+                            ).map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.name}
+                              </option>
+                            ))}
+                          </optgroup>
                         </select>
                         <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
                           {LOGIC_OPTIONS.find((l) => l.id === ((draft.logic as string) || bot.logic))
