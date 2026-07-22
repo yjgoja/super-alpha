@@ -46,7 +46,7 @@ function refMid(symbol: string) {
 }
 
 export default function StrategyLogicPage() {
-  const [logicId, setLogicId] = useState("martin_9");
+  const [logicId, setLogicId] = useState("dubai_bruno_313");
   const [symbol, setSymbol] = useState("XAUUSD");
   const [payload, setPayload] = useState<Payload | null>(null);
   const [hasOverride, setHasOverride] = useState(false);
@@ -302,10 +302,11 @@ export default function StrategyLogicPage() {
         <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>불러오는 중…</p>
       ) : editable === "bulk" || isBulkLogic(logicId) ? (
         <section className="m-card" style={{ display: "grid", gap: "0.75rem", marginBottom: "0.75rem" }}>
-          <div style={{ fontWeight: 650 }}>일괄 설정 (전체 회차 동일)</div>
+          <div style={{ fontWeight: 650 }}>일괄 설정 (로트·손절)</div>
           <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            두바이부르노는 회차 칸을 펼치지 않습니다. 계약수·익절·손절만 한 번에 적용하고, 물타기(drop)
-            표는 기본 프리셋을 유지합니다.
+            두바이부르노 회차 익절 ROI는 정본 표 티어(20→25→30→45→60→70→100→110→125%)를
+            그대로 씁니다. 아래에서 바꾸는 익절%는 시작회차(L0) 미리보기용이며, 물타기 drop·회차 TP
+            표는 덮어쓰지 않습니다.
           </p>
           <label>
             <span className="sa-label">전체 회차 계약수 (로트)</span>
