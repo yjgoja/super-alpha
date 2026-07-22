@@ -1220,36 +1220,53 @@ export async function closePositionsBySymbolDirection(
   symbol: string,
   direction: "BUY" | "SELL",
 ) {
-  const snap = await fetchSnapshot(metaApiAccountId);
-  if (!snap.ok) return snap;
-  const targets = snap.positions.filter(
-    (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
-  );
-  if (targets.length === 0) return { ok: true as const, closed: 0, remaining: 0 };
+  const MAX_ROUNDS = 3;
+  let closedTotal = 0;
 
-  // 소량씩 병렬 청산 (틱 타임아웃 방지)
-  const ids = targets.map((t) => t.id).filter(Boolean);
-  const BATCH = 10;
-  for (let i = 0; i < ids.length; i += BATCH) {
-    await Promise.all(ids.slice(i, i + BATCH).map((id) => closePosition(metaApiAccountId, id)));
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const snap = await fetchSnapshot(metaApiAccountId);
+    if (!snap.ok) return snap;
+    const targets = snap.positions.filter(
+      (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
+    );
+    if (targets.length === 0) {
+      return { ok: true as const, closed: closedTotal, remaining: 0 };
+    }
+
+    const ids = targets.map((t) => t.id).filter(Boolean);
+    const BATCH = 10;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      await Promise.all(ids.slice(i, i + BATCH).map((id) => closePosition(metaApiAccountId, id)));
+    }
+    closedTotal += targets.length;
+    await sleep(350);
+
+    const after = await fetchSnapshot(metaApiAccountId);
+    if (!after.ok) {
+      return {
+        ok: false as const,
+        message: after.message || "청산 후 잔여 확인 실패",
+        closed: closedTotal,
+        remaining: -1,
+      };
+    }
+    const remaining = after.positions.filter(
+      (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
+    );
+    if (remaining.length === 0) {
+      return { ok: true as const, closed: closedTotal, remaining: 0 };
+    }
+    if (round === MAX_ROUNDS - 1) {
+      return {
+        ok: false as const,
+        message: `${symbol} ${direction} 청산 후 ${remaining.length}건 잔여`,
+        closed: Math.max(0, closedTotal - remaining.length),
+        remaining: remaining.length,
+      };
+    }
   }
 
-  const after = await fetchSnapshot(metaApiAccountId);
-  if (!after.ok) {
-    return { ok: false as const, message: after.message || "청산 후 잔여 확인 실패", closed: targets.length, remaining: -1 };
-  }
-  const remaining = after.positions.filter(
-    (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
-  );
-  if (remaining.length > 0) {
-    return {
-      ok: false as const,
-      message: `${symbol} ${direction} 청산 후 ${remaining.length}건 잔여`,
-      closed: targets.length - remaining.length,
-      remaining: remaining.length,
-    };
-  }
-  return { ok: true as const, closed: targets.length, remaining: 0 };
+  return { ok: true as const, closed: closedTotal, remaining: 0 };
 }
 
 /**

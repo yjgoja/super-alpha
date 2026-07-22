@@ -111,8 +111,8 @@ function positionsForSymbol(
   );
 }
 
-/** MT5 PC/앱에서 수동 청산 → 전체 자동매매 중지 (웹 수동청산과 동일) */
-async function stopBotAfterExternalClose(accountId: string, message: string) {
+/** 웹 수동청산 API 등에서만 사용. 엔진 고스트 감지에서는 호출하지 않음. */
+export async function stopBotAfterManualClose(accountId: string, message: string) {
   await prisma.brokerAccount.update({
     where: { id: accountId },
     data: {
@@ -124,13 +124,11 @@ async function stopBotAfterExternalClose(accountId: string, message: string) {
 }
 
 /**
- * DB엔 열린 바스켓이 있는데 MT5 포지션이 없음 = 터미널/외부 수동 청산.
- * 클라우드 재기동 직후 빈 포지션 오탐 방지: 2회 연속 확인 + 재조회.
- * true면 이번 틱에서 주문 중단.
+ * DB엔 열린 바스켓이 있는데 MT5 포지션이 없음 = 동기화 불일치(API 지연·이미 청산됨).
+ * 바스켓만 DB에서 닫고 봇은 절대 끄지 않는다. (오탐으로 전체 중지하던 버그 제거)
+ * true면 심볼 루프는 계속 진행(신규 진입/익절·손절 유지).
  */
-const ghostCloseSuspectUntil = new Map<string, number>();
-
-async function detectAndStopOnExternalClose(
+async function healGhostBaskets(
   accountId: string,
   metaId: string,
   baskets: BasketRow[],
@@ -145,10 +143,7 @@ async function detectAndStopOnExternalClose(
       positionsForSymbol(positions, b.symbol, b.direction === "SELL" ? "SELL" : "BUY")
         .length === 0,
   );
-  if (ghosts.length === 0) {
-    ghostCloseSuspectUntil.delete(accountId);
-    return false;
-  }
+  if (ghosts.length === 0) return false;
 
   // Used margin / equity drawdown → positions almost certainly still open (API lag)
   const margin = opts?.margin ?? 0;
@@ -156,13 +151,13 @@ async function detectAndStopOnExternalClose(
   const balance = opts?.balance ?? 0;
   if (margin > 1 || (balance > 0 && equity > 0 && Math.abs(balance - equity) > 1)) {
     console.warn(
-      `[engine] skip ghost-close account=${accountId} margin=${margin} eq=${equity} bal=${balance}`,
+      `[engine] skip ghost-heal account=${accountId} margin=${margin} eq=${equity} bal=${balance}`,
     );
     return false;
   }
 
   // Confirm with a second snapshot (MetaAPI can return [] briefly after deploy)
-  await new Promise((r) => setTimeout(r, 2000));
+  await new Promise((r) => setTimeout(r, 1500));
   const again = await fetchSnapshot(metaId);
   if (!again.ok) return false;
   const stillGhost = ghosts.filter(
@@ -185,18 +180,6 @@ async function detectAndStopOnExternalClose(
     return false;
   }
 
-  // Require two consecutive tick confirmations before stopping live bots
-  const now = Date.now();
-  const suspectedAt = ghostCloseSuspectUntil.get(accountId);
-  if (!suspectedAt || now - suspectedAt > 120_000) {
-    ghostCloseSuspectUntil.set(accountId, now);
-    console.warn(
-      `[engine] ghost-close suspect account=${accountId} — confirm next tick before stop`,
-    );
-    return false;
-  }
-
-  ghostCloseSuspectUntil.delete(accountId);
   await prisma.basket.updateMany({
     where: { id: { in: stillGhost.map((g) => g.id) } },
     data: {
@@ -205,11 +188,11 @@ async function detectAndStopOnExternalClose(
       unrealizedPnl: 0,
     },
   });
-  await stopBotAfterExternalClose(
-    accountId,
-    "MT5 수동 청산 감지 · 자동매매 전체 중지됨",
+  console.warn(
+    `[engine] healed ${stillGhost.length} ghost basket(s) account=${accountId} — bot stays ON`,
   );
-  return true;
+  // Keep botEnabled. Do not call stopBotAfterExternalClose.
+  return false;
 }
 
 /**
@@ -403,15 +386,13 @@ async function runSymbolTableDca(
   );
   const ourPositions = positionsForSymbol(positions, symbol, direction);
 
-  // Ghost basket (DB open, MT5 empty): do NOT stop here.
-  // Account-level detectAndStopOnExternalClose has margin/2-tick guards.
-  // Unguarded stop here caused false "manual close" shutdowns on MetaAPI lag.
+  // Ghost basket (DB open, MT5 empty): heal at account level only — never stop here.
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
     return {
       ok: true as const,
       action: "ghost_pending",
       symbol,
-      note: "await_external_close_confirm",
+      note: "await_ghost_heal",
     };
   }
 
@@ -610,7 +591,17 @@ async function runSymbolTableDca(
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    await closePositionsBySymbolDirection(metaId, symbol, direction);
+    const slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
+    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+      return {
+        ok: false as const,
+        error:
+          ("message" in slClose && slClose.message) ||
+          `${symbol} 손절 청산 실패(잔여 ${"remaining" in slClose ? slClose.remaining : "?"})`,
+        symbol,
+        action: "sl_retry",
+      };
+    }
     const pnlSum = tpPnl.apiProfit;
     await prisma.basket.update({
       where: { id: basket.id },
@@ -792,7 +783,7 @@ async function runSymbolDca(
       ok: true as const,
       action: "ghost_pending",
       symbol,
-      note: "await_external_close_confirm",
+      note: "await_ghost_heal",
     };
   }
 
@@ -951,7 +942,17 @@ async function runSymbolDca(
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    await closePositionsBySymbolDirection(metaId, symbol, direction);
+    const slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
+    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+      return {
+        ok: false as const,
+        error:
+          ("message" in slClose && slClose.message) ||
+          `${symbol} 손절 청산 실패(잔여 ${"remaining" in slClose ? slClose.remaining : "?"})`,
+        symbol,
+        action: "sl_retry",
+      };
+    }
     await prisma.basket.update({
       where: { id: basket.id },
       data: {
@@ -1172,28 +1173,13 @@ async function runDcaTickInner(accountId: string) {
     },
   });
 
-  // MT5 터미널 수동 청산: 열린 바스켓인데 포지션 없음 → 전체 중지 (심볼 루프 전)
-  if (
-    await detectAndStopOnExternalClose(
-      account.id,
-      metaId,
-      account.baskets,
-      snap.positions,
-      {
-        skip: cloudJustRecovered,
-        margin: snap.margin,
-        equity: snap.equity,
-        balance: snap.balance,
-      },
-    )
-  ) {
-    return {
-      ok: true as const,
-      stopped: true as const,
-      reason: "mt5_manual_close",
-      message: "MT5 수동 청산 감지 · 자동매매 전체 중지됨",
-    };
-  }
+  // Ghost baskets: DB만 정리. 봇 전체 중지는 절대 하지 않음.
+  await healGhostBaskets(account.id, metaId, account.baskets, snap.positions, {
+    skip: cloudJustRecovered,
+    margin: snap.margin,
+    equity: snap.equity,
+    balance: snap.balance,
+  });
 
   const lastEq = lastEquitySnapAt.get(account.id) || 0;
   if (Date.now() - lastEq > 60_000) {

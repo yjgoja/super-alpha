@@ -209,10 +209,11 @@ export async function GET(req: NextRequest) {
             equity: snap.equity,
             lastSyncAt: new Date(),
             // Keep cloud warm while user is viewing live data
-            status: account.botEnabled ? "connected" : "connected",
-            statusMessage: account.botEnabled
-              ? "클라우드 연결 · 봇 실행 중"
-              : "실시간 동기화 중",
+            status: "connected",
+            // Do NOT overwrite stop reason / engine messages
+            ...(account.botEnabled
+              ? { statusMessage: "클라우드 연결 · 봇 실행 중" }
+              : {}),
           },
         });
         account.balance = updated.balance;
