@@ -96,10 +96,36 @@ export default function BotPage() {
   const [msg, setMsg] = useState("");
   const [edit, setEdit] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<Bot>>({});
-  const [addSymbol, setAddSymbol] = useState("EURUSD");
+  const [addSymbol, setAddSymbol] = useState("GBPUSD");
   const [ready, setReady] = useState(false);
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
+  const availableGroups = useMemo(
+    () =>
+      groups
+        .map((g) => ({
+          ...g,
+          symbols: g.symbols.filter((s) => !used.has(s)),
+        }))
+        .filter((g) => g.symbols.length > 0),
+    [groups, used],
+  );
+  const availableSymbols = useMemo(
+    () => availableGroups.flatMap((g) => [...g.symbols]),
+    [availableGroups],
+  );
+  const featuredAddSymbols = useMemo(() => {
+    const prefer = ["GBPUSD", "AUDUSD", "EURUSD", "XAUUSD"];
+    const rest = availableSymbols.filter((s) => !prefer.includes(s));
+    return [...prefer.filter((s) => availableSymbols.includes(s)), ...rest];
+  }, [availableSymbols]);
+
+  useEffect(() => {
+    if (featuredAddSymbols.length === 0) return;
+    if (!featuredAddSymbols.includes(addSymbol)) {
+      setAddSymbol(featuredAddSymbols[0]!);
+    }
+  }, [featuredAddSymbols, addSymbol]);
 
   const defense = useMemo(() => {
     if (!edit) return DCA1000_DEFAULT_DEFENSE;
@@ -281,18 +307,19 @@ export default function BotPage() {
     await load();
   }
 
-  async function addBot() {
-    if (used.has(addSymbol)) {
-      setMsg("이미 추가된 종목입니다.");
+  async function addBot(symbol = addSymbol) {
+    if (!symbol || used.has(symbol)) {
+      setMsg("이미 추가된 종목이거나 선택할 종목이 없습니다.");
       return;
     }
     setBusy(true);
+    setMsg("");
     const meta = tableLogicMeta("dubai_bruno_313");
-    await fetch("/api/symbol-bots", {
+    const res = await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        symbol: addSymbol,
+        symbol,
         enabled: false,
         logic: "dubai_bruno_313",
         entryCount: meta.count,
@@ -300,7 +327,7 @@ export default function BotPage() {
         startLots: 0.01,
         ...(() => {
           const usd = resolveTpSlUsd({
-            symbol: addSymbol,
+            symbol,
             startLots: 0.01,
             takeProfitPct: meta.firstTpRoi || DEFAULT_TP_ROI,
             stopLossPct: DCA1000_DEFAULT_SL_ROI,
@@ -318,7 +345,12 @@ export default function BotPage() {
       }),
     });
     setBusy(false);
-    setMsg(`${addSymbol} 추가됨 (사용 중지 상태 · 켜서 사용)`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMsg(data.error || `${symbol} 추가 실패`);
+      return;
+    }
+    setMsg(`${symbol} 추가됨 (사용 중지 상태 · 켜서 사용)`);
     await load();
   }
 
@@ -399,6 +431,78 @@ export default function BotPage() {
       <header className="m-topbar">
         <h1>봇</h1>
       </header>
+
+      <section className="m-card" style={{ marginBottom: "0.85rem" }}>
+        <div style={{ fontWeight: 650, marginBottom: "0.35rem" }}>종목 추가</div>
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginBottom: "0.75rem" }}>
+          GBPUSD · AUDUSD 등 아직 없는 종목을 고른 뒤 추가합니다.
+        </div>
+        {!ready ? (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--muted)" }}>불러오는 중…</p>
+        ) : featuredAddSymbols.length === 0 ? (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--muted)" }}>
+            추가할 수 있는 종목이 없습니다.
+          </p>
+        ) : (
+          <div style={{ display: "grid", gap: "0.75rem" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+              {featuredAddSymbols.slice(0, 12).map((s) => {
+                const on = addSymbol === s;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className="sa-btn"
+                    disabled={busy}
+                    onClick={() => setAddSymbol(s)}
+                    style={{
+                      borderRadius: 12,
+                      padding: "0.55rem 0.85rem",
+                      border: on
+                        ? "1px solid var(--gold)"
+                        : "1px solid rgba(255,255,255,0.12)",
+                      background: on ? "rgba(232,195,106,0.16)" : "rgba(255,255,255,0.04)",
+                      color: on ? "var(--gold)" : "var(--ink)",
+                      fontWeight: 650,
+                    }}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+            {featuredAddSymbols.length > 12 ? (
+              <select
+                className="sa-select"
+                value={addSymbol}
+                onChange={(e) => setAddSymbol(e.target.value)}
+              >
+                {availableGroups.map((g) => (
+                  <optgroup key={g.id} label={g.name}>
+                    {g.symbols.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            ) : null}
+            <button
+              type="button"
+              className="sa-btn sa-btn-primary"
+              disabled={busy || !addSymbol || used.has(addSymbol)}
+              onClick={() => addBot(addSymbol)}
+              style={{ width: "100%", borderRadius: 12, padding: "0.75rem" }}
+            >
+              {addSymbol} 추가
+            </button>
+            {msg ? (
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--gold)" }}>{msg}</p>
+            ) : null}
+          </div>
+        )}
+      </section>
 
       <section className="m-card" style={{ marginBottom: "0.85rem" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
@@ -825,35 +929,6 @@ export default function BotPage() {
               );
             })}
           </div>
-
-          <section className="m-card" style={{ marginTop: "0.85rem" }}>
-            <div style={{ fontWeight: 650, marginBottom: "0.65rem" }}>종목 추가</div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <select
-                className="sa-select"
-                value={addSymbol}
-                onChange={(e) => setAddSymbol(e.target.value)}
-                style={{ flex: 1 }}
-              >
-                {groups.map((g) => {
-                  const avail = g.symbols.filter((s) => !used.has(s));
-                  if (avail.length === 0) return null;
-                  return (
-                    <optgroup key={g.id} label={g.name}>
-                      {avail.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </optgroup>
-                  );
-                })}
-              </select>
-              <button type="button" className="sa-btn sa-btn-primary" disabled={busy} onClick={addBot}>
-                추가
-              </button>
-            </div>
-          </section>
         </>
       )}
     </>
