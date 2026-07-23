@@ -633,15 +633,81 @@ export async function ensureCloudLive(metaApiAccountId: string, waitMs = 45000) 
     if (st && String(st.connectionStatus).toUpperCase() === "DISCONNECTED") {
       return {
         ok: false as const,
+        code: "DISCONNECTED" as const,
         message:
           "MT5 클라우드가 브로커에 연결되지 않았습니다. 마이페이지에서 계좌를 다시 연결하거나, MT5 비밀번호(투자자 비번 아님)·서버명을 확인 후 전체 시작을 다시 눌러주세요.",
       };
     }
-    return { ok: false as const, message: waited.message };
+    return { ok: false as const, code: waited.code, message: waited.message };
   }
   const snap = await fetchSnapshot(id);
   if (!snap.ok) return { ok: false as const, message: snap.message };
   return { ok: true as const, snap };
+}
+
+/**
+ * Start-all path: if cloud stays DISCONNECTED, re-push credentials and
+ * recreate as cloud-g2/high when needed (g1 can stick disconnected forever).
+ */
+export async function ensureAccountCloudLive(input: {
+  metaApiAccountId: string | null | undefined;
+  login: string;
+  password: string;
+  server: string;
+  waitMs?: number;
+}): Promise<
+  | { ok: true; snap: MetaSnap; metaApiAccountId: string }
+  | { ok: false; message: string }
+> {
+  const waitMs = input.waitMs ?? 45000;
+  const metaId = input.metaApiAccountId ? String(input.metaApiAccountId) : "";
+
+  if (metaId) {
+    await api(PROVISIONING, "PUT", `/users/current/accounts/${metaId}`, {
+      password: input.password,
+      login: input.login,
+      server: input.server,
+      name: `SA-${input.login}`,
+    }).catch(() => null);
+    const live = await ensureCloudLive(metaId, waitMs);
+    if (live.ok) return { ok: true, snap: live.snap, metaApiAccountId: metaId };
+  }
+
+  // Wipe stuck clouds for this login, then create g2/high fresh
+  const existing = await findAllMetaAccountsByLogin(input.login);
+  for (const c of existing) {
+    try {
+      await undeployAccount(c.id);
+    } catch {
+      /* ignore */
+    }
+    await removeMetaAccount(c.id);
+  }
+  await sleep(1500);
+
+  const profileId = await ensureProvisioningProfile();
+  const created = await createAndConnect({
+    login: input.login,
+    password: input.password,
+    server: input.server,
+    profileId,
+    mode: { type: "cloud-g2", reliability: "high", label: "고성능(g2)" },
+  });
+  if (!created.ok) return { ok: false, message: created.message };
+
+  const newId = String(created.metaApiAccountId);
+  const verified = await verifyPasswordOnExistingAccount({
+    metaApiAccountId: newId,
+    login: input.login,
+    password: input.password,
+    server: input.server,
+    name: created.name,
+  });
+  if (!verified.ok) return { ok: false, message: verified.message };
+
+  const live2 = await ensureCloudLive(newId, waitMs);
+  if (!live2.ok) return { ok: false, message: live2.message };
+  return { ok: true, snap: live2.snap, metaApiAccountId: newId };
 }
 
 export async function deployAccount(metaApiAccountId: string) {
@@ -663,15 +729,15 @@ export async function removeMetaAccount(metaApiAccountId: string) {
 type CloudMode = { type: "cloud-g1" | "cloud-g2"; reliability: "regular" | "high"; label: string };
 
 /**
- * Default: cheap g1/regular only (stops duplicate g2 high burn).
- * Set METAAPI_PREFER_G2=1 to try expensive g2/high first.
+ * Default: cloud-g2/high (stable broker connect).
+ * Set METAAPI_FORCE_G1=1 to use cheap g1 only.
  */
 function provisionModes(): CloudMode[] {
   const g1: CloudMode = { type: "cloud-g1", reliability: "regular", label: "일반(g1)" };
   const g2: CloudMode = { type: "cloud-g2", reliability: "high", label: "고성능(g2)" };
   if (process.env.METAAPI_FORCE_G1 === "1") return [g1];
-  if (process.env.METAAPI_PREFER_G2 === "1") return [g2, g1];
-  return [g1];
+  // g2 first — some ZeroMarkets logins stay DISCONNECTED forever on g1
+  return [g2, g1];
 }
 
 function softLinkSnap(

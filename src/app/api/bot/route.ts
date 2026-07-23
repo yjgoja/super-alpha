@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { ensureCloudLive } from "@/lib/metaapi";
+import { ensureAccountCloudLive, ensureCloudLive } from "@/lib/metaapi";
 import { withAccountToggleLock } from "@/lib/toggle-lock";
 
 export const maxDuration = 60;
@@ -33,16 +33,45 @@ export async function POST(req: Request) {
 
   return withAccountToggleLock(account.id, async () => {
     if (body.enabled) {
-      const live = await ensureCloudLive(String(account.metaApiAccountId), 45000);
-      if (!live.ok) {
+      let metaId = String(account.metaApiAccountId);
+      let snapBalance: number | undefined;
+      let snapEquity: number | undefined;
+      let errMsg: string | undefined;
+
+      if (account.syncToken) {
+        const repaired = await ensureAccountCloudLive({
+          metaApiAccountId: account.metaApiAccountId,
+          login: account.login,
+          password: account.syncToken,
+          server: account.server,
+          waitMs: 50000,
+        });
+        if (!repaired.ok) {
+          errMsg = repaired.message;
+        } else {
+          metaId = repaired.metaApiAccountId;
+          snapBalance = repaired.snap.balance;
+          snapEquity = repaired.snap.equity;
+        }
+      } else {
+        const live = await ensureCloudLive(metaId, 45000);
+        if (!live.ok) {
+          errMsg = live.message;
+        } else {
+          snapBalance = live.snap.balance;
+          snapEquity = live.snap.equity;
+        }
+      }
+
+      if (errMsg) {
         await prisma.brokerAccount.update({
           where: { id: account.id },
           data: {
-            statusMessage: live.message || "클라우드 재활성화 실패",
+            statusMessage: errMsg || "클라우드 재활성화 실패",
           },
         });
         return NextResponse.json(
-          { error: live.message || "클라우드 계좌를 활성화하지 못했습니다." },
+          { error: errMsg || "클라우드 계좌를 활성화하지 못했습니다." },
           { status: 400 },
         );
       }
@@ -50,10 +79,18 @@ export async function POST(req: Request) {
       const updated = await prisma.brokerAccount.update({
         where: { id: account.id },
         data: {
+          metaApiAccountId: metaId,
           botEnabled: true,
           botStoppedAt: null,
           status: "connected",
           statusMessage: "클라우드 연결 · 봇 실행 중",
+          ...(snapBalance != null && snapEquity != null
+            ? {
+                balance: snapBalance,
+                equity: snapEquity,
+                lastSyncAt: new Date(),
+              }
+            : {}),
         },
       });
       return NextResponse.json({ ok: true, botEnabled: updated.botEnabled });
