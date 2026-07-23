@@ -16,6 +16,8 @@ import {
   defaultEntryMultiplier,
   getTableLevels,
   isMartinLogic,
+  resolveLiveStopLossPct,
+  resolveLiveTakeProfitPct,
   tableLogicMeta,
 } from "@/lib/table-logics";
 import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
@@ -55,18 +57,45 @@ export async function GET() {
   });
 
   // Migrate removed/unknown logics → dubai_bruno_313
-  const outdated = bots.filter((b) => !isLogicId(b.logic));
+  // + 레거시 alias(martin_9 등) → 정식 id, 공개 프리셋 SL/TP 동기화
+  const outdated = bots.filter((b) => {
+    const normalized = normalizeLogicId(b.logic);
+    if (b.logic !== normalized && isLogicId(normalized)) return true;
+    if (!isLogicId(b.logic)) return true;
+    const wantSl = resolveLiveStopLossPct(b.logic, b.stopLossPct);
+    const wantTp = resolveLiveTakeProfitPct(b.logic, b.takeProfitPct);
+    // custom은 저장값 유지 — 공개 프리셋만 강제 동기화
+    if (normalizeLogicId(b.logic) === "custom") return false;
+    return (
+      Math.abs(b.stopLossPct - wantSl) > 0.01 ||
+      (normalizeLogicId(b.logic).startsWith("martin_9_") &&
+        Math.abs(b.takeProfitPct - wantTp) > 0.01)
+    );
+  });
   if (outdated.length > 0) {
     for (const b of outdated) {
       const nextLogic = normalizeLogicId(b.logic);
       const logic = isLogicId(nextLogic) ? nextLogic : "dubai_bruno_313";
+      const defaults = defaultEditorPayload(logic);
       await prisma.symbolBot.update({
         where: { id: b.id },
         data: {
           logic,
           ...(logic === "dubai_bruno_313"
-            ? { entryCount: DUBAI313_LEVEL_COUNT, entryMultiplier: 1, stopLossPct: DCA1000_DEFAULT_SL_ROI, stopLossEnabled: true }
-            : {}),
+            ? {
+                entryCount: DUBAI313_LEVEL_COUNT,
+                entryMultiplier: 1,
+                stopLossPct: DCA1000_DEFAULT_SL_ROI,
+                takeProfitPct: defaults.takeProfitPct ?? 20,
+                stopLossEnabled: true,
+              }
+            : logic === "custom"
+              ? {}
+              : {
+                  stopLossPct: resolveLiveStopLossPct(logic, b.stopLossPct),
+                  takeProfitPct: resolveLiveTakeProfitPct(logic, b.takeProfitPct),
+                  stopLossEnabled: true,
+                }),
         },
       });
     }

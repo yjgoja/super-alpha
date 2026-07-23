@@ -15,6 +15,8 @@ import {
   isBulkLogic,
   isTableLogic,
   lotsForLogicLevel,
+  resolveLiveStopLossPct,
+  resolveLiveTakeProfitPct,
 } from "./table-logics";
 import { normalizeLogicId } from "./strategies";
 import { resolveStrategyForAccount } from "./strategy-resolve";
@@ -531,27 +533,29 @@ async function runSymbolTableDca(
   const floatingPnl = ourPositions.reduce((s, p) => s + p.profit, 0);
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
 
-  // 익절 ROI: 313차(bulk 표)는 "현재(가장 깊은) 회차"의 표 profit%를 사용.
-  // (표 profit 티어: drop≤130→20%, drop140→25%, drop150→30%)
-  // 그 외 표 로직(마틴/커스텀)은 기존 우선순위 유지(고정 cfg → override → 표 profit).
+  // 익절 ROI: 313차(bulk 표)는 현재 filledLevel 의 표 profit% (회차 티어).
+  // 마틴9 계열은 resolveLiveTakeProfitPct → 고정 20%.
   const levelProfit = levels[basket.filledLevel]?.profit;
   const tpRoiFallback = isBulkLogic(logic)
     ? levelProfit != null && levelProfit > 0
       ? levelProfit
-      : cfg.takeProfitPct > 0
-        ? cfg.takeProfitPct
-        : 20
-    : cfg.takeProfitPct > 0
-      ? cfg.takeProfitPct
-      : resolved.takeProfitPct && resolved.takeProfitPct > 0
-        ? resolved.takeProfitPct
-        : levelProfit ?? 20;
-  const slRoiFallback =
+      : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct)
+    : resolveLiveTakeProfitPct(
+        logic,
+        cfg.takeProfitPct > 0
+          ? cfg.takeProfitPct
+          : resolved.takeProfitPct && resolved.takeProfitPct > 0
+            ? resolved.takeProfitPct
+            : levelProfit ?? 20,
+      );
+  const slRoiFallback = resolveLiveStopLossPct(
+    logic,
     cfg.stopLossPct > 0
       ? cfg.stopLossPct
       : resolved.stopLossPct && resolved.stopLossPct > 0
         ? resolved.stopLossPct
-        : DCA1000_DEFAULT_SL_ROI;
+        : DCA1000_DEFAULT_SL_ROI,
+  );
   const brokerLev = Math.max(
     1,
     cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
@@ -961,8 +965,8 @@ async function runSymbolDca(
     symbol,
     lots: lotsForTp,
     avgPrice: midRef,
-    takeProfitPct: cfg.takeProfitPct > 0 ? cfg.takeProfitPct : 20,
-    stopLossPct: cfg.stopLossPct > 0 ? cfg.stopLossPct : DCA1000_DEFAULT_SL_ROI,
+    takeProfitPct: resolveLiveTakeProfitPct(logic, cfg.takeProfitPct),
+    stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
     brokerLeverage: brokerLev,
     brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
   });
@@ -1347,17 +1351,17 @@ async function runDcaTickInner(accountId: string) {
     directionOverride?: string,
   ): BotCfg => ({
     symbol: b.symbol,
-    logic: b.logic,
+    logic: normalizeLogicId(b.logic),
     direction: directionOverride ?? b.direction,
     dualDirection: (b as { dualDirection?: boolean }).dualDirection ?? false,
     entryCount: b.entryCount,
     entryMultiplier: b.entryMultiplier,
     entryIntervalPct: b.entryIntervalPct,
-    takeProfitPct: b.takeProfitPct,
+    takeProfitPct: resolveLiveTakeProfitPct(b.logic, b.takeProfitPct),
     takeProfitUsd: b.takeProfitUsd ?? 0,
     startLots: b.startLots,
     repeatEnabled: b.repeatEnabled,
-    stopLossPct: b.stopLossPct,
+    stopLossPct: resolveLiveStopLossPct(b.logic, b.stopLossPct),
     stopLossUsd: b.stopLossUsd ?? 0,
     stopLossEnabled: b.stopLossEnabled,
     stopOnSl: b.stopOnSl,
@@ -1435,18 +1439,19 @@ async function runDcaTickInner(accountId: string) {
     }
     // 바스켓만 있고 SymbolBot 행이 없으면 기본 설정으로 관리만
     const c = account.config;
+    const orphanLogic = "dubai_bruno_313";
     bots.push({
       symbol,
-      logic: "dubai_bruno_313",
+      logic: orphanLogic,
       direction,
       entryCount: c?.entryCount ?? 314,
       entryMultiplier: c?.entryMultiplier ?? 1,
       entryIntervalPct: c?.entryIntervalPct ?? 5,
-      takeProfitPct: c?.takeProfitPct ?? 20,
+      takeProfitPct: resolveLiveTakeProfitPct(orphanLogic, c?.takeProfitPct ?? 20),
       takeProfitUsd: 0,
       startLots: c?.startLots || c?.baseLots || 0.01,
       repeatEnabled: false,
-      stopLossPct: c?.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
+      stopLossPct: resolveLiveStopLossPct(orphanLogic, c?.stopLossPct),
       stopLossUsd: 0,
       stopLossEnabled: c?.stopLossEnabled ?? true,
       stopOnSl: c?.stopOnSl ?? true,
@@ -1458,19 +1463,20 @@ async function runDcaTickInner(accountId: string) {
   // 레거시: SymbolBot 없고 config만 있을 때 (마스터 ON)
   if (bots.length === 0 && account.config && masterOn) {
     const c = account.config;
+    const legacyLogic = "dubai_bruno_313";
     bots = [
       {
         symbol: c.symbol || "EURUSD",
-        logic: "dubai_bruno_313",
+        logic: legacyLogic,
         direction: c.direction || "BUY",
         entryCount: c.entryCount,
         entryMultiplier: c.entryMultiplier,
         entryIntervalPct: c.entryIntervalPct,
-        takeProfitPct: c.takeProfitPct,
+        takeProfitPct: resolveLiveTakeProfitPct(legacyLogic, c.takeProfitPct),
         takeProfitUsd: 0,
         startLots: c.startLots || c.baseLots,
         repeatEnabled: c.repeatEnabled,
-        stopLossPct: c.stopLossPct,
+        stopLossPct: resolveLiveStopLossPct(legacyLogic, c.stopLossPct),
         stopLossUsd: 0,
         stopLossEnabled: c.stopLossEnabled,
         stopOnSl: c.stopOnSl,

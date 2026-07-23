@@ -316,3 +316,28 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
     levels: presetToEditorRows(logic, 0.01, 2),
   };
 }
+
+/**
+ * 라이브 손절 ROI% — 공개 프리셋은 표 방어폭 고정값 우선 (DB에 남은 구버전 1250 등 무시).
+ * custom 만 저장값 허용.
+ */
+export function resolveLiveStopLossPct(logic: string, storedPct?: number | null) {
+  const id = normalizeLogicId(logic);
+  const defense = getMartin9Defense(id);
+  if (defense) return defense.stopLossPct;
+  if (id === "dubai_bruno_313") return DCA1000_DEFAULT_SL_ROI;
+  if (storedPct != null && storedPct > 0) return storedPct;
+  return DCA1000_DEFAULT_SL_ROI;
+}
+
+/** 공개 프리셋 익절 ROI% (custom 제외) */
+export function resolveLiveTakeProfitPct(logic: string, storedPct?: number | null) {
+  const id = normalizeLogicId(logic);
+  const defense = getMartin9Defense(id);
+  if (defense) return defense.takeProfitPct;
+  if (id === "dubai_bruno_313") {
+    return storedPct != null && storedPct > 0 ? storedPct : 20;
+  }
+  if (storedPct != null && storedPct > 0) return storedPct;
+  return 20;
+}
