@@ -322,6 +322,12 @@ function loginDigits(s: string) {
   return String(s || "").replace(/\D/g, "");
 }
 
+function isMetaConnectedStatus(connectionStatus: string) {
+  const s = String(connectionStatus || "").toUpperCase();
+  // DISCONNECTED contains substring "CONNECTED" — never use includes()
+  return s === "CONNECTED" || s === "CONNECTED_NEW_ACCOUNT";
+}
+
 function metaAccountScore(a: {
   state: string;
   connectionStatus: string;
@@ -330,8 +336,8 @@ function metaAccountScore(a: {
   const conn = a.connectionStatus.toUpperCase();
   let s = 0;
   if (a.state === "DEPLOYED") s += 10;
-  if (conn.includes("CONNECTED")) s += 20;
-  if (conn.includes("FULL")) s += 5;
+  if (isMetaConnectedStatus(conn)) s += 20;
+  if (conn.includes("FULL") && isMetaConnectedStatus(conn)) s += 5;
   if (a.type?.includes("g2")) s += 1;
   return s;
 }
@@ -464,7 +470,7 @@ export async function waitUntilConnected(accountId: string, timeoutMs = 20000) {
     const res = await api(PROVISIONING, "GET", `/users/current/accounts/${accountId}`);
     const d = (res.data || {}) as Record<string, unknown>;
     const state = String(d.state || "");
-    const connectionStatus = String(d.connectionStatus || "");
+    const connectionStatus = String(d.connectionStatus || "").toUpperCase();
     const code = errCode(res.data);
     const blob = JSON.stringify(res.data || {}).toLowerCase();
 
@@ -482,12 +488,10 @@ export async function waitUntilConnected(accountId: string, timeoutMs = 20000) {
       };
     }
 
-    if (
-      state === "DEPLOYED" &&
-      (connectionStatus === "CONNECTED" ||
-        connectionStatus === "CONNECTED_NEW_ACCOUNT" ||
-        connectionStatus.toUpperCase().includes("CONNECTED"))
-    ) {
+    // 주의: "DISCONNECTED".includes("CONNECTED") === true 이므로 부분문자열 검사 금지
+    const connected = isMetaConnectedStatus(connectionStatus);
+
+    if (state === "DEPLOYED" && connected) {
       return { ok: true as const };
     }
     if (state === "DEPLOY_FAILED") {
@@ -507,7 +511,8 @@ export async function waitUntilConnected(accountId: string, timeoutMs = 20000) {
   return {
     ok: false as const,
     code: "TIMEOUT",
-    message: "서버 연결 시간이 초과되었습니다. 계좌·서버명을 확인한 뒤 다시 시도해주세요.",
+    message:
+      "브로커 클라우드 연결 시간이 초과되었습니다. MT5 비밀번호·서버명을 확인한 뒤 다시 시도해주세요.",
   };
 }
 
@@ -624,6 +629,14 @@ export async function ensureCloudLive(metaApiAccountId: string, waitMs = 45000) 
     // Still try snapshot — sometimes DEPLOYED works before connectionStatus updates
     const snap = await fetchSnapshot(id);
     if (snap.ok) return { ok: true as const, snap };
+    const st = await getMetaAccountStatus(id).catch(() => null);
+    if (st && String(st.connectionStatus).toUpperCase() === "DISCONNECTED") {
+      return {
+        ok: false as const,
+        message:
+          "MT5 클라우드가 브로커에 연결되지 않았습니다. 마이페이지에서 계좌를 다시 연결하거나, MT5 비밀번호(투자자 비번 아님)·서버명을 확인 후 전체 시작을 다시 눌러주세요.",
+      };
+    }
     return { ok: false as const, message: waited.message };
   }
   const snap = await fetchSnapshot(id);
@@ -937,6 +950,8 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
   let info: unknown = null;
   let positionsRaw: unknown[] = [];
   let positionsErr: string | null = null;
+  let lastStatus = 0;
+  let lastBody: unknown = null;
 
   for (const base of bases) {
     const infoRes = await api(
@@ -944,6 +959,8 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
       "GET",
       `/users/current/accounts/${metaApiAccountId}/account-information`,
     );
+    lastStatus = infoRes.status;
+    lastBody = infoRes.data;
     if (infoRes.status < 400) {
       info = infoRes.data;
       const posRes = await api(base, "GET", `/users/current/accounts/${metaApiAccountId}/positions`);
@@ -962,10 +979,28 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
   }
 
   if (!info) {
+    if (lastStatus === 429) {
+      return {
+        ok: false,
+        code: "RATE_LIMIT",
+        message: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+      };
+    }
+    if (lastStatus === 404 || lastStatus === 504 || lastStatus === 502) {
+      return {
+        ok: false,
+        code: "NOT_CONNECTED",
+        message:
+          "MT5 클라우드가 브로커에 연결되지 않았습니다. 마이페이지에서 계좌를 다시 연결한 뒤 전체 시작을 눌러주세요.",
+      };
+    }
     return {
       ok: false,
       code: "UNKNOWN",
-      message: "계좌 정보를 가져오지 못했습니다. 클라우드가 켜져 있는지 확인하세요.",
+      message: toKoreanError(
+        lastBody,
+        "계좌 정보를 가져오지 못했습니다. 클라우드가 켜져 있는지 확인하세요.",
+      ),
     };
   }
 

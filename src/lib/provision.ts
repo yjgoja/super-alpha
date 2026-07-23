@@ -77,10 +77,10 @@ export async function finalizeProvisionIfReady(accountId: string) {
   }
 
   const st = await getMetaAccountStatus(metaId);
+  // DISCONNECTED contains substring "CONNECTED" — never use includes()
+  const conn = String(st.connectionStatus || "").toUpperCase();
   const connected =
-    st.connectionStatus === "CONNECTED" ||
-    st.connectionStatus === "CONNECTED_NEW_ACCOUNT" ||
-    (st.state === "DEPLOYED" && String(st.connectionStatus).toUpperCase().includes("CONNECTED"));
+    conn === "CONNECTED" || conn === "CONNECTED_NEW_ACCOUNT";
 
   if (connected || st.state === "DEPLOYED") {
     // DEPLOYED is enough — fetch snapshot (may work even if status wording differs)
