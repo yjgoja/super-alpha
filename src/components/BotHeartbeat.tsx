@@ -5,11 +5,12 @@ import { publishLive } from "@/lib/live-bus";
 
 /**
  * Single live coordinator while the app is open:
- * - SSE /api/live/stream → DB equity/PnL ~1.5s (feels instant)
+ * - SSE /api/live/stream → DB equity/PnL ~2s (feels instant) — paused when tab hidden
  * - MetaAPI ?live=1&lite=1 every ~12s (positions) + publish to all screens
- * - bot ON → soft tick POST
+ * - bot ON → soft tick POST (same assist path as before; does not replace Render engine)
  *
  * Home/Market subscribe via live-bus — no duplicate MetaAPI polls.
+ * Trading decisions never use the UI snapshot cache (engine uses fresh fetchSnapshot).
  */
 export function BotHeartbeat() {
   useEffect(() => {
@@ -20,8 +21,18 @@ export function BotHeartbeat() {
     let es: EventSource | null = null;
     let pnlPass = 0;
 
+    function closeSse() {
+      try {
+        es?.close();
+      } catch {
+        /* ignore */
+      }
+      es = null;
+    }
+
     function openSse() {
       if (stopped || es) return;
+      if (document.visibilityState === "hidden") return;
       try {
         es = new EventSource("/api/live/stream");
         es.onmessage = (ev) => {
@@ -42,17 +53,11 @@ export function BotHeartbeat() {
           }
         };
         es.onerror = () => {
-          // Browser will retry; if permanently dead, meta poll still works
-          try {
-            es?.close();
-          } catch {
-            /* ignore */
-          }
-          es = null;
-          if (!stopped) {
+          closeSse();
+          if (!stopped && document.visibilityState === "visible") {
             setTimeout(() => {
-              if (!stopped && !es) openSse();
-            }, 3000);
+              if (!stopped && !es && document.visibilityState === "visible") openSse();
+            }, 4000);
           }
         };
       } catch {
@@ -64,7 +69,6 @@ export function BotHeartbeat() {
       if (stopped || busy || document.visibilityState === "hidden") return;
       busy = true;
       try {
-        // First pass: cheap DB link check if SSE has not established yet
         if (!linked) {
           const res = await fetch("/api/stats?summary=1", { cache: "no-store" });
           if (!res.ok) return;
@@ -92,6 +96,7 @@ export function BotHeartbeat() {
           }
         }
 
+        // Soft assist only — Render tick-direct remains the primary engine
         if (botOn) {
           await fetch("/api/stats", { method: "POST" });
         }
@@ -107,8 +112,11 @@ export function BotHeartbeat() {
     const id = setInterval(metaTick, 12_000);
     const onVis = () => {
       if (document.visibilityState === "visible") {
-        if (!es) openSse();
+        openSse();
         metaTick();
+      } else {
+        // Stop DB SSE while backgrounded — protects Postgres under many idle tabs
+        closeSse();
       }
     };
     document.addEventListener("visibilitychange", onVis);
@@ -117,12 +125,7 @@ export function BotHeartbeat() {
       stopped = true;
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVis);
-      try {
-        es?.close();
-      } catch {
-        /* ignore */
-      }
-      es = null;
+      closeSse();
     };
   }, []);
 

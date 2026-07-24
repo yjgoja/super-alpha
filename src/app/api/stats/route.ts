@@ -3,7 +3,7 @@ import { requireApprovedUser, requireUser } from "@/lib/access";
 import { dayKeySeoul } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { ensureCloudLive, fetchSnapshot, syncMt5Account } from "@/lib/metaapi";
+import { ensureCloudLive, fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
 import { runDcaTick } from "@/lib/meta-engine";
 import { syncTodayPnlFromMt5Deals } from "@/lib/mt5-pnl-sync";
 import { redactFillNote } from "@/lib/strategy-public";
@@ -77,7 +77,7 @@ export async function POST() {
   });
 }
 
-type LivePos = Extract<Awaited<ReturnType<typeof fetchSnapshot>>, { ok: true }>["positions"];
+type LivePos = Extract<Awaited<ReturnType<typeof fetchSnapshotCached>>, { ok: true }>["positions"];
 
 async function pullLiveSnapshot(opts: {
   accountId: string;
@@ -100,7 +100,8 @@ async function pullLiveSnapshot(opts: {
   let syncError: string | null = null;
   let liveDailyPnl: number | null = null;
 
-  let snap = await fetchSnapshot(metaId);
+  // UI path only — never feed the DCA engine through this cached read
+  let snap = await fetchSnapshotCached(metaId);
   if (!snap.ok) {
     const live = await ensureCloudLive(metaId, 45000);
     if (live.ok && live.snap) {
@@ -108,7 +109,7 @@ async function pullLiveSnapshot(opts: {
     } else if (!live.ok) {
       syncError = live.message || snap.message;
     } else {
-      snap = await fetchSnapshot(metaId);
+      snap = await fetchSnapshotCached(metaId);
     }
   }
 

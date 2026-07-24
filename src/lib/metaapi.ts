@@ -1047,12 +1047,29 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
   });
 }
 
-/** Coalesce concurrent MetaAPI reads + short TTL (overlapping UI polls). */
-const SNAP_TTL_MS = 2500;
+/** UI-only snapshot cache. Trading/engine must use fetchSnapshot (always fresh). */
+const DEFAULT_UI_SNAP_TTL_MS = 2500;
 const snapCache = new Map<
   string,
   { at: number; value?: MetaSnap | MetaErr; inflight?: Promise<MetaSnap | MetaErr> }
 >();
+
+function uiSnapTtlMs() {
+  const raw = process.env.LIVE_SNAPSHOT_CACHE_MS;
+  if (raw == null || raw === "") return DEFAULT_UI_SNAP_TTL_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_UI_SNAP_TTL_MS;
+  return n;
+}
+
+/** Drop cached UI snapshots after any trade so the next screen refresh is fresh. */
+export function invalidateSnapshotCache(metaApiAccountId?: string) {
+  if (!metaApiAccountId) {
+    snapCache.clear();
+    return;
+  }
+  snapCache.delete(String(metaApiAccountId));
+}
 
 async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
   const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
@@ -1135,15 +1152,31 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
   };
 }
 
+/**
+ * Always fresh — used by DCA engine, close, provision, cron.
+ * Never serve stale positions to trading decisions.
+ */
 export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
+  return fetchSnapshotUncached(String(metaApiAccountId));
+}
+
+/**
+ * UI live polls only. Short TTL + inflight coalesce to cut MetaAPI load.
+ * Disabled when LIVE_SNAPSHOT_CACHE_MS=0. Errors are never cached.
+ */
+export async function fetchSnapshotCached(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
   const id = String(metaApiAccountId);
+  const ttl = uiSnapTtlMs();
+  if (ttl <= 0) return fetchSnapshotUncached(id);
+
   const hit = snapCache.get(id);
-  if (hit?.value && Date.now() - hit.at < SNAP_TTL_MS) return hit.value;
+  if (hit?.value?.ok && Date.now() - hit.at < ttl) return hit.value;
   if (hit?.inflight) return hit.inflight;
 
   const inflight = fetchSnapshotUncached(id)
     .then((value) => {
-      snapCache.set(id, { at: Date.now(), value });
+      if (value.ok) snapCache.set(id, { at: Date.now(), value });
+      else snapCache.delete(id);
       return value;
     })
     .catch((err) => {
@@ -1288,6 +1321,7 @@ export async function placeMarketOrder(input: {
     volume: input.lots,
     comment: input.comment || "SuperAlpha",
   });
+  invalidateSnapshotCache(input.metaApiAccountId);
   if (res.status >= 400) {
     return {
       ok: false as const,
@@ -1305,6 +1339,7 @@ export async function closePosition(metaApiAccountId: string, positionId: string
     actionType: "POSITION_CLOSE_ID",
     positionId,
   });
+  invalidateSnapshotCache(metaApiAccountId);
   if (res.status >= 400) {
     return { ok: false as const, message: toKoreanError(res.data, "청산에 실패했습니다.") };
   }
@@ -1330,6 +1365,7 @@ export async function closePositionsBySymbol(metaApiAccountId: string, symbol: s
     actionType: "POSITIONS_CLOSE_SYMBOL",
     symbol: brokerSym,
   });
+  invalidateSnapshotCache(metaApiAccountId);
   // 브로커 심볼명이 포지션과 다를 수 있음(XAUUSD vs GOLD) — 포지션에 찍힌 이름으로도 시도
   const posSymbols = [...new Set(targets.map((t) => t.symbol).filter(Boolean))];
   for (const ps of posSymbols) {

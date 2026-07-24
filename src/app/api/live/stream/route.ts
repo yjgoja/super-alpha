@@ -9,13 +9,20 @@ export const dynamic = "force-dynamic";
 /** Keep SSE open on Vercel Fluid; clients reconnect after this. */
 export const maxDuration = 60;
 
-const TICK_MS = 1500;
+const TICK_MS = 2000;
 
 /**
  * Near-realtime equity/PnL from DB (engine + MetaAPI syncs write here).
  * Does not call MetaAPI — pair with BotHeartbeat's occasional ?live=1 for positions.
  */
 export async function GET(req: NextRequest) {
+  if (process.env.LIVE_SSE_ENABLED === "0") {
+    return NextResponse.json(
+      { error: "Live SSE disabled (LIVE_SSE_ENABLED=0)" },
+      { status: 503 },
+    );
+  }
+
   const gate = await requireUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
