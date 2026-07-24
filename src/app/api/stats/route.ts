@@ -459,7 +459,11 @@ export async function GET(req: NextRequest) {
       server: account.server,
       mode: account.mode,
       status: account.status,
-      statusMessage: account.statusMessage,
+      statusMessage: publicBotStatusMessage({
+        botEnabled: account.botEnabled,
+        status: account.status,
+        statusMessage: account.statusMessage,
+      }),
       metaApiAccountId: account.metaApiAccountId,
       lastSyncAt: account.lastSyncAt,
       syncAgeSec,
