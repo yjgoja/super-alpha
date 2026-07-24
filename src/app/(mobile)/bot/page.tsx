@@ -62,7 +62,7 @@ export default function BotPage() {
   const load = useCallback(async () => {
     const [botsRes, statsRes, meRes] = await Promise.all([
       fetch("/api/symbol-bots"),
-      fetch("/api/stats"),
+      fetch("/api/stats?summary=1", { cache: "no-store" }),
       fetch("/api/me"),
     ]);
     if (botsRes.status === 401 || statsRes.status === 401 || meRes.status === 401) {

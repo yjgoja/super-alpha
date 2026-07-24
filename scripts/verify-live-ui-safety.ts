@@ -37,6 +37,7 @@ const closeRoute = read("src/app/api/positions/close/route.ts");
 const cron = read("src/app/api/cron/tick/route.ts");
 const heartbeat = read("src/components/BotHeartbeat.tsx");
 const stream = read("src/app/api/live/stream/route.ts");
+const adminUsers = read("src/app/api/admin/users/route.ts");
 const home = read("src/app/(mobile)/home/page.tsx");
 const market = read("src/app/(mobile)/market/page.tsx");
 
@@ -59,12 +60,21 @@ assertIncludes(cron, "runAllBots", "cron still runs runAllBots");
 
 // UI stats live path uses cache helper only for MetaAPI reads
 assertIncludes(stats, "fetchSnapshotCached", "stats live uses fetchSnapshotCached");
-assertIncludes(stats, "UI path only", "stats documents UI-only cache");
-assertNotIncludes(
-  stats.replace(/import[\s\S]*?from "@\/lib\/metaapi";/, ""),
-  "fetchSnapshot(",
-  "stats route body must not call fresh fetchSnapshot for live UI",
-);
+assertNotIncludes(stats, "ensureCloudLive", "stats UI must not cold-wake MetaAPI");
+assertIncludes(stats, "never wake MetaAPI cloud here", "stats documents no UI cloud wake");
+assertIncludes(heartbeat, "void fetch(\"/api/stats\", { method: \"POST\" })", "heartbeat does not await soft tick");
+// Admin list GET must not call finalizeAllProvisioning (only check_provision PATCH)
+{
+  const getBlock = adminUsers.slice(
+    adminUsers.indexOf("export async function GET"),
+    adminUsers.indexOf("export async function PATCH"),
+  );
+  assertNotIncludes(
+    getBlock,
+    "finalizeAllProvisioning",
+    "admin GET must not finalize provisioning on every poll",
+  );
+}
 
 // Trades invalidate cache
 assertIncludes(

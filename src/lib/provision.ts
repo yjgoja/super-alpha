@@ -116,10 +116,9 @@ export async function finalizeAllProvisioning() {
     where: { status: "provisioning" },
     select: { id: true },
   });
-  const out = [];
-  for (const a of list) {
-    out.push({ id: a.id, ...(await finalizeProvisionIfReady(a.id)) });
-  }
+  const settled = await Promise.all(
+    list.map(async (a) => ({ id: a.id, ...(await finalizeProvisionIfReady(a.id)) })),
+  );
   await prisma.brokerAccount.updateMany({
     where: {
       status: "provisioning",
@@ -131,7 +130,7 @@ export async function finalizeAllProvisioning() {
       statusMessage: "연동 시간이 초과되었습니다. 다시 승인해주세요.",
     },
   });
-  return out;
+  return settled;
 }
 
 /**

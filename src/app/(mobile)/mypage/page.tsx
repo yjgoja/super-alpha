@@ -16,7 +16,10 @@ export default function MyPage() {
 
   useEffect(() => {
     (async () => {
-      const [meRes, pnlRes] = await Promise.all([fetch("/api/me"), fetch("/api/pnl")]);
+      const [meRes, pnlRes] = await Promise.all([
+        fetch("/api/me"),
+        fetch("/api/pnl?summary=1", { cache: "no-store" }),
+      ]);
       if (meRes.status === 401) {
         window.location.href = "/login";
         return;

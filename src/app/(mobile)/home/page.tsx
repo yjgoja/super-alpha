@@ -112,10 +112,14 @@ export default function HomePage() {
       }
     }
 
-    /** One-shot chart/history sync from MetaAPI (background) */
+    /** One-shot chart/history sync from MetaAPI (background, ≤1 / 15min / tab) */
     async function refreshPnlOnce() {
       if (stopped || !linkedNow) return;
       try {
+        const key = "sa_pnl_refresh_at";
+        const prev = Number(sessionStorage.getItem(key) || 0);
+        if (Date.now() - prev < 15 * 60_000) return;
+        sessionStorage.setItem(key, String(Date.now()));
         const res = await fetch("/api/pnl?refresh=1", { cache: "no-store" });
         if (!res.ok) return;
         const pnl = await res.json().catch(() => ({}));
@@ -126,11 +130,10 @@ export default function HomePage() {
     }
 
     (async () => {
-      await loadHero();
+      // Hero + chart in parallel for faster first paint
+      await Promise.all([loadHero(), loadPnlFast()]);
       if (stopped) return;
-      await loadPnlFast();
-      if (stopped) return;
-      if (linkedNow) refreshPnlOnce();
+      if (linkedNow) void refreshPnlOnce();
     })();
 
     // Live equity/PnL from BotHeartbeat (SSE + single MetaAPI poller)

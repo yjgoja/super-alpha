@@ -49,9 +49,14 @@ export async function GET(req: NextRequest) {
       req.signal.addEventListener("abort", onAbort);
 
       send({ type: "hello", at: new Date().toISOString() });
+      let lastFingerprint = "";
+      let tick = 0;
 
       while (!closed && !req.signal.aborted) {
         try {
+          tick += 1;
+          // Baskets every ~3rd tick — equity/scalars every tick
+          const includeBaskets = tick === 1 || tick % 3 === 0;
           const account = await prisma.brokerAccount.findFirst({
             where: { userId },
             orderBy: { createdAt: "desc" },
@@ -71,16 +76,20 @@ export async function GET(req: NextRequest) {
               tpCount: true,
               slCount: true,
               cycleCount: true,
-              baskets: {
-                where: { status: "open" },
-                select: {
-                  id: true,
-                  symbol: true,
-                  direction: true,
-                  status: true,
-                  unrealizedPnl: true,
-                },
-              },
+              ...(includeBaskets
+                ? {
+                    baskets: {
+                      where: { status: "open" as const },
+                      select: {
+                        id: true,
+                        symbol: true,
+                        direction: true,
+                        status: true,
+                        unrealizedPnl: true,
+                      },
+                    },
+                  }
+                : {}),
               dailyStats: {
                 where: { date: dayKeySeoul() },
                 take: 1,
@@ -90,7 +99,17 @@ export async function GET(req: NextRequest) {
           });
 
           if (!account) {
-            send({ type: "live", source: "sse", account: null, at: new Date().toISOString() });
+            const payload = {
+              type: "live",
+              source: "sse",
+              account: null,
+              at: new Date().toISOString(),
+            };
+            const fp = JSON.stringify(payload.account);
+            if (fp !== lastFingerprint) {
+              lastFingerprint = fp;
+              send(payload);
+            }
           } else {
             const start =
               account.startingBalance > 0 ? account.startingBalance : account.balance || 1;
@@ -98,34 +117,44 @@ export async function GET(req: NextRequest) {
             const syncAgeSec = account.lastSyncAt
               ? Math.max(0, Math.floor((Date.now() - account.lastSyncAt.getTime()) / 1000))
               : null;
+            const baskets =
+              "baskets" in account
+                ? (account as { baskets?: unknown[] }).baskets
+                : undefined;
 
-            send({
-              type: "live",
-              source: "sse",
-              at: new Date().toISOString(),
-              account: {
-                id: account.id,
-                login: account.login,
-                server: account.server,
-                mode: account.mode,
-                status: account.status,
-                statusMessage: account.statusMessage,
-                metaApiAccountId: account.metaApiAccountId,
-                lastSyncAt: account.lastSyncAt,
-                syncAgeSec,
-                botEnabled: account.botEnabled,
-                balance: account.balance,
-                equity: account.equity,
-                startingBalance: account.startingBalance,
-                tpCount: account.tpCount,
-                slCount: account.slCount,
-                cycleCount: account.cycleCount,
-                totalReturnPct: ((account.equity - start) / start) * 100,
-                dailyReturnPct: today?.returnPct ?? 0,
-                dailyPnl: today?.pnl ?? 0,
-                baskets: account.baskets,
-              },
-            });
+            const accountPayload = {
+              id: account.id,
+              login: account.login,
+              server: account.server,
+              mode: account.mode,
+              status: account.status,
+              statusMessage: account.statusMessage,
+              metaApiAccountId: account.metaApiAccountId,
+              lastSyncAt: account.lastSyncAt,
+              syncAgeSec,
+              botEnabled: account.botEnabled,
+              balance: account.balance,
+              equity: account.equity,
+              startingBalance: account.startingBalance,
+              tpCount: account.tpCount,
+              slCount: account.slCount,
+              cycleCount: account.cycleCount,
+              totalReturnPct: ((account.equity - start) / start) * 100,
+              dailyReturnPct: today?.returnPct ?? 0,
+              dailyPnl: today?.pnl ?? 0,
+              ...(baskets ? { baskets } : {}),
+            };
+            // Skip identical equity frames to cut client work
+            const fp = `${account.equity}|${account.balance}|${today?.pnl ?? 0}|${account.status}|${account.botEnabled}|${baskets ? baskets.length : "-"}`;
+            if (fp !== lastFingerprint) {
+              lastFingerprint = fp;
+              send({
+                type: "live",
+                source: "sse",
+                at: new Date().toISOString(),
+                account: accountPayload,
+              });
+            }
           }
         } catch (e) {
           send({

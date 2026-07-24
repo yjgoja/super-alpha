@@ -91,7 +91,7 @@ export default function DashboardPage() {
   const [msg, setMsg] = useState("");
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/stats");
+    const res = await fetch("/api/stats?full=1", { cache: "no-store" });
     if (res.status === 401) {
       window.location.href = "/login";
       return;
@@ -107,13 +107,17 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    load();
-    const tick = setInterval(async () => {
-      // paper engine only when not live
-      await fetch("/api/stats", { method: "POST" }).catch(() => null);
-      await load();
-    }, 5000);
-    return () => clearInterval(tick);
+    const boot = window.setTimeout(() => {
+      void load();
+    }, 0);
+    // DB-only refresh — never auto POST tick (Render engine owns trading).
+    const tick = setInterval(() => {
+      void load();
+    }, 20_000);
+    return () => {
+      clearTimeout(boot);
+      clearInterval(tick);
+    };
   }, [load]);
 
   async function toggleBot() {
