@@ -2525,8 +2525,9 @@ async function runDcaTickInner(accountId: string) {
     if (/시세를 가져오지|no_price|trade context busy|요청 한도|too many|rate limit/i.test(s)) {
       return false;
     }
-    // Duplicate entry / already in market while open basket is fine
-    if (/already|position|no money|not enough money|margin/i.test(s) && liveBaskets.length > 0) {
+    // Generic broker reject while already in market / managing — UI noise
+    if (/주문에 실패/i.test(n) && liveBaskets.length > 0) return false;
+    if (/already|position|no money|not enough money|market.?closed|trade.?disabled|off quotes/i.test(s)) {
       return false;
     }
     return true;
