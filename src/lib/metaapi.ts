@@ -1151,15 +1151,46 @@ const accountInfoCache = new Map<
 >();
 /** Global pause after 429 — stop REST burn until retry time. */
 let metaApiRateLimitUntil = 0;
+/** Separate pause when /trade 6h CPU credits are exhausted (retries only worsen it). */
+let metaApiTradeCreditUntil = 0;
 
 export function metaApiRateLimited(): boolean {
   return Date.now() < metaApiRateLimitUntil;
+}
+
+export function metaApiTradeCreditBlocked(): boolean {
+  return Date.now() < metaApiTradeCreditUntil;
 }
 
 export function noteMetaApiRateLimit(retryAfterMs = 60_000) {
   // Cap pause so trading/stream recovery is not blocked for many minutes.
   const until = Date.now() + Math.max(10_000, Math.min(retryAfterMs, 90_000));
   if (until > metaApiRateLimitUntil) metaApiRateLimitUntil = until;
+}
+
+function isTradeCreditExhausted(data: unknown): boolean {
+  const raw =
+    typeof data === "string"
+      ? data
+      : data && typeof data === "object"
+        ? JSON.stringify(data)
+        : "";
+  return /4320000 cpu credits|trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(
+    raw,
+  );
+}
+
+function noteTradeCreditExhausted() {
+  const pauseMs = Math.max(
+    60_000,
+    Math.min(Number(process.env.METAAPI_TRADE_CREDIT_PAUSE_MS || 900_000), 1_800_000),
+  );
+  const until = Date.now() + pauseMs;
+  if (until > metaApiTradeCreditUntil) metaApiTradeCreditUntil = until;
+  noteMetaApiRateLimit(90_000);
+  console.warn(
+    `[metaapi] trade CPU credits exhausted — pause orders ${Math.round(pauseMs / 1000)}s`,
+  );
 }
 
 function accountInfoTtlMs() {
@@ -1729,22 +1760,45 @@ export async function placeMarketOrder(input: {
     body.takeProfit = input.takeProfit;
   }
 
-  // Trades must not die on 429 — cheap (10 credits) and retried briefly.
+  if (metaApiTradeCreditBlocked()) {
+    return {
+      ok: false as const,
+      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
+      brokerSymbol: brokerSym,
+    };
+  }
+
+  // Soft 429: brief retry. Hard 6h trade-credit exhaustion: pause, no retry storm.
   let res = await api(
     base,
     "POST",
     `/users/current/accounts/${input.metaApiAccountId}/trade`,
     body,
   );
-  for (let attempt = 0; attempt < 3 && (res.status === 429 || isRateLimitError(res.data)); attempt++) {
-    noteMetaApiRateLimit(20_000);
-    await sleep(1500 * (attempt + 1));
-    res = await api(
-      base,
-      "POST",
-      `/users/current/accounts/${input.metaApiAccountId}/trade`,
-      body,
-    );
+  if (res.status === 429 || isRateLimitError(res.data)) {
+    if (isTradeCreditExhausted(res.data)) {
+      noteTradeCreditExhausted();
+    } else {
+      for (
+        let attempt = 0;
+        attempt < 2 && (res.status === 429 || isRateLimitError(res.data));
+        attempt++
+      ) {
+        if (isTradeCreditExhausted(res.data)) {
+          noteTradeCreditExhausted();
+          break;
+        }
+        noteMetaApiRateLimit(20_000);
+        await sleep(1500 * (attempt + 1));
+        res = await api(
+          base,
+          "POST",
+          `/users/current/accounts/${input.metaApiAccountId}/trade`,
+          body,
+        );
+      }
+      if (isTradeCreditExhausted(res.data)) noteTradeCreditExhausted();
+    }
   }
 
   invalidateSnapshotCache(input.metaApiAccountId);
@@ -1845,8 +1899,22 @@ export async function modifyPositionProtection(input: {
   if (body.stopLoss == null && body.takeProfit == null) {
     return { ok: false as const, message: "stopLoss/takeProfit 값이 없습니다." };
   }
+  if (metaApiTradeCreditBlocked()) {
+    return {
+      ok: false as const,
+      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
+    };
+  }
   const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
   if (res.status === 429 || isRateLimitError(res.data)) {
+    if (isTradeCreditExhausted(res.data)) {
+      noteTradeCreditExhausted();
+      return {
+        ok: false as const,
+        message: toKoreanError(res.data, "포지션 TP/SL 수정에 실패했습니다."),
+        data: res.data,
+      };
+    }
     noteMetaApiRateLimit(20_000);
     await sleep(2000);
     const retry = await api(
@@ -1856,6 +1924,7 @@ export async function modifyPositionProtection(input: {
       body,
     );
     if (retry.status < 400) return { ok: true as const, data: retry.data };
+    if (isTradeCreditExhausted(retry.data)) noteTradeCreditExhausted();
     return {
       ok: false as const,
       message: toKoreanError(retry.data, "포지션 TP/SL 수정에 실패했습니다."),
