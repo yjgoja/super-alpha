@@ -48,6 +48,16 @@ function clientApiBases(preferredRegion?: string | null) {
 
 const metaRegionCache = new Map<string, string>();
 
+/** Prime cache from DB metaApiRegion — avoids provisioning round-trip on every trade. */
+export function primeMetaRegionCache(
+  metaApiAccountId: string,
+  region: string | null | undefined,
+) {
+  const r = (region || "").trim().toLowerCase();
+  if (!metaApiAccountId || !r) return;
+  metaRegionCache.set(String(metaApiAccountId), r);
+}
+
 async function resolveAccountRegion(metaApiAccountId: string): Promise<string | null> {
   const id = String(metaApiAccountId);
   const cached = metaRegionCache.get(id);

@@ -35,6 +35,7 @@ import {
   symbolsMatch,
   getSymbolTradeSpec,
   fetchHistoryDeals,
+  primeMetaRegionCache,
 } from "./metaapi";
 import { prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
@@ -2148,6 +2149,11 @@ async function runDcaTickInner(accountId: string) {
     return { skipped: true as const };
   }
 
+  // Prefer DB region for trade/snap routing (majority of accounts are new-york)
+  if (account.metaApiRegion) {
+    primeMetaRegionCache(account.metaApiAccountId, account.metaApiRegion);
+  }
+
   const masterOn = !!account.botEnabled;
   const hasOpenBaskets = account.baskets.length > 0;
   // 전체 OFF + 열린 포지션 없음 → 틱 스킵
@@ -2219,14 +2225,21 @@ async function runDcaTickInner(accountId: string) {
     }
   }
   if (!snap.ok) {
+    const cold = isCloudColdError(snap.message || "");
+    const transientNet =
+      /네트워크|network|timeout|econnreset|fetch failed|unstable/i.test(
+        snap.message || "",
+      );
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: {
-        statusMessage: snap.message,
-        // Keep botEnabled; only mark cloud cold — next tick will redeploy.
-        ...(isCloudColdError(snap.message || "")
-          ? { status: "undeployed" }
-          : {}),
+        // Never turn bot OFF on snap fail. Transient net → soft message, keep connected.
+        statusMessage: transientNet
+          ? "일시 네트워크 · 재시도 중 (봇 유지)"
+          : snap.message,
+        ...(cold && !transientNet ? { status: "undeployed" } : {}),
+        // Explicitly keep bot running when master was on
+        ...(masterOn ? { botEnabled: true, botStoppedAt: null } : {}),
       },
     });
     return { ok: false as const, error: snap.message };
