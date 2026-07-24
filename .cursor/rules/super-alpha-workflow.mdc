@@ -1,0 +1,41 @@
+---
+description: Super Alpha trading engine — plan, risk, cost, then code + mandatory QA
+alwaysApply: true
+---
+
+# Super Alpha workflow
+
+This is a live MetaAPI / MT5 auto-trading system. Correctness beats speed.
+
+## Mandatory order
+
+1. **Cases → variables → risks → cost → then code** (never reverse).
+2. Do not blindly add global sub-second polling for all accounts.
+3. Prefer broker-side TP/SL (execution) + control-plane for open baskets only.
+
+## Before coding
+
+State briefly:
+- Goal (one)
+- Cases / edge cases
+- Variables involved
+- Risks (esp. live positions, force-close, naked TP/SL)
+- Cost impact (MetaAPI hosting / API)
+- Acceptance checks (commands or live checks)
+
+## After coding (QA — required)
+
+Run what applies:
+- Targeted verify scripts under `scripts/_verify-*.ts` when touching protect/DCA/engine
+- Lint diagnostics on edited TS/TSX
+- Do not claim done if open baskets can be naked or force-closed incorrectly
+
+## Live account safety
+
+- Never force-close baskets on API lag / partial orphan alone.
+- Do not change logic mid-open-basket unless explicitly requested.
+- yjgoja / production logins: keep lots small unless asked.
+
+## Scope
+
+One job per request. If the user asks for “everything”, split into ordered steps and finish the first with QA before expanding.

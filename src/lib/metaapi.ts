@@ -21,6 +21,12 @@ function clientBase(region = REGION) {
   );
 }
 
+/** Trade/close/modify must hit the account's MetaAPI region (snap already does). */
+async function tradeApiBase(metaApiAccountId: string) {
+  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
+  return clientBase(region || REGION);
+}
+
 /** Prefer account region, then common MetaAPI regions (this project uses london g2). */
 function clientApiBases(preferredRegion?: string | null) {
   const regions = [
@@ -1359,7 +1365,8 @@ export async function placeMarketOrder(input: {
   stopLoss?: number | null;
   takeProfit?: number | null;
 }) {
-  const base = clientBase();
+  const t0 = Date.now();
+  const base = await tradeApiBase(input.metaApiAccountId);
   const brokerSym = await resolveBrokerSymbol(input.metaApiAccountId, input.symbol);
   const actionType = input.direction === "BUY" ? "ORDER_TYPE_BUY" : "ORDER_TYPE_SELL";
   const body: Record<string, unknown> = {
@@ -1376,6 +1383,12 @@ export async function placeMarketOrder(input: {
   }
   const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
   invalidateSnapshotCache(input.metaApiAccountId);
+  const ms = Date.now() - t0;
+  if (ms >= 800) {
+    console.warn(
+      `[metaapi] slow placeMarketOrder ${ms}ms regionHost=${base.includes("new-york") ? "ny" : base.includes("london") ? "lon" : "other"} ${brokerSym}`,
+    );
+  }
   if (res.status >= 400) {
     // 동봉 TP/SL 거절 시 나체로라도 진입 재시도하지 않음 — 호출측이 보호 없이 재시도 판단
     return {
@@ -1431,7 +1444,7 @@ export async function getSymbolTradeSpec(metaApiAccountId: string, symbol: strin
 }
 
 export async function closePosition(metaApiAccountId: string, positionId: string) {
-  const base = clientBase();
+  const base = await tradeApiBase(metaApiAccountId);
   const res = await api(base, "POST", `/users/current/accounts/${metaApiAccountId}/trade`, {
     actionType: "POSITION_CLOSE_ID",
     positionId,
@@ -1453,7 +1466,7 @@ export async function modifyPositionProtection(input: {
   stopLoss?: number | null;
   takeProfit?: number | null;
 }) {
-  const base = clientBase();
+  const base = await tradeApiBase(input.metaApiAccountId);
   const body: Record<string, unknown> = {
     actionType: "POSITION_MODIFY",
     positionId: input.positionId,
@@ -1491,7 +1504,7 @@ export async function closePositionsBySymbol(metaApiAccountId: string, symbol: s
   }
 
   const brokerSym = await resolveBrokerSymbol(metaApiAccountId, symbol);
-  const base = clientBase();
+  const base = await tradeApiBase(metaApiAccountId);
   // 한 심볼 일괄 청산 — 수백 포지션을 하나씩 닫으면 틱 타임아웃/부분청산 위험
   const bulk = await api(base, "POST", `/users/current/accounts/${metaApiAccountId}/trade`, {
     actionType: "POSITIONS_CLOSE_SYMBOL",
@@ -1613,7 +1626,7 @@ export async function closeAllPositions(metaApiAccountId: string) {
     return { ok: true as const, closed: 0, remaining: 0, symbols: 0 };
   }
 
-  const base = clientBase();
+  const base = await tradeApiBase(metaApiAccountId);
   const closeBySymbols = async (symbols: string[]) => {
     await Promise.all(
       symbols.map((symbol) =>

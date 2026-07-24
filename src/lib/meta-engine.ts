@@ -192,7 +192,7 @@ async function syncBrokerBasketProtection(opts: {
   let synced = 0;
   let drift = false;
   let failed = 0;
-  for (const p of legs) {
+  const needModify = legs.filter((p) => {
     const tpOk = brokerProtectionMatches({
       current: p.takeProfit,
       target: targets.takeProfit,
@@ -203,14 +203,22 @@ async function syncBrokerBasketProtection(opts: {
       target: targets.stopLoss,
       point: targets.point,
     });
-    if (tpOk && slOk) continue;
-    drift = true;
-    const mod = await modifyPositionProtection({
-      metaApiAccountId: opts.metaId,
-      positionId: String(p.id),
-      takeProfit: targets.takeProfit,
-      stopLoss: targets.stopLoss,
-    });
+    return !(tpOk && slOk);
+  });
+  if (needModify.length > 0) drift = true;
+  // Same basket TP/SL targets — parallel POSITION_MODIFY cuts multi-leg latency
+  const results = await Promise.all(
+    needModify.map(async (p) => {
+      const mod = await modifyPositionProtection({
+        metaApiAccountId: opts.metaId,
+        positionId: String(p.id),
+        takeProfit: targets.takeProfit,
+        stopLoss: targets.stopLoss,
+      });
+      return { p, mod };
+    }),
+  );
+  for (const { p, mod } of results) {
     if (mod.ok) {
       synced += 1;
       p.takeProfit = targets.takeProfit ?? undefined;
@@ -829,13 +837,53 @@ async function closeBasketTp(opts: {
 
   // 같은 틱에서 시작 포지션 재진입 (다음 틱 의존 시 엔진 공백으로 재시작 누락 가능)
   const lots = Math.max(0.01, Math.round(reentryLots * 100) / 100);
-  const order = await placeMarketOrder({
+  const fillPrice = mt5EntryQuote(direction, bid, ask);
+  const reentryTpPct = tpRoi > 0 ? tpRoi : 20;
+  const reentrySlPct =
+    stopLossPct != null && stopLossPct > 0 ? stopLossPct : DCA1000_DEFAULT_SL_ROI;
+  const reentryLive = liveBasketTpSlUsd({
+    symbol,
+    lots,
+    avgPrice: fillPrice,
+    takeProfitPct: reentryTpPct,
+    stopLossPct: reentrySlPct,
+    brokerLeverage: brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
+    brokerMarginSum: null,
+  });
+  let stopsLevelPoints = 0;
+  try {
+    stopsLevelPoints = (await getSymbolTradeSpec(metaId, symbol)).stopsLevel;
+  } catch {
+    /* ignore */
+  }
+  const reentryPx = previewProtectPrices({
+    symbol,
+    direction,
+    avgPrice: fillPrice,
+    lots,
+    takeProfitUsd: reentryLive.takeProfitUsd,
+    stopLossUsd: stopLossEnabled ? reentryLive.stopLossUsd : 0,
+    openPrices: [fillPrice],
+    stopsLevelPoints,
+  });
+  let order = await placeMarketOrder({
     metaApiAccountId: metaId,
     symbol,
     direction,
     lots,
     comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
+    takeProfit: reentryPx.takeProfit,
+    stopLoss: reentryPx.stopLoss,
   });
+  if (!order.ok && (reentryPx.takeProfit != null || reentryPx.stopLoss != null)) {
+    order = await placeMarketOrder({
+      metaApiAccountId: metaId,
+      symbol,
+      direction,
+      lots,
+      comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
+    });
+  }
   if (!order.ok) {
     return {
       closed: true as const,
@@ -843,7 +891,6 @@ async function closeBasketTp(opts: {
       error: order.message || "익절 후 재진입 주문 실패",
     };
   }
-  const fillPrice = mt5EntryQuote(direction, bid, ask);
   await prisma.basket.create({
     data: {
       accountId,
@@ -864,16 +911,15 @@ async function closeBasketTp(opts: {
       price: fillPrice,
       kind: "ENTRY",
       level: 0,
-      note: `${logic}|reentry_after_tp`,
+      note: `${logic}|reentry_after_tp|brokerTP=${reentryPx.takeProfit ?? "-"}`,
     },
   });
   await refreshAndProtectBasket({
     metaId,
     symbol,
     direction,
-    takeProfitPct: tpRoi > 0 ? tpRoi : 20,
-    stopLossPct:
-      stopLossPct != null && stopLossPct > 0 ? stopLossPct : DCA1000_DEFAULT_SL_ROI,
+    takeProfitPct: reentryTpPct,
+    stopLossPct: reentrySlPct,
     stopLossEnabled,
     brokerLeverage,
   });
