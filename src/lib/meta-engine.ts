@@ -2260,14 +2260,13 @@ async function runDcaTickInner(accountId: string) {
       /네트워크|network|timeout|econnreset|fetch failed|unstable/i.test(
         snap.message || "",
       );
+    // Never show 429 / network / retry copy to members — bot + broker TP/SL stay on.
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: {
-        statusMessage: rateLimited
-          ? "MetaAPI 요청 한도 · 대기 재시도 (봇·브로커TP/SL 유지)"
-          : transientNet
-            ? "일시 네트워크 · 재시도 중 (봇 유지)"
-            : snap.message,
+        statusMessage: masterOn
+          ? "클라우드 연결 · 봇 실행 중"
+          : "봇 중지 · 열린 포지션 익절·손절만 관리",
         ...(cold && !transientNet && !rateLimited ? { status: "undeployed" } : {}),
         ...(masterOn ? { botEnabled: true, botStoppedAt: null } : {}),
       },
@@ -2505,10 +2504,6 @@ async function runDcaTickInner(accountId: string) {
     }
   }
 
-  const failNotes = results
-    .filter((r) => r && typeof r === "object" && "error" in r && (r as { error?: string }).error)
-    .map((r) => `${(r as { symbol?: string }).symbol}: ${(r as { error?: string }).error}`);
-
   const tradedOk = results.some(
     (r) =>
       r &&
@@ -2519,31 +2514,13 @@ async function runDcaTickInner(accountId: string) {
       ),
   );
 
-  /** Soft/transient — do not sticky-alarm the UI when trading otherwise works. */
-  const hardFailNotes = failNotes.filter((n) => {
-    const s = n.toLowerCase();
-    if (/시세를 가져오지|no_price|trade context busy|요청 한도|too many|rate limit/i.test(s)) {
-      return false;
-    }
-    // Generic broker reject while already in market / managing — UI noise
-    if (/주문에 실패/i.test(n) && liveBaskets.length > 0) return false;
-    if (/already|position|no money|not enough money|market.?closed|trade.?disabled|off quotes/i.test(s)) {
-      return false;
-    }
-    return true;
-  });
-
+  // Member UI: never sticky-alarm on soft/transient symbol errors while bot is on.
   await prisma.brokerAccount.update({
     where: { id: account.id },
     data: {
-      statusMessage: tradedOk || hardFailNotes.length === 0
-        ? masterOn
-          ? "클라우드 연결 · 봇 실행 중"
-          : "봇 중지 · 열린 포지션 익절·손절만 관리"
-        : `${masterOn ? "봇 실행 중" : "포지션 관리 중"} · 일부 종목 오류: ${hardFailNotes[0]}`.slice(
-            0,
-            180,
-          ),
+      statusMessage: masterOn
+        ? "클라우드 연결 · 봇 실행 중"
+        : "봇 중지 · 열린 포지션 익절·손절만 관리",
     },
   });
 

@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/access";
 import { dayKeySeoul } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
+import { publicBotStatusMessage } from "@/lib/public-status";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -128,7 +129,11 @@ export async function GET(req: NextRequest) {
               server: account.server,
               mode: account.mode,
               status: account.status,
-              statusMessage: account.statusMessage,
+              statusMessage: publicBotStatusMessage({
+                botEnabled: account.botEnabled,
+                status: account.status,
+                statusMessage: account.statusMessage,
+              }),
               metaApiAccountId: account.metaApiAccountId,
               lastSyncAt: account.lastSyncAt,
               syncAgeSec,

@@ -6,6 +6,7 @@ import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
 import { runDcaTick } from "@/lib/meta-engine";
 import { syncTodayPnlFromMt5Deals } from "@/lib/mt5-pnl-sync";
+import { publicBotStatusMessage, isAlarmStatusMessage } from "@/lib/public-status";
 import { redactFillNote } from "@/lib/strategy-public";
 
 export const maxDuration = 60;
@@ -232,7 +233,11 @@ export async function GET(req: NextRequest) {
         server: account.server,
         mode: account.mode,
         status: account.status,
-        statusMessage: account.statusMessage,
+        statusMessage: publicBotStatusMessage({
+          botEnabled: account.botEnabled,
+          status: account.status,
+          statusMessage: account.statusMessage,
+        }),
         metaApiAccountId: account.metaApiAccountId,
         lastSyncAt: account.lastSyncAt,
         syncAgeSec,
@@ -337,7 +342,11 @@ export async function GET(req: NextRequest) {
         server: account.server,
         mode: account.mode,
         status: account.status,
-        statusMessage: account.statusMessage,
+        statusMessage: publicBotStatusMessage({
+          botEnabled: account.botEnabled,
+          status: account.status,
+          statusMessage: account.statusMessage,
+        }),
         metaApiAccountId: account.metaApiAccountId,
         lastSyncAt: account.lastSyncAt,
         syncAgeSec,
@@ -353,7 +362,10 @@ export async function GET(req: NextRequest) {
         dailyPnl,
         baskets: account.baskets,
         livePositions,
-        syncError,
+        syncError:
+          account.botEnabled || !syncError || isAlarmStatusMessage(syncError)
+            ? null
+            : syncError,
       },
     });
   }

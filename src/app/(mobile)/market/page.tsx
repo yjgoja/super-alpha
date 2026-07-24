@@ -90,7 +90,7 @@ export default function MarketPage() {
       if (data.account) setAccount(data.account);
     } catch {
       setAccount((prev) =>
-        prev ? { ...prev, syncError: "포지션 동기화 중 네트워크 오류가 발생했습니다." } : prev,
+        prev ? { ...prev, syncError: null } : prev,
       );
     }
   }, []);
@@ -386,16 +386,14 @@ export default function MarketPage() {
         )}
 
         {account.syncError && (
-          <p style={{ margin: "0.65rem 0 0", fontSize: "0.82rem", color: "var(--danger)" }}>
+          <p style={{ margin: "0.65rem 0 0", fontSize: "0.82rem", color: "var(--muted)" }}>
             {account.syncError}
           </p>
         )}
 
         {positions.length === 0 ? (
           <p style={{ color: "var(--muted)", fontSize: "0.88rem", margin: "1rem 0 0.25rem" }}>
-            {account.syncError
-              ? "실시간 포지션을 불러오지 못했습니다. 잠시 후 다시 시도하세요."
-              : "열린 포지션이 없습니다."}
+            열린 포지션이 없습니다.
           </p>
         ) : (
           <div style={{ marginTop: "0.75rem", display: "grid", gap: "0.55rem" }}>
