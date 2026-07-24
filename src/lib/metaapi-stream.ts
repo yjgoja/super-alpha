@@ -1,8 +1,8 @@
 /**
  * MetaAPI real-time streaming pool.
  * Terminal state (account info + positions) is local after sync — no REST CPU credits.
- * Trades prefer the streaming connection (not REST /trade) so we do not burn
- * the separate REST trade CPU quota that was blocking re-entry.
+ * Trades prefer the streaming connection (ws:trade). Note: MetaAPI still
+ * bills trade CPU credits for ws:trade — same 6h pool as REST /trade.
  *
  * Docs: https://metaapi.cloud/docs/client/rateLimiting/
  */
@@ -442,9 +442,11 @@ export async function streamPlaceMarketOrder(input: {
       via: "stream",
     };
   } catch (e) {
+    const err = e as { message?: string; metadata?: unknown };
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "스트리밍 주문 예외",
+      message: err?.message || (e instanceof Error ? e.message : "스트리밍 주문 예외"),
+      data: (e && typeof e === "object" ? (e as TradeResult) : undefined),
       via: "stream",
     };
   }

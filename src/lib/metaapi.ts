@@ -1175,19 +1175,39 @@ function isTradeCreditExhausted(data: unknown): boolean {
       : data && typeof data === "object"
         ? JSON.stringify(data)
         : "";
-  return /4320000 cpu credits|trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(
+  return /cpu credits per 6h|trade API allows|ws:trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(
     raw,
   );
 }
 
-function noteTradeCreditExhausted() {
+function recommendedRetryMs(data: unknown): number | null {
+  try {
+    const meta =
+      data && typeof data === "object"
+        ? ((data as { metadata?: { recommendedRetryTime?: string } }).metadata ??
+          (data as { recommendedRetryTime?: string }))
+        : null;
+    const t = meta && "recommendedRetryTime" in meta ? meta.recommendedRetryTime : null;
+    if (!t) return null;
+    const ms = new Date(String(t)).getTime() - Date.now();
+    return Number.isFinite(ms) ? Math.max(5_000, ms + 2_000) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function noteTradeCreditExhausted(data?: unknown) {
+  const fromRetry = recommendedRetryMs(data);
   const pauseMs = Math.max(
     60_000,
-    Math.min(Number(process.env.METAAPI_TRADE_CREDIT_PAUSE_MS || 900_000), 1_800_000),
+    Math.min(
+      fromRetry ?? Number(process.env.METAAPI_TRADE_CREDIT_PAUSE_MS || 900_000),
+      6 * 3600_000,
+    ),
   );
   const until = Date.now() + pauseMs;
   if (until > metaApiTradeCreditUntil) metaApiTradeCreditUntil = until;
-  noteMetaApiRateLimit(90_000);
+  noteMetaApiRateLimit(Math.min(pauseMs, 90_000));
   console.warn(
     `[metaapi] trade CPU credits exhausted — pause orders ${Math.round(pauseMs / 1000)}s`,
   );
@@ -1762,27 +1782,25 @@ export async function placeMarketOrder(input: {
       invalidateSnapshotCache(input.metaApiAccountId);
       return { ok: true as const, data: streamed.data, brokerSymbol: brokerSym, via: "stream" as const };
     }
-    // Soft broker reject (e.g. TP/SL) — caller may retry naked; don't fall through if stream ran.
     if (streamed && !streamed.ok) {
-      const soft =
-        /Invalid stops|Invalid S\/L|Invalid T\/P|stops level|TRADE_RETCODE_INVALID_STOPS|TRADE_RETCODE_INVALID_PRICE/i.test(
-          streamed.message || JSON.stringify(streamed.data || ""),
-        );
-      if (!soft) {
-        // Stream connected but order failed for non-stops reason — still try REST only if not credit-blocked.
-        // Stops rejects should return so caller can naked-retry via stream again.
-      } else {
+      const failRaw = streamed.message || JSON.stringify(streamed.data || "");
+      if (isTradeCreditExhausted(failRaw) || isTradeCreditExhausted(streamed.data)) {
+        noteTradeCreditExhausted(streamed.data);
         invalidateSnapshotCache(input.metaApiAccountId);
         return {
           ok: false as const,
-          message: streamed.message || "주문에 실패했습니다.",
+          message: streamed.message || "MetaAPI 주문 한도 소진",
           data: streamed.data,
           brokerSymbol: brokerSym,
           via: "stream" as const,
         };
       }
-      // Non-soft stream fail: attempt REST fallback below (unless trade credits exhausted).
-      if (metaApiTradeCreditBlocked()) {
+      const soft =
+        /Invalid stops|Invalid S\/L|Invalid T\/P|stops level|TRADE_RETCODE_INVALID_STOPS|TRADE_RETCODE_INVALID_PRICE/i.test(
+          failRaw,
+        );
+      // Soft stops reject: return so caller can naked-retry. Do not burn REST credits.
+      if (soft || metaApiTradeCreditBlocked()) {
         invalidateSnapshotCache(input.metaApiAccountId);
         return {
           ok: false as const,
