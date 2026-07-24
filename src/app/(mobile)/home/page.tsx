@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AccountLinkBadge } from "@/components/ConnectPrompt";
 import { SharePnlSheet } from "@/components/SharePnlSheet";
+import { subscribeLive } from "@/lib/live-bus";
 import { padDailyPnl, withCumulative, type DayPnl } from "@/lib/pnl-period";
 
 function fmt(n: number) {
@@ -113,19 +114,6 @@ export default function HomePage() {
       }
     }
 
-    /** 3) Live equity/today — MetaAPI snapshot (no full history) */
-    async function refreshLive() {
-      if (stopped || document.visibilityState === "hidden" || !linkedNow) return;
-      try {
-        const res = await fetch("/api/stats?live=1", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json().catch(() => ({}));
-        if (!stopped && data.account) applyStats(data);
-      } catch {
-        /* ignore transient */
-      }
-    }
-
     /** One-shot chart/history sync from MetaAPI (background) */
     async function refreshPnlOnce() {
       if (stopped || !linkedNow) return;
@@ -144,24 +132,20 @@ export default function HomePage() {
       if (stopped) return;
       await loadPnlFast();
       if (stopped) return;
-      if (linkedNow) {
-        refreshLive();
-        refreshPnlOnce();
-      }
+      if (linkedNow) refreshPnlOnce();
     })();
 
-    const id = setInterval(() => {
-      refreshLive();
-    }, 15_000);
-    const onVis = () => {
-      if (document.visibilityState === "visible") refreshLive();
-    };
-    document.addEventListener("visibilitychange", onVis);
+    // Live equity/PnL from BotHeartbeat (SSE + single MetaAPI poller)
+    const unsub = subscribeLive((detail) => {
+      if (stopped || !detail.account) return;
+      applyStats({ account: detail.account });
+      linkedNow = Boolean(detail.account.metaApiAccountId);
+      setLinked(linkedNow);
+    });
 
     return () => {
       stopped = true;
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVis);
+      unsub();
     };
   }, []);
 

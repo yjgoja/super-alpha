@@ -1047,7 +1047,14 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
   });
 }
 
-export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
+/** Coalesce concurrent MetaAPI reads + short TTL (overlapping UI polls). */
+const SNAP_TTL_MS = 2500;
+const snapCache = new Map<
+  string,
+  { at: number; value?: MetaSnap | MetaErr; inflight?: Promise<MetaSnap | MetaErr> }
+>();
+
+async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
   const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
   const bases = clientApiBases(region);
   let info: unknown = null;
@@ -1057,16 +1064,15 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
   let lastBody: unknown = null;
 
   for (const base of bases) {
-    const infoRes = await api(
-      base,
-      "GET",
-      `/users/current/accounts/${metaApiAccountId}/account-information`,
-    );
+    // Account info + positions in parallel (was sequential — ~2× MetaAPI RTT)
+    const [infoRes, posRes] = await Promise.all([
+      api(base, "GET", `/users/current/accounts/${metaApiAccountId}/account-information`),
+      api(base, "GET", `/users/current/accounts/${metaApiAccountId}/positions`),
+    ]);
     lastStatus = infoRes.status;
     lastBody = infoRes.data;
     if (infoRes.status < 400) {
       info = infoRes.data;
-      const posRes = await api(base, "GET", `/users/current/accounts/${metaApiAccountId}/positions`);
       if (posRes.status >= 400 || !Array.isArray(posRes.data)) {
         const msg =
           (posRes.data as { message?: string } | null)?.message ||
@@ -1127,6 +1133,25 @@ export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap 
     login: String(i.login || ""),
     positions: mapPositions(positionsRaw),
   };
+}
+
+export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
+  const id = String(metaApiAccountId);
+  const hit = snapCache.get(id);
+  if (hit?.value && Date.now() - hit.at < SNAP_TTL_MS) return hit.value;
+  if (hit?.inflight) return hit.inflight;
+
+  const inflight = fetchSnapshotUncached(id)
+    .then((value) => {
+      snapCache.set(id, { at: Date.now(), value });
+      return value;
+    })
+    .catch((err) => {
+      snapCache.delete(id);
+      throw err;
+    });
+  snapCache.set(id, { at: Date.now(), inflight });
+  return inflight;
 }
 
 /** Zero Markets 등 브로커별 심볼명 후보 */
