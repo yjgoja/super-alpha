@@ -1489,10 +1489,38 @@ export async function listBrokerSymbols(metaApiAccountId: string): Promise<strin
   const cached = brokerSymbolsListCache.get(metaApiAccountId);
   if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.symbols;
 
+  // Prefer streaming specs (0 REST credits) — /symbols costs 500 CPU credits.
+  try {
+    const { readStreamSymbols, ensureStreamConnected } = await import("./metaapi-stream");
+    await ensureStreamConnected(metaApiAccountId).catch(() => false);
+    const fromStream = readStreamSymbols(metaApiAccountId);
+    if (fromStream && fromStream.length > 0) {
+      brokerSymbolsListCache.set(metaApiAccountId, {
+        at: Date.now(),
+        symbols: fromStream,
+      });
+      return fromStream;
+    }
+  } catch {
+    /* fall through */
+  }
+
+  if (metaApiRateLimited()) return cached?.symbols || [];
+
   const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
-  const bases = clientApiBases(region);
+  const preferred = clientApiBases(region).slice(0, 1);
+  const bases =
+    preferred.length > 0 ? preferred : [clientBase(region || REGION)];
   for (const base of bases) {
-    const res = await api(base, "GET", `/users/current/accounts/${metaApiAccountId}/symbols`);
+    const res = await api(
+      base,
+      "GET",
+      `/users/current/accounts/${metaApiAccountId}/symbols`,
+    );
+    if (res.status === 429) {
+      noteMetaApiRateLimit(120_000);
+      return cached?.symbols || [];
+    }
     if (res.status < 400 && Array.isArray(res.data)) {
       const symbols = (res.data as unknown[]).map((s) => String(s));
       brokerSymbolsListCache.set(metaApiAccountId, { at: Date.now(), symbols });
@@ -1513,6 +1541,19 @@ export async function resolveBrokerSymbol(metaApiAccountId: string, logical: str
 
   const want = logical.toUpperCase();
   const aliases = SYMBOL_ALIASES[want] || [logical];
+
+  // Stream price proves the broker symbol without REST /symbols (500 credits).
+  try {
+    const { waitForStreamPrice } = await import("./metaapi-stream");
+    const priced = await waitForStreamPrice(metaApiAccountId, aliases, 6_000);
+    if (priced) {
+      brokerSymbolCache.set(key, priced.symbol);
+      return priced.symbol;
+    }
+  } catch {
+    /* fall through */
+  }
+
   const available = await listBrokerSymbols(metaApiAccountId);
 
   if (available.length > 0) {
@@ -1546,9 +1587,11 @@ const priceCache = new Map<string, { at: number; bid: number; ask: number }>();
 
 async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
   try {
-    const { readStreamPrice } = await import("./metaapi-stream");
-    const streamPx = readStreamPrice(metaApiAccountId, symbol);
-    if (streamPx) return streamPx;
+    const { waitForStreamPrice, readStreamPrice } = await import("./metaapi-stream");
+    const quick = readStreamPrice(metaApiAccountId, symbol);
+    if (quick) return quick;
+    const waited = await waitForStreamPrice(metaApiAccountId, [symbol], 5_000);
+    if (waited) return { bid: waited.bid, ask: waited.ask };
   } catch {
     /* ignore */
   }
@@ -1591,6 +1634,25 @@ async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
 }
 
 export async function getSymbolPrice(metaApiAccountId: string, symbol: string) {
+  const want = symbol.toUpperCase();
+  const aliases = SYMBOL_ALIASES[want] || [symbol];
+  // Fast path: stream quotes first (ENTRY/DCA blocker when REST is 429).
+  try {
+    const { waitForStreamPrice } = await import("./metaapi-stream");
+    const priced = await waitForStreamPrice(metaApiAccountId, aliases, 8_000);
+    if (priced) {
+      const key = `${metaApiAccountId}:${want}`;
+      brokerSymbolCache.set(key, priced.symbol);
+      return {
+        bid: priced.bid,
+        ask: priced.ask,
+        brokerSymbol: priced.symbol,
+      };
+    }
+  } catch {
+    /* fall through */
+  }
+
   const brokerSym = await resolveBrokerSymbol(metaApiAccountId, symbol);
   const price = await getSymbolPriceRaw(metaApiAccountId, brokerSym);
   if (!price) return null;

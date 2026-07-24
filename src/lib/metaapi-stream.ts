@@ -23,6 +23,7 @@ type StreamConn = {
     connectedToBroker: boolean;
     accountInformation?: Record<string, unknown> | null;
     positions?: Array<Record<string, unknown>>;
+    specifications?: Array<{ symbol?: string } | string>;
     price?: (symbol: string) => { bid?: number; ask?: number } | null;
   };
 };
@@ -142,6 +143,53 @@ export function readStreamPrice(
   return null;
 }
 
+export function readStreamSymbols(metaApiAccountId: string): string[] | null {
+  if (!isMetaStreamEnabled()) return null;
+  const h = handles.get(String(metaApiAccountId));
+  if (!h?.ready) return null;
+  const specs = h.conn.terminalState.specifications;
+  if (!Array.isArray(specs) || specs.length === 0) return null;
+  h.lastUsed = Date.now();
+  return specs
+    .map((s) => (typeof s === "string" ? s : String(s?.symbol || "")))
+    .filter(Boolean);
+}
+
+/**
+ * Ensure stream + quote subscription, then wait until bid/ask appear (0 REST credits).
+ */
+export async function waitForStreamPrice(
+  metaApiAccountId: string,
+  symbols: string[],
+  waitMs = 8_000,
+): Promise<{ bid: number; ask: number; symbol: string } | null> {
+  if (!isMetaStreamEnabled()) return null;
+  const id = String(metaApiAccountId);
+  const candidates = [
+    ...new Set(
+      symbols
+        .flatMap((s) => {
+          const u = s.toUpperCase();
+          if (u === "XAUUSD" || u === "GOLD") return ["XAUUSD", "GOLD"];
+          return [s];
+        })
+        .filter(Boolean),
+    ),
+  ];
+  const ok = await ensureStreamConnected(id, null, candidates);
+  if (!ok) return null;
+
+  const deadline = Date.now() + Math.max(500, waitMs);
+  while (Date.now() < deadline) {
+    for (const sym of candidates) {
+      const px = readStreamPrice(id, sym);
+      if (px) return { ...px, symbol: sym };
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
 async function subscribeSymbols(conn: StreamConn, symbols: string[]) {
   if (!conn.subscribeToMarketData) return;
   const expand = (s: string) => {
@@ -183,6 +231,17 @@ export async function ensureStreamConnected(
     try {
       const api = getApi();
       const account = await api.metatraderAccountApi.getAccount(id);
+      // Prefer broker-connected before streaming subscribe
+      try {
+        const waitConnected = (
+          account as { waitConnected?: (timeoutInSeconds?: number) => Promise<unknown> }
+        ).waitConnected;
+        if (typeof waitConnected === "function") {
+          await waitConnected.call(account, 60);
+        }
+      } catch {
+        /* continue — connect may still succeed */
+      }
       // Deployed accounts only — do not create
       const conn = account.getStreamingConnection() as unknown as StreamConn;
       await conn.connect();
