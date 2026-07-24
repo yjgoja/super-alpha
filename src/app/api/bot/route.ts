@@ -6,7 +6,7 @@ import { gateErrorKo } from "@/lib/ko-errors";
 import { ensureAccountCloudLive, ensureCloudLive } from "@/lib/metaapi";
 import { withAccountToggleLock } from "@/lib/toggle-lock";
 
-export const maxDuration = 60;
+export const maxDuration = 90;
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
@@ -19,15 +19,24 @@ export async function POST(req: Request) {
   const account = await prisma.brokerAccount.findFirst({
     where: {
       userId: gate.user.id,
-      status: { in: ["connected", "undeployed"] },
-      metaApiAccountId: { not: null },
+      OR: [
+        {
+          status: { in: ["connected", "undeployed"] },
+          metaApiAccountId: { not: null },
+        },
+        // Allow recovery of failed links when password is still stored
+        {
+          status: "failed",
+          syncToken: { not: null },
+        },
+      ],
     },
     orderBy: { createdAt: "desc" },
     include: {
       baskets: { where: { status: "open" }, select: { id: true } },
     },
   });
-  if (!account?.metaApiAccountId) {
+  if (!account || (!account.metaApiAccountId && !account.syncToken)) {
     return NextResponse.json({ error: "연결된 계좌가 없습니다." }, { status: 400 });
   }
 

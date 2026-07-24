@@ -22,6 +22,7 @@ import { normalizeLogicId } from "./strategies";
 import { resolveStrategyForAccount } from "./strategy-resolve";
 import {
   closePositionsBySymbolDirection,
+  ensureAccountCloudLive,
   ensureCloudLive,
   fetchSnapshot,
   getSymbolPrice,
@@ -1265,9 +1266,33 @@ async function runDcaTickInner(accountId: string) {
       8_000,
       Number(process.env.ENGINE_CLOUD_WAIT_MS || 45_000),
     );
-    const live = await ensureCloudLive(metaId, waitMs);
-    if (live.ok && live.snap) {
-      snap = live.snap;
+    let recovered = false;
+    if (account.syncToken) {
+      const live = await ensureAccountCloudLive({
+        metaApiAccountId: metaId,
+        login: account.login,
+        password: account.syncToken,
+        server: account.server,
+        waitMs,
+      });
+      if (live.ok) {
+        snap = live.snap;
+        recovered = true;
+        if (live.metaApiAccountId !== metaId) {
+          await prisma.brokerAccount.update({
+            where: { id: account.id },
+            data: { metaApiAccountId: live.metaApiAccountId },
+          });
+        }
+      }
+    } else {
+      const live = await ensureCloudLive(metaId, waitMs);
+      if (live.ok && live.snap) {
+        snap = live.snap;
+        recovered = true;
+      }
+    }
+    if (recovered) {
       cloudJustRecovered = true;
       await prisma.brokerAccount.update({
         where: { id: account.id },
@@ -1610,7 +1635,14 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
     },
     // Round-robin fairness: oldest tick lock / oldest update first
     orderBy: [{ tickLockedAt: "asc" }, { updatedAt: "asc" }],
-    select: { id: true, status: true, metaApiAccountId: true },
+    select: {
+      id: true,
+      status: true,
+      metaApiAccountId: true,
+      login: true,
+      server: true,
+      syncToken: true,
+    },
   });
 
   // DB 바스켓이 없어도 equity≠balance(부동손익)면 관리 틱에 포함
@@ -1629,6 +1661,9 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
       id: true,
       status: true,
       metaApiAccountId: true,
+      login: true,
+      server: true,
+      syncToken: true,
       equity: true,
       balance: true,
     },
@@ -1639,6 +1674,9 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
         id: a.id,
         status: a.status,
         metaApiAccountId: a.metaApiAccountId,
+        login: a.login,
+        server: a.server,
+        syncToken: a.syncToken,
       });
     }
   }
@@ -1656,26 +1694,56 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
         // Local engine can wait longer; serverless cron must stay under ~52s
         const maxWait =
           process.env.ENGINE_MODE === "direct"
-            ? Math.min(60_000, Number(process.env.ENGINE_CLOUD_WAIT_MS || 45_000))
+            ? Math.min(70_000, Number(process.env.ENGINE_CLOUD_WAIT_MS || 60_000))
             : 12_000;
         const remaining = Math.max(3_000, Math.min(maxWait, budgetMs - elapsed - 2_000));
-        const live = await ensureCloudLive(String(a.metaApiAccountId), remaining);
-        if (!live.ok) {
-          results.push({
-            id: a.id,
-            ok: false,
-            error: live.message || "redeploy failed",
+        let liveOk = false;
+        if (a.syncToken) {
+          const live = await ensureAccountCloudLive({
+            metaApiAccountId: String(a.metaApiAccountId),
+            login: a.login,
+            password: a.syncToken,
+            server: a.server,
+            waitMs: remaining,
           });
-          continue;
+          if (live.ok) {
+            liveOk = true;
+            if (live.metaApiAccountId !== a.metaApiAccountId) {
+              await prisma.brokerAccount.update({
+                where: { id: a.id },
+                data: { metaApiAccountId: live.metaApiAccountId },
+              });
+            }
+          } else {
+            results.push({
+              id: a.id,
+              ok: false,
+              error: live.message || "redeploy failed",
+            });
+            continue;
+          }
+        } else {
+          const live = await ensureCloudLive(String(a.metaApiAccountId), remaining);
+          if (!live.ok) {
+            results.push({
+              id: a.id,
+              ok: false,
+              error: live.message || "redeploy failed",
+            });
+            continue;
+          }
+          liveOk = true;
         }
-        await prisma.brokerAccount.update({
-          where: { id: a.id },
-          data: {
-            status: "connected",
-            botStoppedAt: null,
-            statusMessage: "클라우드 재활성화 · 봇 실행 중",
-          },
-        });
+        if (liveOk) {
+          await prisma.brokerAccount.update({
+            where: { id: a.id },
+            data: {
+              status: "connected",
+              botStoppedAt: null,
+              statusMessage: "클라우드 재활성화 · 봇 실행 중",
+            },
+          });
+        }
       }
       results.push({ id: a.id, ...(await runDcaTick(a.id)) });
     } catch (e) {

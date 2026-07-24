@@ -565,7 +565,7 @@ async function verifyPasswordOnExistingAccount(input: {
   }
 
   await deployAccount(id);
-  const waited = await waitUntilConnected(id, 28000);
+  const waited = await waitUntilConnected(id, 60000);
 
   if (!waited.ok) {
     if (waited.code === "E_AUTH") {
@@ -616,8 +616,13 @@ async function verifyPasswordOnExistingAccount(input: {
   }
 
   void undeployAccount(id).catch(() => null);
-  // Credentials OK; balances unknown until next live sync
-  return softLinkSnap({ login: input.login, server: input.server }, id, input.name);
+  // Never soft-succeed without a readable broker snapshot
+  return {
+    ok: false,
+    code: "TIMEOUT",
+    message:
+      "브로커 연결은 됐지만 계좌 정보를 읽지 못했습니다. 잠시 후 다시 시도해주세요.",
+  };
 }
 
 /** Deploy + wait until MetaAPI can read the broker account (for live sync). */
@@ -646,8 +651,8 @@ export async function ensureCloudLive(metaApiAccountId: string, waitMs = 45000) 
 }
 
 /**
- * Start-all path: if cloud stays DISCONNECTED, re-push credentials and
- * recreate as cloud-g2/high when needed (g1 can stick disconnected forever).
+ * Start-all path: keep working clouds; only re-auth / recreate when needed.
+ * Never overwrite password on an already-live cloud (stale syncToken can brick it).
  */
 export async function ensureAccountCloudLive(input: {
   metaApiAccountId: string | null | undefined;
@@ -659,21 +664,26 @@ export async function ensureAccountCloudLive(input: {
   | { ok: true; snap: MetaSnap; metaApiAccountId: string }
   | { ok: false; message: string }
 > {
-  const waitMs = input.waitMs ?? 45000;
+  const waitMs = input.waitMs ?? 60000;
   const metaId = input.metaApiAccountId ? String(input.metaApiAccountId) : "";
 
+  // 1) Try existing cloud as-is (no password PUT)
   if (metaId) {
+    const live = await ensureCloudLive(metaId, waitMs);
+    if (live.ok) return { ok: true, snap: live.snap, metaApiAccountId: metaId };
+
+    // 2) Re-push credentials once, then redeploy
     await api(PROVISIONING, "PUT", `/users/current/accounts/${metaId}`, {
       password: input.password,
       login: input.login,
       server: input.server,
       name: `SA-${input.login}`,
     }).catch(() => null);
-    const live = await ensureCloudLive(metaId, waitMs);
-    if (live.ok) return { ok: true, snap: live.snap, metaApiAccountId: metaId };
+    const livePw = await ensureCloudLive(metaId, waitMs);
+    if (livePw.ok) return { ok: true, snap: livePw.snap, metaApiAccountId: metaId };
   }
 
-  // Wipe stuck clouds for this login, then create g2/high fresh
+  // 3) Wipe stuck clouds for this login, then create g2/high fresh
   const existing = await findAllMetaAccountsByLogin(input.login);
   for (const c of existing) {
     try {
@@ -683,7 +693,7 @@ export async function ensureAccountCloudLive(input: {
     }
     await removeMetaAccount(c.id);
   }
-  await sleep(1500);
+  await sleep(4000);
 
   const profileId = await ensureProvisioningProfile();
   const created = await createAndConnect({
@@ -696,16 +706,14 @@ export async function ensureAccountCloudLive(input: {
   if (!created.ok) return { ok: false, message: created.message };
 
   const newId = String(created.metaApiAccountId);
-  const verified = await verifyPasswordOnExistingAccount({
-    metaApiAccountId: newId,
-    login: input.login,
+  // Deploy + prove with snapshot (skip verifyPassword which undeploys mid-flow)
+  await api(PROVISIONING, "PUT", `/users/current/accounts/${newId}`, {
     password: input.password,
+    login: input.login,
     server: input.server,
-    name: created.name,
-  });
-  if (!verified.ok) return { ok: false, message: verified.message };
-
-  const live2 = await ensureCloudLive(newId, waitMs);
+    name: `SA-${input.login}`,
+  }).catch(() => null);
+  const live2 = await ensureCloudLive(newId, Math.max(waitMs, 70000));
   if (!live2.ok) return { ok: false, message: live2.message };
   return { ok: true, snap: live2.snap, metaApiAccountId: newId };
 }
@@ -769,7 +777,10 @@ async function createAndConnect(input: {
   mode: CloudMode;
 }): Promise<MetaSnap | MetaErr> {
   const already = await findMetaAccountByLogin(input.login);
-  if (already?.id) return softLinkSnap(input, already.id, already.name);
+  if (already?.id) {
+    // Caller (provisionTradingAccount) must still verify CONNECTED + snapshot
+    return softLinkSnap(input, already.id, already.name);
+  }
 
   const payload: Record<string, unknown> = {
     name: `SA-${input.login}`,

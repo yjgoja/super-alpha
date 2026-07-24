@@ -82,22 +82,21 @@ export async function finalizeProvisionIfReady(accountId: string) {
   const connected =
     conn === "CONNECTED" || conn === "CONNECTED_NEW_ACCOUNT";
 
-  if (connected || st.state === "DEPLOYED") {
-    // DEPLOYED is enough — fetch snapshot (may work even if status wording differs)
+  // Only accept real broker connect + readable snapshot.
+  // DEPLOYED+DISCONNECTED must NOT soft-link (causes start-all failures later).
+  if (st.state === "DEPLOYED" && connected) {
     const snap = await fetchSnapshot(metaId);
     if (snap.ok) {
       await markLinked(account.id, snap);
       return { done: true as const, status: "connected" as const };
     }
-    // Connected in MetaAPI UI but snapshot failed — still mark linked with zeros
-    if (connected || st.state === "DEPLOYED") {
-      await markLinked(account.id, {
+    await prisma.brokerAccount.update({
+      where: { id: account.id },
+      data: {
         metaApiAccountId: metaId,
-        balance: account.balance,
-        equity: account.equity,
-      });
-      return { done: true as const, status: "connected" as const };
-    }
+        statusMessage: "브로커 연결됨 · 잔고 동기화 대기 중…",
+      },
+    });
     return { done: false as const, status: "provisioning" as const, message: snap.message };
   }
 
@@ -144,7 +143,8 @@ export async function finalizeAllProvisioning() {
 }
 
 /**
- * Admin approve: verify MT5 password via MetaAPI, then undeploy to save cost.
+ * Admin approve: verify MT5 password via MetaAPI (g2), then undeploy to save cost.
+ * Retries rate-limits; never soft-links a DISCONNECTED cloud.
  */
 export async function runAdminProvision(accountId: string) {
   const account = await prisma.brokerAccount.findUnique({ where: { id: accountId } });
@@ -161,51 +161,52 @@ export async function runAdminProvision(accountId: string) {
     data: { status: "provisioning", statusMessage: "비밀번호·브로커 검증 중…" },
   });
 
-  const { verifyMt5Credentials } = await import("./metaapi");
-  const verified = await verifyMt5Credentials({
+  const { ensureAccountCloudLive, undeployAccount } = await import("./metaapi");
+
+  let repaired = await ensureAccountCloudLive({
+    metaApiAccountId: account.metaApiAccountId,
     login: account.login,
     password: account.syncToken,
     server: account.server,
-    reuseAccountId: account.metaApiAccountId,
+    waitMs: 70000,
   });
 
-  if (!verified.ok) {
+  if (!repaired.ok && /너무 많|rate|429/i.test(repaired.message)) {
+    await prisma.brokerAccount.update({
+      where: { id: account.id },
+      data: { statusMessage: "요청 제한 · 잠시 후 재시도 중…" },
+    });
+    await new Promise((r) => setTimeout(r, 65000));
+    repaired = await ensureAccountCloudLive({
+      metaApiAccountId: account.metaApiAccountId,
+      login: account.login,
+      password: account.syncToken,
+      server: account.server,
+      waitMs: 70000,
+    });
+  }
+
+  if (!repaired.ok) {
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: {
         status: "failed",
-        statusMessage: verified.message,
+        statusMessage: repaired.message,
         metaApiAccountId: null,
         botEnabled: false,
       },
     });
-    return { ok: false as const, error: verified.message };
+    return { ok: false as const, error: repaired.message };
   }
 
-  const metaId = String(verified.metaApiAccountId);
+  const metaId = String(repaired.metaApiAccountId);
+  const balance = repaired.snap.balance;
+  const equity = repaired.snap.equity;
 
-  // If verify returned empty balances (snapshot missed), force a live read before undeploy
-  let balance = verified.balance;
-  let equity = verified.equity;
-  if (!(balance > 0 || equity > 0)) {
-    const { ensureCloudLive, undeployAccount } = await import("./metaapi");
-    const live = await ensureCloudLive(metaId, 60000);
-    if (live.ok && live.snap) {
-      balance = live.snap.balance;
-      equity = live.snap.equity;
-    }
-    try {
-      await undeployAccount(metaId);
-    } catch {
-      /* ignore */
-    }
-  } else {
-    try {
-      const { undeployAccount } = await import("./metaapi");
-      await undeployAccount(metaId);
-    } catch {
-      /* ignore */
-    }
+  try {
+    await undeployAccount(metaId);
+  } catch {
+    /* ignore */
   }
 
   await prisma.brokerAccount.update({
