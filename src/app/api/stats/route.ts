@@ -3,7 +3,7 @@ import { requireApprovedUser, requireUser } from "@/lib/access";
 import { dayKeySeoul } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { ensureCloudLive, fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
+import { fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
 import { runDcaTick } from "@/lib/meta-engine";
 import { syncTodayPnlFromMt5Deals } from "@/lib/mt5-pnl-sync";
 import { redactFillNote } from "@/lib/strategy-public";
@@ -97,24 +97,13 @@ async function pullLiveSnapshot(opts: {
 }> {
   const metaId = opts.metaApiAccountId;
   let livePositions: LivePos = [];
-  let syncError: string | null = null;
   let liveDailyPnl: number | null = null;
 
-  // UI path only — never feed the DCA engine through this cached read
-  let snap = await fetchSnapshotCached(metaId);
+  // UI path only — never wake MetaAPI cloud here (bot/engine owns deploy).
+  // Cold accounts return syncError immediately instead of blocking 45s.
+  const snap = await fetchSnapshotCached(metaId);
   if (!snap.ok) {
-    const live = await ensureCloudLive(metaId, 45000);
-    if (live.ok && live.snap) {
-      snap = live.snap;
-    } else if (!live.ok) {
-      syncError = live.message || snap.message;
-    } else {
-      snap = await fetchSnapshotCached(metaId);
-    }
-  }
-
-  if (!snap.ok) {
-    return { livePositions, syncError: syncError || snap.message, liveDailyPnl };
+    return { livePositions, syncError: snap.message, liveDailyPnl };
   }
 
   const updated = await prisma.brokerAccount.update({
@@ -187,6 +176,7 @@ export async function GET(req: NextRequest) {
   const wantSummary = req.nextUrl.searchParams.get("summary") === "1";
   const wantLite = req.nextUrl.searchParams.get("lite") === "1";
   const wantPnlSync = req.nextUrl.searchParams.get("pnl") === "1";
+  const wantFull = req.nextUrl.searchParams.get("full") === "1";
 
   // Home hero: light query (no baskets/fills/snapshots)
   if (wantSummary && !wantLive) {
@@ -370,13 +360,28 @@ export async function GET(req: NextRequest) {
 
   const account = await prisma.brokerAccount.findFirst({
     where: { userId: gate.user.id },
-    include: {
-      config: true,
-      baskets: { where: { status: "open" }, include: { legs: true } },
-      fills: { orderBy: { createdAt: "desc" }, take: 20 },
-      snapshots: { orderBy: { createdAt: "desc" }, take: 48 },
-      dailyStats: { orderBy: { date: "desc" }, take: 14 },
-    },
+    include: wantFull
+      ? {
+          config: true,
+          baskets: { where: { status: "open" }, include: { legs: true } },
+          fills: { orderBy: { createdAt: "desc" }, take: 20 },
+          snapshots: { orderBy: { createdAt: "desc" }, take: 48 },
+          dailyStats: { orderBy: { date: "desc" }, take: 14 },
+        }
+      : {
+          baskets: {
+            where: { status: "open" },
+            select: {
+              id: true,
+              symbol: true,
+              direction: true,
+              status: true,
+              unrealizedPnl: true,
+            },
+          },
+          fills: { orderBy: { createdAt: "desc" }, take: 10 },
+          dailyStats: { orderBy: { date: "desc" }, take: 7 },
+        },
     orderBy: { createdAt: "desc" },
   });
 
@@ -429,6 +434,10 @@ export async function GET(req: NextRequest) {
     : null;
 
   const isAdmin = gate.user.role === "admin";
+  const fullAccount = account as typeof account & {
+    config?: unknown;
+    snapshots?: Array<{ createdAt: Date } & Record<string, unknown>>;
+  };
 
   return NextResponse.json({
     role: gate.user.role,
@@ -452,10 +461,10 @@ export async function GET(req: NextRequest) {
       totalReturnPct,
       dailyReturnPct,
       dailyPnl,
-      // Strategy config / leg lots / fill notes are IP — admin only
-      ...(isAdmin
+      // Strategy config / leg lots / fill notes are IP — admin only + full
+      ...(isAdmin && wantFull
         ? {
-            config: account.config,
+            config: fullAccount.config,
             baskets: account.baskets,
             fills: account.fills,
           }
@@ -466,7 +475,6 @@ export async function GET(req: NextRequest) {
               direction: b.direction,
               status: b.status,
               unrealizedPnl: b.unrealizedPnl,
-              // omit filledLevel / legs (ladder progress & lots)
             })),
             fills: account.fills.map((f) => ({
               id: f.id,
@@ -476,10 +484,9 @@ export async function GET(req: NextRequest) {
               kind: f.kind,
               note: redactFillNote(f.note),
               createdAt: f.createdAt,
-              // omit lots / price / level (reverse-engineers DCA table)
             })),
           }),
-      snapshots: account.snapshots.reverse(),
+      snapshots: wantFull && fullAccount.snapshots ? [...fullAccount.snapshots].reverse() : [],
       dailyStats: account.dailyStats,
       livePositions: wantLive ? livePositions : undefined,
       syncError: wantLive ? syncError : undefined,

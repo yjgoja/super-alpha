@@ -3,12 +3,16 @@ import { requireUser } from "@/lib/access";
 import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { ensureCloudLive, fetchSnapshot } from "@/lib/metaapi";
+import { fetchSnapshotCached } from "@/lib/metaapi";
 import { mt5DailyPnlFromDeals, mt5LifetimeClosedPnl } from "@/lib/mt5-pnl-sync";
 import { padDailyPnl, withCumulative } from "@/lib/pnl-period";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/** Avoid hammering MetaAPI history on every home open. */
+const PNL_REFRESH_MIN_MS = 10 * 60_000;
+const lastPnlRefreshAt = new Map<string, number>();
 
 type PnlJson = {
   days: ReturnType<typeof padDailyPnl>;
@@ -92,7 +96,7 @@ async function pnlFromDb(account: {
   };
 }
 
-/** MetaAPI deals sync — slower; call with ?refresh=1 */
+/** MetaAPI deals sync — slower; call with ?refresh=1 (throttled, no cloud wake). */
 async function pnlFromMetaApi(account: {
   id: string;
   login: string;
@@ -109,12 +113,8 @@ async function pnlFromMetaApi(account: {
 
   if (account.metaApiAccountId) {
     const metaId = String(account.metaApiAccountId);
-    let snap = await fetchSnapshot(metaId);
-    if (!snap.ok) {
-      const live = await ensureCloudLive(metaId, 20_000);
-      if (live.ok && live.snap) snap = live.snap;
-      else snap = await fetchSnapshot(metaId);
-    }
+    // Never ensureCloudLive on UI refresh — leave deploy to bot/engine.
+    const snap = await fetchSnapshotCached(metaId);
     if (snap.ok) {
       balance = snap.balance;
       equity = snap.equity;
@@ -129,11 +129,67 @@ async function pnlFromMetaApi(account: {
   let cumulative = withCumulative(days);
 
   if (account.metaApiAccountId) {
-    // Parallel: lifetime + 14d daily (was sequential before)
+    // Prefer balance_delta when calibrated — skip heavy lifetime history pull.
+    if (startingBalance > 0) {
+      totalPnl = Math.round((balance - startingBalance) * 100) / 100;
+      source = "balance_delta";
+      const daily = await mt5DailyPnlFromDeals({
+        metaApiAccountId: account.metaApiAccountId,
+        daysBack: 14,
+      });
+      if (daily.ok) {
+        days = padDailyPnl(daily.days, today);
+        cumulative = withCumulative(days);
+        totalTrades =
+          account.tpCount + account.slCount ||
+          daily.days.reduce((a, d) => a + d.trades, 0);
+        const todayRow = daily.days.find((d) => d.date === today);
+        if (todayRow) {
+          const startEq = startingBalance || equity || 0;
+          await prisma.dailyStat.upsert({
+            where: { accountId_date: { accountId: account.id, date: today } },
+            create: {
+              accountId: account.id,
+              date: today,
+              startEquity: startEq,
+              endEquity: equity,
+              pnl: todayRow.pnl,
+              returnPct: startEq > 0 ? (todayRow.pnl / startEq) * 100 : 0,
+              tpCount: 0,
+              slCount: 0,
+            },
+            update: {
+              endEquity: equity,
+              pnl: todayRow.pnl,
+              returnPct: startEq > 0 ? (todayRow.pnl / startEq) * 100 : 0,
+            },
+          });
+        }
+        await prisma.brokerAccount.update({
+          where: { id: account.id },
+          data: { balance, equity, lastSyncAt: new Date() },
+        });
+      }
+      return {
+        days,
+        cumulative,
+        totalPnl,
+        totalTrades: totalTrades || account.tpCount + account.slCount,
+        source,
+        account: {
+          login: account.login,
+          equity,
+          balance,
+          startingBalance,
+        },
+      };
+    }
+
+    // Uncalibrated: lighter lifetime window (90d) + 14d daily
     const [life, daily] = await Promise.all([
       mt5LifetimeClosedPnl({
         metaApiAccountId: account.metaApiAccountId,
-        daysBack: 400,
+        daysBack: 90,
       }),
       mt5DailyPnlFromDeals({
         metaApiAccountId: account.metaApiAccountId,
@@ -169,7 +225,6 @@ async function pnlFromMetaApi(account: {
     if (daily.ok) {
       days = padDailyPnl(daily.days, today);
       cumulative = withCumulative(days);
-      // Persist today's row so next fast load is accurate
       const todayRow = daily.days.find((d) => d.date === today);
       if (todayRow) {
         const startEq = startingBalance || equity || 0;
@@ -264,7 +319,8 @@ async function pnlFromMetaApi(account: {
 
 /**
  * GET /api/pnl — fast DB by default.
- * Pass ?refresh=1 to sync from MetaAPI (slower).
+ * Pass ?refresh=1 to sync from MetaAPI (throttled, no cloud wake).
+ * Pass ?summary=1 for totals only (mypage).
  */
 export async function GET(req: NextRequest) {
   const gate = await requireUser();
@@ -273,22 +329,38 @@ export async function GET(req: NextRequest) {
   }
 
   const wantRefresh = req.nextUrl.searchParams.get("refresh") === "1";
+  const wantSummary = req.nextUrl.searchParams.get("summary") === "1";
 
   const account = await prisma.brokerAccount.findFirst({
     where: { userId: gate.user.id },
     orderBy: { createdAt: "desc" },
   });
+
   if (!account) {
-    return NextResponse.json(emptyPnl(), {
-      headers: { "Cache-Control": "no-store" },
+    return NextResponse.json(emptyPnl());
+  }
+
+  if (wantSummary && !wantRefresh) {
+    const db = await pnlFromDb(account);
+    return NextResponse.json({
+      totalPnl: db.totalPnl,
+      totalTrades: db.totalTrades,
+      source: db.source,
+      account: db.account,
+      days: [],
+      cumulative: [],
     });
   }
 
-  const body = wantRefresh
-    ? await pnlFromMetaApi(account)
-    : await pnlFromDb(account);
+  if (wantRefresh && account.metaApiAccountId) {
+    const prev = lastPnlRefreshAt.get(account.id) || 0;
+    if (Date.now() - prev < PNL_REFRESH_MIN_MS) {
+      const db = await pnlFromDb(account);
+      return NextResponse.json({ ...db, source: `${db.source}+refresh_throttled` });
+    }
+    lastPnlRefreshAt.set(account.id, Date.now());
+    return NextResponse.json(await pnlFromMetaApi(account));
+  }
 
-  return NextResponse.json(body, {
-    headers: { "Cache-Control": "no-store" },
-  });
+  return NextResponse.json(await pnlFromDb(account));
 }

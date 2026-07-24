@@ -82,9 +82,8 @@ export function BotHeartbeat() {
 
         if (linked) {
           pnlPass += 1;
-          // Every ~5th meta tick (~60s) refresh today's PnL from deals
-          const pnlQ = pnlPass % 5 === 0 ? "&pnl=1" : "";
-          const liveRes = await fetch(`/api/stats?live=1&lite=1${pnlQ}`, {
+          // Lite live only — deal PnL sync is owned by engine / rare home refresh
+          const liveRes = await fetch(`/api/stats?live=1&lite=1`, {
             cache: "no-store",
           });
           if (liveRes.ok) {
@@ -96,9 +95,9 @@ export function BotHeartbeat() {
           }
         }
 
-        // Soft assist only — Render tick-direct remains the primary engine
-        if (botOn) {
-          await fetch("/api/stats", { method: "POST" });
+        // Soft assist — never await (blocks next live poll / freezes UI)
+        if (botOn && pnlPass % 3 === 0) {
+          void fetch("/api/stats", { method: "POST" }).catch(() => null);
         }
       } catch {
         /* ignore */

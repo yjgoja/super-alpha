@@ -48,7 +48,7 @@ export default function MarketPage() {
   const [showConnect, setShowConnect] = useState(false);
 
   const loadFast = useCallback(async () => {
-    const res = await fetch("/api/stats");
+    const res = await fetch("/api/stats?summary=1", { cache: "no-store" });
     if (res.status === 401) {
       window.location.href = "/login";
       return;

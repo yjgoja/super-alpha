@@ -146,9 +146,11 @@ export default function AdminPage() {
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "회원 로드 실패");
-      return;
+      return [] as UserRow[];
     }
-    setUsers(data.users || []);
+    const next = (data.users || []) as UserRow[];
+    setUsers(next);
+    return next;
   }, []);
 
   const boot = useCallback(async () => {
@@ -161,12 +163,21 @@ export default function AdminPage() {
   }, [loadOverview, loadUsers]);
 
   useEffect(() => {
-    boot();
-    const id = setInterval(() => {
-      loadOverview();
-      loadUsers();
-    }, 15000);
-    return () => clearInterval(id);
+    const t = window.setTimeout(() => {
+      void boot();
+    }, 0);
+    // Users list is cheap now (no MetaAPI finalize). Overview less often.
+    const usersId = setInterval(() => {
+      void loadUsers();
+    }, 20_000);
+    const overviewId = setInterval(() => {
+      void loadOverview();
+    }, 60_000);
+    return () => {
+      clearTimeout(t);
+      clearInterval(usersId);
+      clearInterval(overviewId);
+    };
   }, [boot, loadOverview, loadUsers]);
 
   async function patch(body: Record<string, unknown>, key: string) {
@@ -198,20 +209,18 @@ export default function AdminPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "check_provision" }),
         }).catch(() => null);
-        await loadUsers();
-        await loadOverview();
-        const still = (await fetch("/api/admin/users").then((r) => r.json())).users?.some(
-          (u: UserRow) =>
-            u.accounts.some(
-              (a) => a.status === "provisioning" || a.status === "pending_registration",
-            ),
+        const list = await loadUsers();
+        const still = list.some((u) =>
+          u.accounts.some(
+            (a) => a.status === "provisioning" || a.status === "pending_registration",
+          ),
         );
         if (!still || n >= 40) {
           clearInterval(poll);
           setMsg(still ? "아직 연결 중입니다. 잠시 후 새로고침해주세요." : "계좌 연동이 완료되었습니다.");
-          await loadUsers();
+          await Promise.all([loadUsers(), loadOverview()]);
         }
-      }, 3000);
+      }, 5000);
     }
   }
 

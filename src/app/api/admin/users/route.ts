@@ -15,12 +15,6 @@ export async function GET() {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
 
-  try {
-    await finalizeAllProvisioning();
-  } catch {
-    /* non-fatal */
-  }
-
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
     select: {
