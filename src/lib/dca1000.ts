@@ -667,7 +667,7 @@ export function mt5TpMoneyTarget(opts: {
   return Math.round(margin * (tpRoi / 100) * 100) / 100;
 }
 
-/** 익절 판정용: API 수익과 호가 계산 수익 중 MT5에 가까운 값 */
+/** 익절/손절 판정용 PnL — TP는 낙관(max), SL은 보수(min)로 분리해 손절 지연·익절 누락을 동시에 막는다. */
 export function mt5PnlForTakeProfit(opts: {
   apiProfit: number;
   symbol: string;
@@ -689,12 +689,15 @@ export function mt5PnlForTakeProfit(opts: {
       }),
     0,
   );
-  // 터미널 수익(스프레드 반영)과 라이브 호가 손익 중 큰 쪽으로 익절 — 지연으로 놓치는 것 방지
   const api = Number.isFinite(opts.apiProfit) ? opts.apiProfit : quotePnl;
+  const quote = Math.round(quotePnl * 100) / 100;
   return {
+    /** 익절용 — API/호가 중 큰 값 (지연으로 익절 놓침 방지) */
     pnl: Math.max(api, quotePnl),
+    /** 손절용 — API/호가 중 작은 값 (손절 지연·미발동 방지) */
+    pnlForSl: Math.min(api, quotePnl),
     apiProfit: api,
-    quotePnl: Math.round(quotePnl * 100) / 100,
+    quotePnl: quote,
     spreadCost: mt5SpreadCostMoney({
       symbol: opts.symbol,
       lots: opts.legs.reduce((s, l) => s + l.lots, 0),

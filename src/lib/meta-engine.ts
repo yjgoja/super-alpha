@@ -199,10 +199,10 @@ async function syncBrokerBasketProtection(opts: {
       );
     }
   }
-  return { synced, skipped: false as const, drift, failed, targets };
+  return { synced, skipped: false as const, drift, failed, targets, missingIds: legs.length === 0 && opts.positions.length > 0 };
 }
 
-/** 진입/DCA 직후 스냅샷 재조회 → 브로커 TP/SL 즉시 재설정 */
+/** 진입/DCA 직후 스냅샷 재조회 → 브로커 TP/SL 즉시 재설정 (실패 시 1회 재시도) */
 async function refreshAndProtectBasket(opts: {
   metaId: string;
   symbol: string;
@@ -213,19 +213,83 @@ async function refreshAndProtectBasket(opts: {
   brokerLeverage?: number;
 }) {
   if (!brokerProtectEnabled()) return { ok: false as const, reason: "disabled" };
-  const snap = await fetchSnapshot(opts.metaId);
-  if (!snap.ok) return { ok: false as const, reason: snap.message };
-  const positions = snap.positions.filter(
-    (p) => symbolsMatch(p.symbol, opts.symbol) && p.direction === opts.direction,
-  ) as PosRow[];
-  if (positions.length === 0) return { ok: false as const, reason: "no_positions" };
-  const lots = positions.reduce((s, p) => s + p.lots, 0);
-  const avg =
-    lots > 0 ? positions.reduce((s, p) => s + p.lots * p.price, 0) / lots : 0;
-  const brokerMarginSum = positions.reduce(
-    (s, p) => s + (typeof p.margin === "number" && p.margin > 0 ? p.margin : 0),
-    0,
-  );
+
+  async function once() {
+    const snap = await fetchSnapshot(opts.metaId);
+    if (!snap.ok) return { ok: false as const, reason: snap.message };
+    const positions = snap.positions.filter(
+      (p) => symbolsMatch(p.symbol, opts.symbol) && p.direction === opts.direction,
+    ) as PosRow[];
+    if (positions.length === 0) return { ok: false as const, reason: "no_positions" };
+    const lots = positions.reduce((s, p) => s + p.lots, 0);
+    const avg =
+      lots > 0 ? positions.reduce((s, p) => s + p.lots * p.price, 0) / lots : 0;
+    const brokerMarginSum = positions.reduce(
+      (s, p) => s + (typeof p.margin === "number" && p.margin > 0 ? p.margin : 0),
+      0,
+    );
+    const liveUsd = liveBasketTpSlUsd({
+      symbol: opts.symbol,
+      lots,
+      avgPrice: avg,
+      takeProfitPct: opts.takeProfitPct,
+      stopLossPct: opts.stopLossPct,
+      brokerLeverage: opts.brokerLeverage,
+      brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
+    });
+    const sync = await syncBrokerBasketProtection({
+      metaId: opts.metaId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      positions,
+      avgPrice: avg,
+      lots,
+      takeProfitUsd: liveUsd.takeProfitUsd,
+      stopLossUsd: liveUsd.stopLossUsd,
+      stopLossEnabled: opts.stopLossEnabled,
+    });
+    if ((sync.failed ?? 0) > 0) {
+      return { ok: false as const, reason: `modify_failed:${sync.failed}`, sync, liveUsd };
+    }
+    return { ok: true as const, sync, liveUsd };
+  }
+
+  let result = await once();
+  if (!result.ok && result.reason !== "disabled") {
+    await new Promise((r) => setTimeout(r, 400));
+    result = await once();
+  }
+  if (!result.ok) {
+    console.error(
+      `[engine] protect refresh fail ${opts.symbol} ${opts.direction}: ${result.reason}`,
+    );
+  }
+  return result;
+}
+
+/**
+ * 포지션 API 공백(고스트)인데 DB 바스켓이 열린 경우 — 호가 ROI로 긴급 TP/SL 시도.
+ * closePositionsBySymbolDirection 이 내부에서 스냅샷을 다시 보므로 지연 중에도 닫힐 수 있다.
+ */
+async function tryGhostBasketSoftExit(opts: {
+  accountId: string;
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  basket: BasketRow;
+  legs: { level: number; lots: number; price: number }[];
+  bid: number;
+  ask: number;
+  logic: string;
+  takeProfitPct: number;
+  stopLossPct: number;
+  stopLossEnabled: boolean;
+  brokerLeverage?: number;
+}) {
+  const lots = opts.legs.reduce((s, l) => s + l.lots, 0);
+  const avg = avgPrice(opts.legs);
+  if (!(lots > 0) || !(avg > 0)) return { handled: false as const };
+
   const liveUsd = liveBasketTpSlUsd({
     symbol: opts.symbol,
     lots,
@@ -233,20 +297,121 @@ async function refreshAndProtectBasket(opts: {
     takeProfitPct: opts.takeProfitPct,
     stopLossPct: opts.stopLossPct,
     brokerLeverage: opts.brokerLeverage,
-    brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
   });
-  const sync = await syncBrokerBasketProtection({
-    metaId: opts.metaId,
+  const tpPnl = mt5PnlForTakeProfit({
+    apiProfit: 0,
     symbol: opts.symbol,
     direction: opts.direction,
-    positions,
-    avgPrice: avg,
-    lots,
-    takeProfitUsd: liveUsd.takeProfitUsd,
-    stopLossUsd: liveUsd.stopLossUsd,
-    stopLossEnabled: opts.stopLossEnabled,
+    legs: opts.legs.map((l) => ({ lots: l.lots, price: l.price })),
+    bid: opts.bid,
+    ask: opts.ask,
   });
-  return { ok: true as const, sync, liveUsd };
+  const tpDecision = shouldTriggerTakeProfit({
+    pnl: tpPnl.pnl,
+    takeProfitUsd: liveUsd.takeProfitUsd,
+    usedMargin: liveUsd.marginUsd,
+    tpRoiPct: liveUsd.takeProfitPct,
+  });
+  const slDecision = shouldTriggerStopLossUsd({
+    pnl: tpPnl.pnlForSl,
+    stopLossUsd: opts.stopLossEnabled ? liveUsd.stopLossUsd : 0,
+    usedMargin: opts.stopLossEnabled ? liveUsd.marginUsd : 0,
+    stopLossRoiPct: opts.stopLossEnabled ? liveUsd.stopLossPct : 0,
+  });
+
+  if (!tpDecision.hit && !slDecision.hit) return { handled: false as const };
+
+  const kind = tpDecision.hit ? "TP" : "SL";
+  console.error(
+    `[engine] ghost soft-${kind} attempt account=${opts.accountId} ${opts.symbol} ${opts.direction} roiTp=${tpDecision.floatingRoi.toFixed(2)} roiSl=${slDecision.floatingRoi.toFixed(2)}`,
+  );
+  const closeRes = await closePositionsBySymbolDirection(
+    opts.metaId,
+    opts.symbol,
+    opts.direction,
+  );
+  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+    await logTpMissGuard({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      logic: opts.logic,
+      floatingRoi: tpDecision.hit ? tpDecision.floatingRoi : slDecision.floatingRoi,
+      tpRoi: tpDecision.tpRoi,
+      tpMoney: tpDecision.tpMoney,
+      pnl: tpDecision.hit ? tpPnl.pnl : tpPnl.pnlForSl,
+      brokerTpMissing: true,
+      reason: `ghost_${kind.toLowerCase()}_close_failed`,
+    });
+    return {
+      handled: true as const,
+      result: {
+        ok: false as const,
+        action: "ghost_close_failed",
+        symbol: opts.symbol,
+        error: ("message" in closeRes && closeRes.message) || "ghost close failed",
+      },
+    };
+  }
+
+  const pnlSum = tpDecision.hit ? tpPnl.pnl : tpPnl.pnlForSl;
+  await prisma.basket.update({
+    where: { id: opts.basket.id },
+    data: {
+      status: "closed",
+      realizedPnl: pnlSum,
+      lastExitAt: new Date(),
+      unrealizedPnl: 0,
+    },
+  });
+  await prisma.fill.create({
+    data: {
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      side: opts.direction === "BUY" ? "SELL" : "BUY",
+      lots,
+      price: opts.direction === "BUY" ? opts.bid : opts.ask,
+      pnl: pnlSum,
+      kind,
+      note: `${opts.logic}|ghost_soft_${kind}|roi=${(tpDecision.hit ? tpDecision.floatingRoi : slDecision.floatingRoi).toFixed(2)}`,
+    },
+  });
+  if (kind === "TP") {
+    await prisma.brokerAccount.update({
+      where: { id: opts.accountId },
+      data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
+    });
+  } else {
+    await prisma.brokerAccount.update({
+      where: { id: opts.accountId },
+      data: { slCount: { increment: 1 } },
+    });
+  }
+  return {
+    handled: true as const,
+    result: {
+      ok: true as const,
+      action: kind === "TP" ? ("ghost_tp" as const) : ("ghost_sl" as const),
+      symbol: opts.symbol,
+      floatingPnl: pnlSum,
+    },
+  };
+}
+
+async function forceCloseRemainder(opts: {
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  rounds?: number;
+}) {
+  const rounds = Math.max(1, opts.rounds ?? 2);
+  let last: Awaited<ReturnType<typeof closePositionsBySymbolDirection>> | null = null;
+  for (let i = 0; i < rounds; i++) {
+    last = await closePositionsBySymbolDirection(opts.metaId, opts.symbol, opts.direction);
+    if (last.ok && (last.remaining ?? 0) === 0) return last;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return last!;
 }
 
 async function logTpMissGuard(opts: {
@@ -439,6 +604,9 @@ async function closeBasketTp(opts: {
   floatingRoi: number;
   /** manageOnly / 토글 OFF 시 재진입 금지 */
   allowReentry?: boolean;
+  stopLossPct?: number;
+  stopLossEnabled?: boolean;
+  brokerLeverage?: number;
 }) {
   const {
     accountId,
@@ -457,9 +625,15 @@ async function closeBasketTp(opts: {
     pnlSum,
     floatingRoi,
     allowReentry = true,
+    stopLossPct,
+    stopLossEnabled = true,
+    brokerLeverage,
   } = opts;
 
-  const closeRes = await closePositionsBySymbolDirection(metaId, symbol, direction);
+  let closeRes = await closePositionsBySymbolDirection(metaId, symbol, direction);
+  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+    closeRes = await forceCloseRemainder({ metaId, symbol, direction });
+  }
   if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
     return {
       closed: false as const,
@@ -556,8 +730,10 @@ async function closeBasketTp(opts: {
     symbol,
     direction,
     takeProfitPct: tpRoi > 0 ? tpRoi : 20,
-    stopLossPct: DCA1000_DEFAULT_SL_ROI,
-    stopLossEnabled: true,
+    stopLossPct:
+      stopLossPct != null && stopLossPct > 0 ? stopLossPct : DCA1000_DEFAULT_SL_ROI,
+    stopLossEnabled,
+    brokerLeverage,
   });
   return { closed: true as const, reentered: true as const };
 }
@@ -619,16 +795,44 @@ async function runSymbolTableDca(
   let basket = baskets.find(
     (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
   );
-  const ourPositions = positionsForSymbol(positions, symbol, direction);
+  let ourPositions = positionsForSymbol(positions, symbol, direction);
 
-  // Ghost basket (DB open, MT5 empty): heal at account level only — never stop here.
+  // Ghost basket (DB open, MT5 empty): retry snapshot → 호가 긴급 TP/SL → 그래도 없으면 pending
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
-    return {
-      ok: true as const,
-      action: "ghost_pending",
-      symbol,
-      note: "await_ghost_heal",
-    };
+    const retry = await fetchSnapshot(metaId);
+    if (retry.ok) {
+      ourPositions = positionsForSymbol(retry.positions, symbol, direction);
+    }
+    if (ourPositions.length === 0) {
+      const legsForGhost = basket.legs.sort((a, b) => a.level - b.level);
+      const ghostTp = isBulkLogic(logic)
+        ? levels[basket.filledLevel]?.profit && levels[basket.filledLevel]!.profit > 0
+          ? levels[basket.filledLevel]!.profit
+          : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct)
+        : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
+      const ghostExit = await tryGhostBasketSoftExit({
+        accountId,
+        metaId,
+        symbol,
+        direction,
+        basket,
+        legs: legsForGhost,
+        bid: price.bid,
+        ask: price.ask,
+        logic,
+        takeProfitPct: ghostTp,
+        stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+        stopLossEnabled: cfg.stopLossEnabled,
+        brokerLeverage: cfg.brokerLeverage,
+      });
+      if (ghostExit.handled) return ghostExit.result;
+      return {
+        ok: true as const,
+        action: "ghost_pending",
+        symbol,
+        note: "await_ghost_heal",
+      };
+    }
   }
 
   if (!basket && ourPositions.length > 0) {
@@ -706,7 +910,7 @@ async function runSymbolTableDca(
         ? levels[0].profit
         : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct)
       : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
-    await refreshAndProtectBasket({
+    const protectRes = await refreshAndProtectBasket({
       metaId,
       symbol,
       direction,
@@ -715,6 +919,15 @@ async function runSymbolTableDca(
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: cfg.brokerLeverage,
     });
+    if (!protectRes.ok && protectRes.reason !== "disabled") {
+      return {
+        ok: false as const,
+        action: "entry_unprotected",
+        symbol,
+        error: `진입 후 브로커 TP/SL 동기화 실패: ${protectRes.reason}`,
+        spreadPct: spr,
+      };
+    }
     return { ok: true as const, action: "entry", symbol, spreadPct: spr };
   }
 
@@ -799,6 +1012,11 @@ async function runSymbolTableDca(
     stopLossUsd: liveUsd.stopLossUsd,
     stopLossEnabled: cfg.stopLossEnabled,
   });
+  if ((protect.failed ?? 0) > 0) {
+    console.error(
+      `[engine] broker protect partial fail account=${accountId} ${symbol} ${direction} failed=${protect.failed}`,
+    );
+  }
 
   const tpDecision = shouldTriggerTakeProfit({
     pnl: tpPnl.pnl,
@@ -809,6 +1027,7 @@ async function runSymbolTableDca(
   // 익절 우선: BasketROI ≥ TP% → 바스켓 전량 청산 → 재진입
   if (tpDecision.hit) {
     const brokerTpMissing =
+      (protect.failed ?? 0) > 0 ||
       !protect.targets?.takeProfit ||
       ourPositions.some(
         (p) =>
@@ -851,6 +1070,9 @@ async function runSymbolTableDca(
       pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
       allowReentry: !cfg.manageOnly,
+      stopLossPct: liveUsd.stopLossPct,
+      stopLossEnabled: cfg.stopLossEnabled,
+      brokerLeverage: brokerLev,
     });
     if (!tpClose.closed) {
       await logTpMissGuard({
@@ -896,14 +1118,18 @@ async function runSymbolTableDca(
   }
 
   // 손절: BasketROI ≤ -SL% (마진 ROI, 바이낸스식) → 바스켓 전량 청산
+  // pnlForSl = min(api,quote) — 손절 지연(익절용 max PnL) 방지
   const slDecision = shouldTriggerStopLossUsd({
-    pnl: tpPnl.pnl,
+    pnl: tpPnl.pnlForSl,
     stopLossUsd: cfg.stopLossEnabled ? liveUsd.stopLossUsd : 0,
     usedMargin: cfg.stopLossEnabled ? usedMargin : 0,
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    const slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
+    let slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
+    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+      slClose = await forceCloseRemainder({ metaId, symbol, direction });
+    }
     if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
       return {
         ok: false as const,
@@ -933,7 +1159,7 @@ async function runSymbolTableDca(
         price: direction === "BUY" ? price.bid : price.ask,
         pnl: pnlSum,
         kind: "SL",
-        note: `${logic}|roi=${floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${pnlSum.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
+        note: `${logic}|roi=${slDecision.floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${pnlSum.toFixed(2)}<=-sl$${slDecision.stopLossUsd}|pnlForSl=${tpPnl.pnlForSl.toFixed(2)}`,
       },
     });
     await prisma.brokerAccount.update({
@@ -949,7 +1175,7 @@ async function runSymbolTableDca(
       symbol,
       profit,
       floatingPnl: pnlSum,
-      floatingRoi,
+      floatingRoi: slDecision.floatingRoi,
       stopLossUsd: slDecision.stopLossUsd,
       spreadPct: spr,
     };
@@ -1045,7 +1271,7 @@ async function runSymbolTableDca(
         ? levels[filled].profit
         : tpRoiFallback
       : tpRoiFallback;
-    await refreshAndProtectBasket({
+    const protectRes = await refreshAndProtectBasket({
       metaId,
       symbol,
       direction,
@@ -1054,6 +1280,17 @@ async function runSymbolTableDca(
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: brokerLev,
     });
+    if (!protectRes.ok && protectRes.reason !== "disabled") {
+      return {
+        ok: false as const,
+        action: "dca_unprotected",
+        symbol,
+        filled,
+        actions,
+        error: `DCA 후 브로커 TP/SL 동기화 실패: ${protectRes.reason}`,
+        spreadPct: spr,
+      };
+    }
     return {
       ok: true as const,
       action: "dca",
@@ -1120,16 +1357,39 @@ async function runSymbolDca(
   let basket = baskets.find(
     (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
   );
-  const ourPositions = positionsForSymbol(positions, symbol, direction);
+  let ourPositions = positionsForSymbol(positions, symbol, direction);
 
-  // Same as table-logic path: never stop master bot from a single empty snapshot.
+  // Same as table-logic path: retry → ghost soft TP/SL → pending
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
-    return {
-      ok: true as const,
-      action: "ghost_pending",
-      symbol,
-      note: "await_ghost_heal",
-    };
+    const retry = await fetchSnapshot(metaId);
+    if (retry.ok) {
+      ourPositions = positionsForSymbol(retry.positions, symbol, direction);
+    }
+    if (ourPositions.length === 0) {
+      const legsForGhost = basket.legs.sort((a, b) => a.level - b.level);
+      const ghostExit = await tryGhostBasketSoftExit({
+        accountId,
+        metaId,
+        symbol,
+        direction,
+        basket,
+        legs: legsForGhost,
+        bid: price.bid,
+        ask: price.ask,
+        logic,
+        takeProfitPct: resolveLiveTakeProfitPct(logic, cfg.takeProfitPct),
+        stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+        stopLossEnabled: cfg.stopLossEnabled,
+        brokerLeverage: cfg.brokerLeverage,
+      });
+      if (ghostExit.handled) return ghostExit.result;
+      return {
+        ok: true as const,
+        action: "ghost_pending",
+        symbol,
+        note: "await_ghost_heal",
+      };
+    }
   }
 
   if (!basket && ourPositions.length > 0) {
@@ -1201,7 +1461,7 @@ async function runSymbolDca(
         note: logic,
       },
     });
-    await refreshAndProtectBasket({
+    const protectRes = await refreshAndProtectBasket({
       metaId,
       symbol,
       direction,
@@ -1210,6 +1470,14 @@ async function runSymbolDca(
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: cfg.brokerLeverage,
     });
+    if (!protectRes.ok && protectRes.reason !== "disabled") {
+      return {
+        ok: false as const,
+        action: "entry_unprotected",
+        symbol,
+        error: `진입 후 브로커 TP/SL 동기화 실패: ${protectRes.reason}`,
+      };
+    }
     return { ok: true as const, action: "entry", symbol };
   }
 
@@ -1264,6 +1532,11 @@ async function runSymbolDca(
     stopLossUsd: liveUsd.stopLossUsd,
     stopLossEnabled: cfg.stopLossEnabled,
   });
+  if ((protect.failed ?? 0) > 0) {
+    console.error(
+      `[engine] broker protect partial fail account=${accountId} ${symbol} ${direction} failed=${protect.failed}`,
+    );
+  }
 
   const tpDecision = shouldTriggerTakeProfit({
     pnl: tpPnl.pnl,
@@ -1274,6 +1547,7 @@ async function runSymbolDca(
 
   if (tpDecision.hit) {
     const brokerTpMissing =
+      (protect.failed ?? 0) > 0 ||
       !protect.targets?.takeProfit ||
       ourPositions.some(
         (p) =>
@@ -1315,6 +1589,9 @@ async function runSymbolDca(
       pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
       allowReentry: !cfg.manageOnly,
+      stopLossPct: liveUsd.stopLossPct,
+      stopLossEnabled: cfg.stopLossEnabled,
+      brokerLeverage: brokerLev,
     });
     if (!tpClose.closed) {
       await logTpMissGuard({
@@ -1349,13 +1626,16 @@ async function runSymbolDca(
   }
 
   const slDecision = shouldTriggerStopLossUsd({
-    pnl: tpPnl.pnl,
+    pnl: tpPnl.pnlForSl,
     stopLossUsd: cfg.stopLossEnabled ? liveUsd.stopLossUsd : 0,
     usedMargin: cfg.stopLossEnabled ? usedMargin : 0,
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    const slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
+    let slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
+    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+      slClose = await forceCloseRemainder({ metaId, symbol, direction });
+    }
     if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
       return {
         ok: false as const,
@@ -1388,7 +1668,7 @@ async function runSymbolDca(
         price: direction === "BUY" ? price.bid : price.ask,
         pnl: tpPnl.apiProfit,
         kind: "SL",
-        note: `${logic}|roi=${floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${tpPnl.apiProfit.toFixed(2)}<=-sl$${slDecision.stopLossUsd}`,
+        note: `${logic}|roi=${slDecision.floatingRoi.toFixed(2)}%<=-${liveUsd.stopLossPct}%|pnl=${tpPnl.apiProfit.toFixed(2)}<=-sl$${slDecision.stopLossUsd}|pnlForSl=${tpPnl.pnlForSl.toFixed(2)}`,
       },
     });
     if (cfg.stopOnSl) {
@@ -1400,7 +1680,7 @@ async function runSymbolDca(
       symbol,
       stopLossUsd: slDecision.stopLossUsd,
       floatingPnl: tpPnl.apiProfit,
-      floatingRoi,
+      floatingRoi: slDecision.floatingRoi,
     };
   }
 
@@ -1474,7 +1754,7 @@ async function runSymbolDca(
           note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}`,
         },
       });
-      await refreshAndProtectBasket({
+      const protectRes = await refreshAndProtectBasket({
         metaId,
         symbol,
         direction,
@@ -1483,6 +1763,15 @@ async function runSymbolDca(
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: brokerLev,
       });
+      if (!protectRes.ok && protectRes.reason !== "disabled") {
+        return {
+          ok: false as const,
+          action: "dca_unprotected",
+          symbol,
+          level: nextLevel,
+          error: `DCA 후 브로커 TP/SL 동기화 실패: ${protectRes.reason}`,
+        };
+      }
       return { ok: true as const, action: "dca", level: nextLevel, symbol };
     }
   }
