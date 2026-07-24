@@ -22,7 +22,6 @@ export default function HomePage() {
   const [equity, setEquity] = useState(0);
   const [dailyPnl, setDailyPnl] = useState(0);
   const [dailyReturnPct, setDailyReturnPct] = useState(0);
-  const [totalReturnPct, setTotalReturnPct] = useState(0);
   const [shareOpen, setShareOpen] = useState(false);
   const [tip, setTip] = useState<{ date: string; pnl: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +64,6 @@ export default function HomePage() {
       setEquity(stats.account.equity || 0);
       setDailyPnl(stats.account.dailyPnl || 0);
       setDailyReturnPct(Number(stats.account.dailyReturnPct) || 0);
-      setTotalReturnPct(Number(stats.account.totalReturnPct) || 0);
       setAccountStatus(stats.account.status || null);
       setHasAccount(true);
       if (stats.account.metaApiAccountId) linkedNow = true;
