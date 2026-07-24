@@ -1,12 +1,22 @@
 /**
  * MetaAPI real-time streaming pool.
  * Terminal state (account info + positions) is local after sync — no REST CPU credits.
- * Trades still go through REST/RPC (cheap: 10 credits).
+ * Trades prefer the streaming connection (not REST /trade) so we do not burn
+ * the separate REST trade CPU quota that was blocking re-entry.
  *
  * Docs: https://metaapi.cloud/docs/client/rateLimiting/
  */
 import MetaApi from "metaapi.cloud-sdk";
 import type { MetaErr, MetaSnap } from "./metaapi";
+
+type TradeResult = {
+  numericCode?: number;
+  stringCode?: string;
+  message?: string;
+  error?: string;
+  positionId?: string;
+  orderId?: string;
+};
 
 type StreamConn = {
   connect: () => Promise<unknown>;
@@ -18,6 +28,29 @@ type StreamConn = {
     subscriptions: Array<{ type: string }>,
     timeoutInSeconds?: number,
   ) => Promise<unknown>;
+  createMarketBuyOrder: (
+    symbol: string,
+    volume: number,
+    stopLoss?: number,
+    takeProfit?: number,
+    options?: { comment?: string },
+  ) => Promise<TradeResult>;
+  createMarketSellOrder: (
+    symbol: string,
+    volume: number,
+    stopLoss?: number,
+    takeProfit?: number,
+    options?: { comment?: string },
+  ) => Promise<TradeResult>;
+  modifyPosition: (
+    positionId: string,
+    stopLoss?: number,
+    takeProfit?: number,
+  ) => Promise<TradeResult>;
+  closePosition: (
+    positionId: string,
+    options?: Record<string, unknown>,
+  ) => Promise<TradeResult>;
   terminalState: {
     connected: boolean;
     connectedToBroker: boolean;
@@ -335,4 +368,151 @@ export function pruneStreams(activeIds: Set<string>, maxIdleMs = 180_000) {
 
 export function streamPoolSize() {
   return handles.size;
+}
+
+function tradeOk(res: TradeResult | null | undefined): boolean {
+  if (!res || typeof res !== "object") return false;
+  if (res.error) return false;
+  const n = Number(res.numericCode);
+  // MT retcodes: 10008 DONE_PARTIAL, 10009 DONE, 10010 DONE_MONEY
+  if (Number.isFinite(n) && n >= 10008 && n <= 10010) return true;
+  const s = String(res.stringCode || "");
+  return /DONE|PLACED|OK/i.test(s);
+}
+
+function tradeFailMessage(res: TradeResult | null | undefined, fallback: string) {
+  if (!res) return fallback;
+  return String(res.message || res.stringCode || res.error || fallback);
+}
+
+async function readyTradeConn(
+  metaApiAccountId: string,
+  symbol?: string,
+): Promise<StreamConn | null> {
+  if (!isMetaStreamEnabled()) return null;
+  const ok = await ensureStreamConnected(
+    metaApiAccountId,
+    null,
+    symbol ? [symbol] : [],
+  );
+  if (!ok) return null;
+  const h = handles.get(String(metaApiAccountId));
+  if (!h?.ready || !h.conn) return null;
+  h.lastUsed = Date.now();
+  return h.conn;
+}
+
+/** Streaming market order — avoids REST /trade CPU credits when connection is live. */
+export async function streamPlaceMarketOrder(input: {
+  metaApiAccountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  lots: number;
+  comment?: string;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+}): Promise<
+  | { ok: true; data: TradeResult; via: "stream" }
+  | { ok: false; message: string; data?: TradeResult; via: "stream" }
+  | null
+> {
+  const conn = await readyTradeConn(input.metaApiAccountId, input.symbol);
+  if (!conn) return null;
+  const sl =
+    input.stopLoss != null && Number.isFinite(input.stopLoss) && input.stopLoss > 0
+      ? input.stopLoss
+      : undefined;
+  const tp =
+    input.takeProfit != null &&
+    Number.isFinite(input.takeProfit) &&
+    input.takeProfit > 0
+      ? input.takeProfit
+      : undefined;
+  const options = input.comment ? { comment: input.comment } : undefined;
+  try {
+    const res =
+      input.direction === "BUY"
+        ? await conn.createMarketBuyOrder(input.symbol, input.lots, sl, tp, options)
+        : await conn.createMarketSellOrder(input.symbol, input.lots, sl, tp, options);
+    if (tradeOk(res)) return { ok: true, data: res, via: "stream" };
+    return {
+      ok: false,
+      message: tradeFailMessage(res, "스트리밍 주문 실패"),
+      data: res,
+      via: "stream",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "스트리밍 주문 예외",
+      via: "stream",
+    };
+  }
+}
+
+export async function streamModifyPosition(input: {
+  metaApiAccountId: string;
+  positionId: string;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+}): Promise<
+  | { ok: true; data: TradeResult; via: "stream" }
+  | { ok: false; message: string; data?: TradeResult; via: "stream" }
+  | null
+> {
+  const conn = await readyTradeConn(input.metaApiAccountId);
+  if (!conn) return null;
+  const sl =
+    input.stopLoss != null && Number.isFinite(input.stopLoss) && input.stopLoss > 0
+      ? input.stopLoss
+      : undefined;
+  const tp =
+    input.takeProfit != null &&
+    Number.isFinite(input.takeProfit) &&
+    input.takeProfit > 0
+      ? input.takeProfit
+      : undefined;
+  try {
+    const res = await conn.modifyPosition(input.positionId, sl, tp);
+    if (tradeOk(res)) return { ok: true, data: res, via: "stream" };
+    return {
+      ok: false,
+      message: tradeFailMessage(res, "스트리밍 TP/SL 수정 실패"),
+      data: res,
+      via: "stream",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "스트리밍 TP/SL 예외",
+      via: "stream",
+    };
+  }
+}
+
+export async function streamClosePosition(
+  metaApiAccountId: string,
+  positionId: string,
+): Promise<
+  | { ok: true; via: "stream" }
+  | { ok: false; message: string; via: "stream" }
+  | null
+> {
+  const conn = await readyTradeConn(metaApiAccountId);
+  if (!conn) return null;
+  try {
+    const res = await conn.closePosition(positionId, {});
+    if (tradeOk(res)) return { ok: true, via: "stream" };
+    return {
+      ok: false,
+      message: tradeFailMessage(res, "스트리밍 청산 실패"),
+      via: "stream",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "스트리밍 청산 예외",
+      via: "stream",
+    };
+  }
 }

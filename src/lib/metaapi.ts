@@ -1744,8 +1744,71 @@ export async function placeMarketOrder(input: {
   takeProfit?: number | null;
 }) {
   const t0 = Date.now();
-  const base = await tradeApiBase(input.metaApiAccountId);
   const brokerSym = await resolveBrokerSymbol(input.metaApiAccountId, input.symbol);
+
+  // Prefer streaming trade (avoids exhausted REST /trade CPU quota).
+  try {
+    const { streamPlaceMarketOrder } = await import("./metaapi-stream");
+    const streamed = await streamPlaceMarketOrder({
+      metaApiAccountId: input.metaApiAccountId,
+      symbol: brokerSym,
+      direction: input.direction,
+      lots: input.lots,
+      comment: input.comment,
+      stopLoss: input.stopLoss,
+      takeProfit: input.takeProfit,
+    });
+    if (streamed?.ok) {
+      invalidateSnapshotCache(input.metaApiAccountId);
+      return { ok: true as const, data: streamed.data, brokerSymbol: brokerSym, via: "stream" as const };
+    }
+    // Soft broker reject (e.g. TP/SL) — caller may retry naked; don't fall through if stream ran.
+    if (streamed && !streamed.ok) {
+      const soft =
+        /Invalid stops|Invalid S\/L|Invalid T\/P|stops level|TRADE_RETCODE_INVALID_STOPS|TRADE_RETCODE_INVALID_PRICE/i.test(
+          streamed.message || JSON.stringify(streamed.data || ""),
+        );
+      if (!soft) {
+        // Stream connected but order failed for non-stops reason — still try REST only if not credit-blocked.
+        // Stops rejects should return so caller can naked-retry via stream again.
+      } else {
+        invalidateSnapshotCache(input.metaApiAccountId);
+        return {
+          ok: false as const,
+          message: streamed.message || "주문에 실패했습니다.",
+          data: streamed.data,
+          brokerSymbol: brokerSym,
+          via: "stream" as const,
+        };
+      }
+      // Non-soft stream fail: attempt REST fallback below (unless trade credits exhausted).
+      if (metaApiTradeCreditBlocked()) {
+        invalidateSnapshotCache(input.metaApiAccountId);
+        return {
+          ok: false as const,
+          message: streamed.message || "주문에 실패했습니다.",
+          data: streamed.data,
+          brokerSymbol: brokerSym,
+          via: "stream" as const,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[metaapi] stream placeMarketOrder fallback",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  if (metaApiTradeCreditBlocked()) {
+    return {
+      ok: false as const,
+      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
+      brokerSymbol: brokerSym,
+    };
+  }
+
+  const base = await tradeApiBase(input.metaApiAccountId);
   const actionType = input.direction === "BUY" ? "ORDER_TYPE_BUY" : "ORDER_TYPE_SELL";
   const body: Record<string, unknown> = {
     actionType,
@@ -1758,14 +1821,6 @@ export async function placeMarketOrder(input: {
   }
   if (input.takeProfit != null && Number.isFinite(input.takeProfit) && input.takeProfit > 0) {
     body.takeProfit = input.takeProfit;
-  }
-
-  if (metaApiTradeCreditBlocked()) {
-    return {
-      ok: false as const,
-      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
-      brokerSymbol: brokerSym,
-    };
   }
 
   // Soft 429: brief retry. Hard 6h trade-credit exhaustion: pause, no retry storm.
@@ -1815,9 +1870,10 @@ export async function placeMarketOrder(input: {
       message: toKoreanError(res.data, "주문에 실패했습니다."),
       data: res.data,
       brokerSymbol: brokerSym,
+      via: "rest" as const,
     };
   }
-  return { ok: true as const, data: res.data, brokerSymbol: brokerSym };
+  return { ok: true as const, data: res.data, brokerSymbol: brokerSym, via: "rest" as const };
 }
 
 /** 심볼 거래 스펙 (stopsLevel / digits) — modify 거절 방지용 캐시 */
@@ -1863,6 +1919,30 @@ export async function getSymbolTradeSpec(metaApiAccountId: string, symbol: strin
 }
 
 export async function closePosition(metaApiAccountId: string, positionId: string) {
+  try {
+    const { streamClosePosition } = await import("./metaapi-stream");
+    const streamed = await streamClosePosition(metaApiAccountId, positionId);
+    if (streamed?.ok) {
+      invalidateSnapshotCache(metaApiAccountId);
+      return { ok: true as const, via: "stream" as const };
+    }
+    if (streamed && !streamed.ok && metaApiTradeCreditBlocked()) {
+      return { ok: false as const, message: streamed.message };
+    }
+  } catch (e) {
+    console.warn(
+      "[metaapi] stream closePosition fallback",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  if (metaApiTradeCreditBlocked()) {
+    return {
+      ok: false as const,
+      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
+    };
+  }
+
   const base = await tradeApiBase(metaApiAccountId);
   const res = await api(base, "POST", `/users/current/accounts/${metaApiAccountId}/trade`, {
     actionType: "POSITION_CLOSE_ID",
@@ -1870,9 +1950,10 @@ export async function closePosition(metaApiAccountId: string, positionId: string
   });
   invalidateSnapshotCache(metaApiAccountId);
   if (res.status >= 400) {
+    if (isTradeCreditExhausted(res.data)) noteTradeCreditExhausted();
     return { ok: false as const, message: toKoreanError(res.data, "청산에 실패했습니다.") };
   }
-  return { ok: true as const };
+  return { ok: true as const, via: "rest" as const };
 }
 
 /**
@@ -1885,6 +1966,40 @@ export async function modifyPositionProtection(input: {
   stopLoss?: number | null;
   takeProfit?: number | null;
 }) {
+  if (
+    (input.stopLoss == null || !(input.stopLoss > 0)) &&
+    (input.takeProfit == null || !(input.takeProfit > 0))
+  ) {
+    return { ok: false as const, message: "stopLoss/takeProfit 값이 없습니다." };
+  }
+
+  try {
+    const { streamModifyPosition } = await import("./metaapi-stream");
+    const streamed = await streamModifyPosition(input);
+    if (streamed?.ok) {
+      return { ok: true as const, data: streamed.data, via: "stream" as const };
+    }
+    if (streamed && !streamed.ok && metaApiTradeCreditBlocked()) {
+      return {
+        ok: false as const,
+        message: streamed.message,
+        data: streamed.data,
+      };
+    }
+  } catch (e) {
+    console.warn(
+      "[metaapi] stream modifyPosition fallback",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  if (metaApiTradeCreditBlocked()) {
+    return {
+      ok: false as const,
+      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
+    };
+  }
+
   const base = await tradeApiBase(input.metaApiAccountId);
   const body: Record<string, unknown> = {
     actionType: "POSITION_MODIFY",
@@ -1895,15 +2010,6 @@ export async function modifyPositionProtection(input: {
   }
   if (input.takeProfit != null && Number.isFinite(input.takeProfit) && input.takeProfit > 0) {
     body.takeProfit = input.takeProfit;
-  }
-  if (body.stopLoss == null && body.takeProfit == null) {
-    return { ok: false as const, message: "stopLoss/takeProfit 값이 없습니다." };
-  }
-  if (metaApiTradeCreditBlocked()) {
-    return {
-      ok: false as const,
-      message: "MetaAPI 주문 한도(6시간) 소진 — 잠시 후 재시도",
-    };
   }
   const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
   if (res.status === 429 || isRateLimitError(res.data)) {
@@ -1923,7 +2029,7 @@ export async function modifyPositionProtection(input: {
       `/users/current/accounts/${input.metaApiAccountId}/trade`,
       body,
     );
-    if (retry.status < 400) return { ok: true as const, data: retry.data };
+    if (retry.status < 400) return { ok: true as const, data: retry.data, via: "rest" as const };
     if (isTradeCreditExhausted(retry.data)) noteTradeCreditExhausted();
     return {
       ok: false as const,
@@ -1938,7 +2044,7 @@ export async function modifyPositionProtection(input: {
       data: res.data,
     };
   }
-  return { ok: true as const, data: res.data };
+  return { ok: true as const, data: res.data, via: "rest" as const };
 }
 
 /**
