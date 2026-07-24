@@ -2175,6 +2175,20 @@ async function runDcaTickInner(accountId: string) {
     Number(process.env.ENGINE_SNAP_STALE_MS || 15_000),
   );
   let snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });
+  // REST 429 / cold stream: force stream attach then retry — trading must continue.
+  if (
+    !snap.ok &&
+    (snap.code === "RATE_LIMIT" ||
+      /요청 한도|TooManyRequests|rate limit/i.test(snap.message || ""))
+  ) {
+    try {
+      const { ensureStreamConnected } = await import("./metaapi-stream");
+      await ensureStreamConnected(metaId, account.metaApiRegion);
+      snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });
+    } catch {
+      /* keep snap */
+    }
+  }
   // Wrong cached/DB region can timeout; refresh+retry once.
   // Skip fan-out retry on RATE_LIMIT (would burn more credits).
   if (

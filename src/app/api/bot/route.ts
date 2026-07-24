@@ -58,7 +58,16 @@ export async function POST(req: Request) {
           allowRecreate: account.status === "failed" || !account.metaApiAccountId,
         });
         if (!repaired.ok) {
-          errMsg = repaired.message;
+          // Rate-limit on reconnect: if cloud already exists, still turn bot ON.
+          if (
+            /너무 많|rate|429|요청 한도/i.test(repaired.message) &&
+            account.metaApiAccountId
+          ) {
+            errMsg = undefined;
+            metaId = String(account.metaApiAccountId);
+          } else {
+            errMsg = repaired.message;
+          }
         } else {
           metaId = repaired.metaApiAccountId;
           snapBalance = repaired.snap.balance;

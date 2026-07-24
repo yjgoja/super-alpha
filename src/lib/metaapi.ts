@@ -886,9 +886,21 @@ async function createAndConnect(input: {
   };
   if (input.profileId) payload.provisioningProfileId = input.profileId;
 
-  const created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
+  let created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
     "transaction-id": newTransactionId(),
   });
+  // Account create must survive transient 429 — retry twice with backoff.
+  for (
+    let i = 0;
+    i < 2 && (created.status === 429 || isRateLimitError(created.data));
+    i++
+  ) {
+    noteMetaApiRateLimit(15_000);
+    await sleep(5000 * (i + 1));
+    created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
+      "transaction-id": newTransactionId(),
+    });
+  }
 
   if (created.status === 0 || created.status >= 400) {
     const found = await findMetaAccountByLogin(input.login);
@@ -1145,7 +1157,8 @@ export function metaApiRateLimited(): boolean {
 }
 
 export function noteMetaApiRateLimit(retryAfterMs = 60_000) {
-  const until = Date.now() + Math.max(15_000, Math.min(retryAfterMs, 15 * 60_000));
+  // Cap pause so trading/stream recovery is not blocked for many minutes.
+  const until = Date.now() + Math.max(10_000, Math.min(retryAfterMs, 90_000));
   if (until > metaApiRateLimitUntil) metaApiRateLimitUntil = until;
 }
 
@@ -1344,8 +1357,7 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
  * Trading snapshot.
  * Prefer MetaAPI streaming terminalState (0 REST credits) when connected.
  * REST applies a min interval floor to avoid MetaAPI 429.
- * allowStaleMs raises the floor further for HOLD/reconcile coalescing.
- * Trades invalidate via invalidateSnapshotCache.
+ * On rate-limit: attach/wait for stream — never block ENTRY/DCA solely because REST is paused.
  */
 export async function fetchSnapshot(
   metaApiAccountId: string,
@@ -1356,16 +1368,36 @@ export async function fetchSnapshot(
   const want = Math.max(0, opts?.allowStaleMs ?? 0);
   const staleMs = Math.max(floor, want || floor);
 
-  // Streaming first — no CPU credits (client rateLimiting docs).
-  try {
-    const { readStreamSnapshot } = await import("./metaapi-stream");
-    const streamSnap = readStreamSnapshot(id);
-    if (streamSnap?.ok) {
-      snapCache.set(id, { at: Date.now(), value: streamSnap });
-      return streamSnap;
+  const tryStream = async (waitMs: number): Promise<MetaSnap | null> => {
+    try {
+      const { ensureStreamConnected, readStreamSnapshot } = await import(
+        "./metaapi-stream"
+      );
+      const ready = await ensureStreamConnected(id);
+      if (!ready) {
+        const hit0 = readStreamSnapshot(id);
+        return hit0?.ok ? hit0 : null;
+      }
+      const deadline = Date.now() + Math.max(0, waitMs);
+      for (;;) {
+        const s = readStreamSnapshot(id);
+        if (s?.ok) {
+          snapCache.set(id, { at: Date.now(), value: s });
+          return s;
+        }
+        if (Date.now() >= deadline) break;
+        await sleep(250);
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* stream module optional at build edge */
+    return null;
+  };
+
+  // Streaming first — no CPU credits (client rateLimiting docs).
+  {
+    const streamSnap = await tryStream(0);
+    if (streamSnap) return streamSnap;
   }
 
   const hit = snapCache.get(id);
@@ -1373,6 +1405,10 @@ export async function fetchSnapshot(
   if (hit?.inflight) return hit.inflight;
 
   if (metaApiRateLimited()) {
+    if (hit?.value?.ok) return hit.value;
+    // REST paused — recover via streaming so trading continues.
+    const streamSnap = await tryStream(8_000);
+    if (streamSnap) return streamSnap;
     if (hit?.value?.ok) return hit.value;
     return {
       ok: false,
@@ -1385,15 +1421,22 @@ export async function fetchSnapshot(
   const prevOk = hit?.value?.ok ? hit.value : undefined;
   const prevAt = hit?.value?.ok ? hit.at : Date.now();
   const inflight = fetchSnapshotUncached(id)
-    .then((value) => {
+    .then(async (value) => {
       if (value.ok) {
         snapCache.set(id, { at: Date.now(), value });
-      } else if (value.code === "RATE_LIMIT" && prevOk) {
-        // Keep last good snap — do not blank the engine on 429.
-        snapCache.set(id, { at: prevAt, value: prevOk });
-      } else {
-        snapCache.delete(id);
+        return value;
       }
+      if (value.code === "RATE_LIMIT") {
+        const streamSnap = await tryStream(8_000);
+        if (streamSnap) return streamSnap;
+        if (prevOk) {
+          snapCache.set(id, { at: prevAt, value: prevOk });
+          return prevOk;
+        }
+        snapCache.delete(id);
+        return value;
+      }
+      snapCache.delete(id);
       return value;
     })
     .catch((err) => {
@@ -1685,7 +1728,25 @@ export async function placeMarketOrder(input: {
   if (input.takeProfit != null && Number.isFinite(input.takeProfit) && input.takeProfit > 0) {
     body.takeProfit = input.takeProfit;
   }
-  const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
+
+  // Trades must not die on 429 — cheap (10 credits) and retried briefly.
+  let res = await api(
+    base,
+    "POST",
+    `/users/current/accounts/${input.metaApiAccountId}/trade`,
+    body,
+  );
+  for (let attempt = 0; attempt < 3 && (res.status === 429 || isRateLimitError(res.data)); attempt++) {
+    noteMetaApiRateLimit(20_000);
+    await sleep(1500 * (attempt + 1));
+    res = await api(
+      base,
+      "POST",
+      `/users/current/accounts/${input.metaApiAccountId}/trade`,
+      body,
+    );
+  }
+
   invalidateSnapshotCache(input.metaApiAccountId);
   const ms = Date.now() - t0;
   if (ms >= 800) {
@@ -1785,6 +1846,22 @@ export async function modifyPositionProtection(input: {
     return { ok: false as const, message: "stopLoss/takeProfit 값이 없습니다." };
   }
   const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
+  if (res.status === 429 || isRateLimitError(res.data)) {
+    noteMetaApiRateLimit(20_000);
+    await sleep(2000);
+    const retry = await api(
+      base,
+      "POST",
+      `/users/current/accounts/${input.metaApiAccountId}/trade`,
+      body,
+    );
+    if (retry.status < 400) return { ok: true as const, data: retry.data };
+    return {
+      ok: false as const,
+      message: toKoreanError(retry.data, "포지션 TP/SL 수정에 실패했습니다."),
+      data: retry.data,
+    };
+  }
   if (res.status >= 400) {
     return {
       ok: false as const,
