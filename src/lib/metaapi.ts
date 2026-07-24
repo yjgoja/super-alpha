@@ -47,31 +47,61 @@ function clientApiBases(preferredRegion?: string | null) {
 }
 
 const metaRegionCache = new Map<string, string>();
+const metaRegionCacheAt = new Map<string, number>();
+const REGION_CACHE_TTL_MS = 30 * 60_000;
 
-/** Prime cache from DB metaApiRegion — avoids provisioning round-trip on every trade. */
+/** Soft hint only — never overrides a fresh MetaAPI-resolved region. */
 export function primeMetaRegionCache(
   metaApiAccountId: string,
   region: string | null | undefined,
 ) {
   const r = (region || "").trim().toLowerCase();
   if (!metaApiAccountId || !r) return;
-  metaRegionCache.set(String(metaApiAccountId), r);
+  const id = String(metaApiAccountId);
+  const at = metaRegionCacheAt.get(id) || 0;
+  // Do not overwrite a recently verified live region with possibly-stale DB
+  if (metaRegionCache.has(id) && Date.now() - at < REGION_CACHE_TTL_MS) return;
+  metaRegionCache.set(id, r);
+  // Mark as soft (old) so next resolve refreshes from MetaAPI soon
+  metaRegionCacheAt.set(id, Date.now() - REGION_CACHE_TTL_MS + 60_000);
+}
+
+export function clearMetaRegionCache(metaApiAccountId?: string) {
+  if (!metaApiAccountId) {
+    metaRegionCache.clear();
+    metaRegionCacheAt.clear();
+    return;
+  }
+  const id = String(metaApiAccountId);
+  metaRegionCache.delete(id);
+  metaRegionCacheAt.delete(id);
 }
 
 async function resolveAccountRegion(metaApiAccountId: string): Promise<string | null> {
   const id = String(metaApiAccountId);
   const cached = metaRegionCache.get(id);
-  if (cached) return cached;
+  const at = metaRegionCacheAt.get(id) || 0;
+  if (cached && Date.now() - at < REGION_CACHE_TTL_MS) return cached;
+
   const st = await getMetaAccountStatus(id);
   const region =
     st.raw && typeof st.raw === "object"
-      ? String((st.raw as { region?: string }).region || "")
+      ? String((st.raw as { region?: string }).region || "").toLowerCase()
       : "";
   if (region) {
     metaRegionCache.set(id, region);
+    metaRegionCacheAt.set(id, Date.now());
     return region;
   }
-  return null;
+  return cached || null;
+}
+
+/** Resolve live MetaAPI region into cache (caller may persist to DB). */
+export async function refreshAccountRegion(
+  metaApiAccountId: string,
+): Promise<string | null> {
+  clearMetaRegionCache(metaApiAccountId);
+  return resolveAccountRegion(metaApiAccountId);
 }
 
 function newTransactionId() {
@@ -184,7 +214,8 @@ async function api(
         /* metrics optional */
       }
 
-      const retryable = res.status === 429 || res.status === 503 || res.status === 502;
+      // 429: do not retry here — burns MetaAPI credits further; caller backs off
+      const retryable = res.status === 503 || res.status === 502;
       if (retryable && attempt < maxAttempts) {
         const ra = res.headers.get("retry-after");
         const parsed = ra ? Number(ra) * 1000 : NaN;
@@ -1125,6 +1156,15 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
     ]);
     lastStatus = infoRes.status;
     lastBody = infoRes.data;
+    // Rate limit: do NOT fan-out to other regions (burns more credits)
+    if (infoRes.status === 429 || posRes.status === 429) {
+      return {
+        ok: false,
+        code: "RATE_LIMIT",
+        message:
+          "MetaAPI 요청 한도에 도달했습니다. 잠시 후 자동 재시도됩니다. (봇·브로커 TP/SL 유지)",
+      };
+    }
     if (infoRes.status < 400) {
       info = infoRes.data;
       if (posRes.status >= 400 || !Array.isArray(posRes.data)) {

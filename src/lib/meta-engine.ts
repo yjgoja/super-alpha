@@ -36,6 +36,8 @@ import {
   getSymbolTradeSpec,
   fetchHistoryDeals,
   primeMetaRegionCache,
+  refreshAccountRegion,
+  clearMetaRegionCache,
 } from "./metaapi";
 import { prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
@@ -2149,7 +2151,8 @@ async function runDcaTickInner(accountId: string) {
     return { skipped: true as const };
   }
 
-  // Prefer DB region for trade/snap routing (majority of accounts are new-york)
+  // Soft DB region hint only (may be stale). Live MetaAPI region wins via resolve TTL /
+  // and on snap network fail we refresh+retry below.
   if (account.metaApiRegion) {
     primeMetaRegionCache(account.metaApiAccountId, account.metaApiRegion);
   }
@@ -2169,6 +2172,27 @@ async function runDcaTickInner(accountId: string) {
   const metaId = account.metaApiAccountId;
   const snapStaleMs = Math.max(0, Number(process.env.ENGINE_SNAP_STALE_MS || 2500));
   let snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });
+  // Wrong cached/DB region can timeout; refresh+retry once.
+  // Skip fan-out retry on RATE_LIMIT (would burn more credits).
+  if (
+    !snap.ok &&
+    snap.code !== "RATE_LIMIT" &&
+    /네트워크|network|timeout|econnreset|fetch failed|unstable/i.test(snap.message || "")
+  ) {
+    try {
+      const liveRegion = await refreshAccountRegion(metaId);
+      if (liveRegion && liveRegion !== (account.metaApiRegion || "").toLowerCase()) {
+        await prisma.brokerAccount.update({
+          where: { id: account.id },
+          data: { metaApiRegion: liveRegion },
+        });
+        account.metaApiRegion = liveRegion;
+      }
+      snap = await fetchSnapshot(metaId);
+    } catch {
+      clearMetaRegionCache(metaId);
+    }
+  }
   let cloudJustRecovered = false;
   // Bot ON but MetaAPI cloud cold/undeployed → redeploy once (never leave live money unmonitored)
   if (
@@ -2226,19 +2250,22 @@ async function runDcaTickInner(accountId: string) {
   }
   if (!snap.ok) {
     const cold = isCloudColdError(snap.message || "");
+    const rateLimited =
+      snap.code === "RATE_LIMIT" || /요청 한도|TooManyRequests|rate limit/i.test(snap.message || "");
     const transientNet =
+      !rateLimited &&
       /네트워크|network|timeout|econnreset|fetch failed|unstable/i.test(
         snap.message || "",
       );
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: {
-        // Never turn bot OFF on snap fail. Transient net → soft message, keep connected.
-        statusMessage: transientNet
-          ? "일시 네트워크 · 재시도 중 (봇 유지)"
-          : snap.message,
-        ...(cold && !transientNet ? { status: "undeployed" } : {}),
-        // Explicitly keep bot running when master was on
+        statusMessage: rateLimited
+          ? "MetaAPI 요청 한도 · 대기 재시도 (봇·브로커TP/SL 유지)"
+          : transientNet
+            ? "일시 네트워크 · 재시도 중 (봇 유지)"
+            : snap.message,
+        ...(cold && !transientNet && !rateLimited ? { status: "undeployed" } : {}),
         ...(masterOn ? { botEnabled: true, botStoppedAt: null } : {}),
       },
     });
