@@ -1,6 +1,13 @@
-import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "./day-key";
 import { prisma } from "./db";
 import { fetchHistoryDeals, sumMt5TradePnl, type MetaDeal } from "./metaapi";
+import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "./day-key";
+
+/** 계정당 history-deals 스로틀 (기본 90초) — 매틱 호출 비용 차단 */
+const PNL_SYNC_THROTTLE_MS = Math.max(
+  15_000,
+  Number(process.env.PNL_SYNC_THROTTLE_MS || 90_000),
+);
+const lastPnlSyncAt = new Map<string, number>();
 
 function groupDealsBySeoulDay(deals: MetaDeal[]) {
   const byDay = new Map<string, { pnl: number; trades: number }>();
@@ -25,7 +32,16 @@ export async function syncTodayPnlFromMt5Deals(opts: {
   metaApiAccountId: string;
   equity?: number;
   startingBalance?: number;
+  /** true면 스로틀 무시 (청산 직후 등) */
+  force?: boolean;
 }) {
+  const now = Date.now();
+  const prev = lastPnlSyncAt.get(opts.accountId) ?? 0;
+  if (!opts.force && now - prev < PNL_SYNC_THROTTLE_MS) {
+    return { ok: true as const, skipped: true as const, dayPnl: null as number | null };
+  }
+  lastPnlSyncAt.set(opts.accountId, now);
+
   const day = dayKeySeoul();
   const start = seoulDayStartUtc(day);
   const end = new Date();
@@ -52,7 +68,7 @@ export async function syncTodayPnlFromMt5Deals(opts: {
       returnPct: startEq > 0 ? (dayPnl / startEq) * 100 : 0,
     },
   });
-  return { ok: true as const, dayPnl, deals: hist.deals.length };
+  return { ok: true as const, skipped: false as const, dayPnl, deals: hist.deals.length };
 }
 
 /** 최근 N일 MT5 딜 → 일자별 손익 (차트용) */

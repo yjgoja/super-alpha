@@ -21,7 +21,21 @@ services:
       - key: ENGINE_MODE
         value: direct
       - key: ENGINE_INTERVAL_MS
-        value: "2000"
+        value: "20000"
+      - key: STREAM_OPEN_BASKETS
+        value: "1"
+      - key: STREAM_OPEN_INTERVAL_MS
+        value: "400"
+      - key: STREAM_OPEN_MAX
+        value: "50"
+      - key: ENGINE_SNAP_STALE_MS
+        value: "2500"
+      - key: PNL_SYNC_THROTTLE_MS
+        value: "90000"
+      - key: IDLE_BOT_UNDEPLOY_HOURS
+        value: "2"
+      - key: BROKER_PROTECT_TP_SL
+        value: "1"
       - key: ENGINE_BUDGET_MS
         value: "600000"
       - key: ENGINE_DB_HOST_ALLOW

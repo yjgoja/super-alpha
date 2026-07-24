@@ -33,6 +33,8 @@ import {
   placeMarketOrder,
   resolveBrokerSymbol,
   symbolsMatch,
+  getSymbolTradeSpec,
+  fetchHistoryDeals,
 } from "./metaapi";
 import { prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
@@ -138,7 +140,7 @@ async function syncBrokerBasketProtection(opts: {
   stopLossEnabled: boolean;
 }) {
   if (!brokerProtectEnabled()) {
-    return { synced: 0, skipped: true as const, drift: false, targets: null };
+    return { synced: 0, skipped: true as const, drift: false, targets: null, allProtected: true };
   }
   const targetsRaw = basketExitPricesFromUsd({
     symbol: opts.symbol,
@@ -151,20 +153,41 @@ async function syncBrokerBasketProtection(opts: {
   const legs = opts.positions.filter(
     (p) => p.id && symbolsMatch(p.symbol, opts.symbol) && p.direction === opts.direction,
   );
+  let stopsLevelPoints = 0;
+  let point = targetsRaw.point;
+  try {
+    const spec = await getSymbolTradeSpec(opts.metaId, opts.symbol);
+    stopsLevelPoints = spec.stopsLevel;
+    if (spec.point > 0) point = spec.point;
+  } catch {
+    /* fallback point */
+  }
   const clamped = clampBasketProtectForLegs({
     direction: opts.direction,
     openPrices: legs.map((p) => p.price),
     takeProfit: targetsRaw.takeProfit,
     stopLoss: targetsRaw.stopLoss,
-    point: targetsRaw.point,
+    point,
+    stopsLevelPoints,
   });
   const targets = {
     ...targetsRaw,
+    point,
     takeProfit: clamped.takeProfit,
     stopLoss: clamped.stopLoss,
   };
   if (targets.takeProfit == null && targets.stopLoss == null) {
-    return { synced: 0, skipped: true as const, drift: false, targets };
+    console.error(
+      `[engine] protect targets null ${opts.symbol} ${opts.direction} — soft guard only`,
+    );
+    return {
+      synced: 0,
+      skipped: true as const,
+      drift: true,
+      failed: legs.length,
+      targets,
+      allProtected: false,
+    };
   }
   let synced = 0;
   let drift = false;
@@ -199,7 +222,62 @@ async function syncBrokerBasketProtection(opts: {
       );
     }
   }
-  return { synced, skipped: false as const, drift, failed, targets, missingIds: legs.length === 0 && opts.positions.length > 0 };
+  const allProtected =
+    failed === 0 &&
+    legs.every(
+      (p) =>
+        brokerProtectionMatches({
+          current: p.takeProfit,
+          target: targets.takeProfit,
+          point: targets.point,
+        }) &&
+        brokerProtectionMatches({
+          current: p.stopLoss,
+          target: targets.stopLoss,
+          point: targets.point,
+        }),
+    );
+  return {
+    synced,
+    skipped: false as const,
+    drift,
+    failed,
+    targets,
+    missingIds: legs.length === 0 && opts.positions.length > 0,
+    allProtected,
+  };
+}
+
+/** 예상 평단/로트로 지정가 미리 계산 (진입·DCA 동봉용) */
+function previewProtectPrices(opts: {
+  symbol: string;
+  direction: "BUY" | "SELL";
+  avgPrice: number;
+  lots: number;
+  takeProfitUsd: number;
+  stopLossUsd: number;
+  openPrices?: number[];
+  stopsLevelPoints?: number;
+  point?: number;
+}) {
+  const raw = basketExitPricesFromUsd({
+    symbol: opts.symbol,
+    direction: opts.direction,
+    avgPrice: opts.avgPrice,
+    lots: opts.lots,
+    takeProfitUsd: opts.takeProfitUsd,
+    stopLossUsd: opts.stopLossUsd,
+  });
+  const point = opts.point && opts.point > 0 ? opts.point : raw.point;
+  const clamped = clampBasketProtectForLegs({
+    direction: opts.direction,
+    openPrices: opts.openPrices?.length ? opts.openPrices : [opts.avgPrice],
+    takeProfit: raw.takeProfit,
+    stopLoss: raw.stopLoss,
+    point,
+    stopsLevelPoints: opts.stopsLevelPoints,
+  });
+  return { ...raw, point, takeProfit: clamped.takeProfit, stopLoss: clamped.stopLoss };
 }
 
 /** 진입/DCA 직후 스냅샷 재조회 → 브로커 TP/SL 즉시 재설정 (실패 시 1회 재시도) */
@@ -565,18 +643,82 @@ async function healGhostBaskets(
     return false;
   }
 
-  await prisma.basket.updateMany({
-    where: { id: { in: stillGhost.map((g) => g.id) } },
-    data: {
-      status: "closed",
-      lastExitAt: new Date(),
-      unrealizedPnl: 0,
-    },
-  });
+  // Classify exit via recent deals (broker TP/SL vs manual)
+  const histStart = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const hist = await fetchHistoryDeals(metaId, histStart, new Date());
+  const deals = hist.ok ? hist.deals : [];
+
+  for (const g of stillGhost) {
+    const dir = g.direction === "SELL" ? "SELL" : "BUY";
+    const symDeals = deals.filter(
+      (d) =>
+        symbolsMatch(d.symbol || "", g.symbol) &&
+        String(d.entryType || "").includes("OUT"),
+    );
+    const last = symDeals.sort(
+      (a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime(),
+    )[0];
+    const pnl =
+      last != null
+        ? Number(last.profit || 0) + Number(last.swap || 0) + Number(last.commission || 0)
+        : 0;
+    const reason = String(last?.reason || "").toLowerCase();
+    const kind =
+      reason.includes("sl") || reason.includes("stop")
+        ? "SL"
+        : reason.includes("tp") || reason.includes("take")
+          ? "TP"
+          : pnl >= 0
+            ? "TP"
+            : "SL";
+
+    await prisma.basket.update({
+      where: { id: g.id },
+      data: {
+        status: "closed",
+        lastExitAt: new Date(),
+        unrealizedPnl: 0,
+        realizedPnl: pnl,
+      },
+    });
+    await prisma.fill.create({
+      data: {
+        accountId,
+        symbol: g.symbol,
+        side: dir === "BUY" ? "SELL" : "BUY",
+        lots: g.legs.reduce((s, l) => s + l.lots, 0),
+        price: Number(last?.price || g.firstEntryPrice || 0),
+        pnl,
+        kind,
+        note: `ghost_deal|${kind}|reason=${reason || "pnl_sign"}`,
+      },
+    });
+    if (kind === "TP") {
+      await prisma.brokerAccount.update({
+        where: { id: accountId },
+        data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
+      });
+    } else {
+      await prisma.brokerAccount.update({
+        where: { id: accountId },
+        data: { slCount: { increment: 1 } },
+      });
+      // stopOnSl: best-effort disable matching symbol bots
+      const bots = await prisma.symbolBot.findMany({
+        where: { accountId, symbol: g.symbol, stopOnSl: true },
+        select: { direction: true, dualDirection: true },
+      });
+      for (const b of bots) {
+        if (b.dualDirection || (b.direction === "SELL" ? "SELL" : "BUY") === dir) {
+          await disableSymbolBotSide(accountId, g.symbol, dir);
+        }
+      }
+    }
+  }
+
   console.warn(
-    `[engine] healed ${stillGhost.length} ghost basket(s) account=${accountId} — bot stays ON`,
+    `[engine] healed ${stillGhost.length} ghost basket(s) account=${accountId} via deals — bot stays ON`,
   );
-  // Keep botEnabled. Do not call stopBotAfterExternalClose.
   return true;
 }
 
@@ -873,15 +1015,58 @@ async function runSymbolTableDca(
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
     }
     const lots = levelLots(0);
-    const order = await placeMarketOrder({
+    const entryTpPct = isBulkLogic(logic)
+      ? levels[0]?.profit && levels[0].profit > 0
+        ? levels[0].profit
+        : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct)
+      : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
+    const entrySlPct = resolveLiveStopLossPct(logic, cfg.stopLossPct);
+    const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
+    const entryLive = liveBasketTpSlUsd({
+      symbol,
+      lots,
+      avgPrice: fillPrice,
+      takeProfitPct: entryTpPct,
+      stopLossPct: entrySlPct,
+      brokerLeverage: cfg.brokerLeverage,
+    });
+    let stopsLevelPoints = 0;
+    try {
+      const spec = await getSymbolTradeSpec(metaId, symbol);
+      stopsLevelPoints = spec.stopsLevel;
+    } catch {
+      /* ignore */
+    }
+    const entryPx = previewProtectPrices({
+      symbol,
+      direction,
+      avgPrice: fillPrice,
+      lots,
+      takeProfitUsd: entryLive.takeProfitUsd,
+      stopLossUsd: cfg.stopLossEnabled ? entryLive.stopLossUsd : 0,
+      openPrices: [fillPrice],
+      stopsLevelPoints,
+    });
+    let order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
       direction,
       lots,
       comment: `SA-${tag}-L0`,
+      takeProfit: entryPx.takeProfit,
+      stopLoss: entryPx.stopLoss,
     });
+    // 동봉 TP/SL 거절 시 나체 진입 후 즉시 modify (fail-closed)
+    if (!order.ok && (entryPx.takeProfit != null || entryPx.stopLoss != null)) {
+      order = await placeMarketOrder({
+        metaApiAccountId: metaId,
+        symbol,
+        direction,
+        lots,
+        comment: `SA-${tag}-L0`,
+      });
+    }
     if (!order.ok) return { ok: false as const, error: order.message, symbol };
-    const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
     await prisma.basket.create({
       data: {
         accountId,
@@ -902,20 +1087,15 @@ async function runSymbolTableDca(
         price: fillPrice,
         kind: "ENTRY",
         level: 0,
-        note: `${logic}|spr=${spr.toFixed(4)}`,
+        note: `${logic}|spr=${spr.toFixed(4)}|brokerTP=${entryPx.takeProfit ?? "-"}`,
       },
     });
-    const entryTp = isBulkLogic(logic)
-      ? levels[0]?.profit && levels[0].profit > 0
-        ? levels[0].profit
-        : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct)
-      : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
     const protectRes = await refreshAndProtectBasket({
       metaId,
       symbol,
       direction,
-      takeProfitPct: entryTp,
-      stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+      takeProfitPct: entryTpPct,
+      stopLossPct: entrySlPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: cfg.brokerLeverage,
     });
@@ -932,6 +1112,32 @@ async function runSymbolTableDca(
   }
 
   const legs = basket.legs.sort((a, b) => a.level - b.level);
+  // 브로커가 일부만 닫은 orphan → ROI와 무관하게 잔여 전량 정리
+  if (ourPositions.length > 0 && legs.length > ourPositions.length) {
+    console.error(
+      `[engine] partial basket account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} — force close`,
+    );
+    const fc = await forceCloseRemainder({ metaId, symbol, direction, rounds: 3 });
+    if (fc.ok && (fc.remaining ?? 0) === 0) {
+      await prisma.basket.update({
+        where: { id: basket.id },
+        data: { status: "closed", lastExitAt: new Date(), unrealizedPnl: 0 },
+      });
+      await prisma.fill.create({
+        data: {
+          accountId,
+          symbol,
+          side: direction === "BUY" ? "SELL" : "BUY",
+          lots: ourPositions.reduce((s, p) => s + p.lots, 0),
+          price: direction === "BUY" ? price.bid : price.ask,
+          pnl: ourPositions.reduce((s, p) => s + p.profit, 0),
+          kind: "GUARD",
+          note: "partial_orphan_force_close",
+        },
+      });
+      return { ok: true as const, action: "partial_force_close", symbol };
+    }
+  }
   // MT5 실포지션 평단·손익 우선
   const posVol = ourPositions.reduce((s, p) => s + p.lots, 0);
   const avg =
@@ -1221,13 +1427,71 @@ async function runSymbolTableDca(
     }
 
     const lots = levelLots(next);
-    const order = await placeMarketOrder({
+    const estFill = mt5EntryQuote(direction, price.bid, price.ask);
+    const projLots = posVol + lots;
+    const projAvg =
+      projLots > 0 ? (posVol * avg + lots * estFill) / projLots : estFill;
+    const dcaTpPct = isBulkLogic(logic)
+      ? levels[next]?.profit && levels[next]!.profit > 0
+        ? levels[next]!.profit
+        : tpRoiFallback
+      : tpRoiFallback;
+    const projLive = liveBasketTpSlUsd({
+      symbol,
+      lots: projLots,
+      avgPrice: projAvg,
+      takeProfitPct: dcaTpPct,
+      stopLossPct: slRoiFallback,
+      brokerLeverage: brokerLev,
+      brokerMarginSum: null,
+    });
+    let stopsLevelPoints = 0;
+    try {
+      stopsLevelPoints = (await getSymbolTradeSpec(metaId, symbol)).stopsLevel;
+    } catch {
+      /* ignore */
+    }
+    const projPx = previewProtectPrices({
+      symbol,
+      direction,
+      avgPrice: projAvg,
+      lots: projLots,
+      takeProfitUsd: projLive.takeProfitUsd,
+      stopLossUsd: cfg.stopLossEnabled ? projLive.stopLossUsd : 0,
+      openPrices: [...ourPositions.map((p) => p.price), estFill],
+      stopsLevelPoints,
+    });
+    // DCA 전: 기존 레그 SL/TP를 새 바스켓 기준으로 먼저 재설정 (조기 손절 방지)
+    await syncBrokerBasketProtection({
+      metaId,
+      symbol,
+      direction,
+      positions: ourPositions,
+      avgPrice: projAvg,
+      lots: projLots,
+      takeProfitUsd: projLive.takeProfitUsd,
+      stopLossUsd: projLive.stopLossUsd,
+      stopLossEnabled: cfg.stopLossEnabled,
+    });
+
+    let order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
       direction,
       lots,
       comment: `SA-${tag}-L${next}`,
+      takeProfit: projPx.takeProfit,
+      stopLoss: projPx.stopLoss,
     });
+    if (!order.ok && (projPx.takeProfit != null || projPx.stopLoss != null)) {
+      order = await placeMarketOrder({
+        metaApiAccountId: metaId,
+        symbol,
+        direction,
+        lots,
+        comment: `SA-${tag}-L${next}`,
+      });
+    }
     if (!order.ok) {
       return {
         ok: false as const,
@@ -1869,7 +2133,8 @@ async function runDcaTickInner(accountId: string) {
   }
 
   const metaId = account.metaApiAccountId;
-  let snap = await fetchSnapshot(metaId);
+  const snapStaleMs = Math.max(0, Number(process.env.ENGINE_SNAP_STALE_MS || 2500));
+  let snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });
   let cloudJustRecovered = false;
   // Bot ON but MetaAPI cloud cold/undeployed → redeploy once (never leave live money unmonitored)
   if (
@@ -2184,13 +2449,23 @@ async function runDcaTickInner(accountId: string) {
     });
   }
 
-  // 오늘 실현 = MT5 딜 히스토리 (실패해도 매매 틱은 계속)
+  // 오늘 실현 = MT5 딜 히스토리 (스로틀; 청산 틱만 force)
   try {
+    const traded = results.some(
+      (r) =>
+        r &&
+        typeof r === "object" &&
+        "action" in r &&
+        ["tp", "sl", "entry", "dca", "ghost_tp", "ghost_sl", "partial_force_close"].includes(
+          String((r as { action?: string }).action || ""),
+        ),
+    );
     await syncTodayPnlFromMt5Deals({
       accountId: account.id,
       metaApiAccountId: metaId,
       equity: snap.equity,
       startingBalance: account.startingBalance,
+      force: traded,
     });
   } catch (e) {
     console.warn(
@@ -2254,7 +2529,7 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
 
   if (!opts.skipIdleUndeploy) {
     try {
-      await undeployIdleAccounts(24);
+      await undeployIdleAccounts();
     } catch {
       /* ignore */
     }

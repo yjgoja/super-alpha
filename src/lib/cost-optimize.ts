@@ -1,10 +1,13 @@
 import { prisma } from "./db";
 import { removeMetaAccount, undeployAccount } from "./metaapi";
 
-export const IDLE_BOT_HOURS = 24;
+export const IDLE_BOT_HOURS = Math.max(
+  1,
+  Number(process.env.IDLE_BOT_UNDEPLOY_HOURS || 2),
+);
 
 /**
- * Undeploy MetaAPI cloud when trading bot has been OFF for >= 24 hours.
+ * Undeploy MetaAPI cloud when trading bot has been OFF for >= idle hours (default 2h).
  * Signup-only / idle users stop burning MetaAPI hours.
  * Bot start will re-deploy via ensureCloudLive.
  */

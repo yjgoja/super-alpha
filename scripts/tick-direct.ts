@@ -17,11 +17,35 @@ import {
   assertTradingDatabase,
   isFatalEngineError,
 } from "../src/lib/engine-guard";
-import { runAllBots } from "../src/lib/meta-engine";
+import { runAllBots, runDcaTick } from "../src/lib/meta-engine";
+import { logMetaApiHttpWindow } from "../src/lib/metaapi-metrics";
+import {
+  countNakedBrokerPositions,
+  countRecentGuards,
+  logEngineObservability,
+} from "../src/lib/engine-obs";
 
 process.env.ENGINE_MODE = "direct";
 
-const INTERVAL_MS = Math.max(1500, Number(process.env.ENGINE_INTERVAL_MS || 2000));
+/** Reconcile interval. With open-basket stream on, default 20s; else 2s. */
+const STREAM_ON =
+  (process.env.STREAM_OPEN_BASKETS || "1").trim() !== "0" &&
+  (process.env.STREAM_OPEN_BASKETS || "1").toLowerCase() !== "false";
+const INTERVAL_MS = Math.max(
+  STREAM_ON ? 5000 : 1500,
+  Number(
+    process.env.ENGINE_INTERVAL_MS ||
+      (STREAM_ON ? 20_000 : 2000),
+  ),
+);
+const STREAM_INTERVAL_MS = Math.max(
+  200,
+  Number(process.env.STREAM_OPEN_INTERVAL_MS || 400),
+);
+const STREAM_MAX = Math.min(
+  100,
+  Math.max(1, Number(process.env.STREAM_OPEN_MAX || 50)),
+);
 const OUT_DIR = path.join(process.cwd(), "scripts", "out");
 const PID_FILE = path.join(OUT_DIR, "engine.pid");
 const HEARTBEAT_FILE = path.join(OUT_DIR, "engine-heartbeat.json");
@@ -126,6 +150,44 @@ function fatalExit(reason: unknown, code = 1): never {
   process.exit(code);
 }
 
+let streamRunning = false;
+
+async function streamOpenBasketsTick() {
+  if (!STREAM_ON || streamRunning || shuttingDown) return;
+  streamRunning = true;
+  try {
+    const open = await prisma.basket.findMany({
+      where: { status: "open" },
+      select: {
+        accountId: true,
+        account: { select: { metaApiAccountId: true, status: true } },
+      },
+      take: STREAM_MAX * 3,
+    });
+    const ids = [
+      ...new Set(
+        open
+          .filter((b) => b.account.metaApiAccountId && b.account.status !== "failed")
+          .map((b) => b.accountId),
+      ),
+    ].slice(0, STREAM_MAX);
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await runDcaTick(id);
+        } catch (e) {
+          console.warn(
+            `[stream] tick fail ${id}`,
+            e instanceof Error ? e.message : e,
+          );
+        }
+      }),
+    );
+  } finally {
+    streamRunning = false;
+  }
+}
+
 async function tick() {
   if (running || shuttingDown) return;
   running = true;
@@ -143,7 +205,18 @@ async function tick() {
       lastMs: Date.now() - t0,
       accounts: results.length,
       ok: true,
+      streamOn: STREAM_ON,
     });
+
+    if (ticks % 3 === 0) {
+      logMetaApiHttpWindow("engine-http");
+      logEngineObservability("engine-obs");
+      const naked = await countNakedBrokerPositions();
+      const guards = await countRecentGuards(6);
+      console.log(
+        `[engine-obs] openBaskets=${naked.openBaskets} guards=${JSON.stringify(guards)}`,
+      );
+    }
 
     const allHardFail =
       results.length > 0 &&
@@ -199,12 +272,20 @@ async function main() {
     fatalExit(e);
   }
 
-  console.log(`[direct] start interval=${INTERVAL_MS}ms pid=${process.pid}`);
-  writeHeartbeat({ started: true });
+  console.log(
+    `[direct] start reconcile=${INTERVAL_MS}ms stream=${STREAM_ON ? STREAM_INTERVAL_MS + "ms" : "off"} maxOpen=${STREAM_MAX} pid=${process.pid}`,
+  );
+  writeHeartbeat({ started: true, streamOn: STREAM_ON });
   void tick();
   setInterval(() => {
     void tick();
   }, INTERVAL_MS);
+  if (STREAM_ON) {
+    void streamOpenBasketsTick();
+    setInterval(() => {
+      void streamOpenBasketsTick();
+    }, STREAM_INTERVAL_MS);
+  }
 }
 
 void main();

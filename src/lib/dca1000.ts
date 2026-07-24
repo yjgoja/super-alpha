@@ -299,7 +299,7 @@ export function basketExitPricesFromUsd(opts: {
 /**
  * 바스켓 공통 지정가를 전 레그 openPrice 기준으로 브로커 유효 범위에 맞춤.
  * SELL TP는 모든 open 미만, BUY TP는 모든 open 초과여야 MT5가 수락한다.
- * (분산 진입 시 목표가 일부 레그에 무효 → 전 레그 유효한 쪽으로 클램프; 소프트 ROI가 정밀 보정)
+ * stopsLevel(포인트)만큼 최소 이격을 강제한다.
  */
 export function clampBasketProtectForLegs(opts: {
   direction: "BUY" | "SELL";
@@ -307,13 +307,16 @@ export function clampBasketProtectForLegs(opts: {
   takeProfit: number | null;
   stopLoss: number | null;
   point: number;
+  /** 브로커 SYMBOL_TRADE_STOPS_LEVEL (포인트). 0이면 2틱 */
+  stopsLevelPoints?: number;
 }) {
   const opens = opts.openPrices.filter((p) => p > 0);
   if (opens.length === 0) {
     return { takeProfit: opts.takeProfit, stopLoss: opts.stopLoss };
   }
   const point = opts.point > 0 ? opts.point : 0.00001;
-  const pad = point * 2;
+  const stopsPts = Math.max(2, opts.stopsLevelPoints ?? 0, 2);
+  const pad = point * stopsPts;
   const minOpen = Math.min(...opens);
   const maxOpen = Math.max(...opens);
   let takeProfit = opts.takeProfit;
@@ -326,13 +329,13 @@ export function clampBasketProtectForLegs(opts: {
     if (stopLoss != null) {
       const ceil = roundPriceToPoint(minOpen - pad, point);
       stopLoss = roundPriceToPoint(Math.min(stopLoss, ceil), point);
-      if (!(stopLoss < minOpen)) stopLoss = null;
+      if (!(stopLoss < minOpen - point)) stopLoss = null;
     }
   } else {
     if (takeProfit != null) {
       const ceil = roundPriceToPoint(minOpen - pad, point);
       takeProfit = roundPriceToPoint(Math.min(takeProfit, ceil), point);
-      if (!(takeProfit < minOpen)) takeProfit = null;
+      if (!(takeProfit < minOpen - point)) takeProfit = null;
     }
     if (stopLoss != null) {
       const floor = roundPriceToPoint(maxOpen + pad, point);

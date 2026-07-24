@@ -161,6 +161,13 @@ async function api(
       lastStatus = res.status;
       lastData = data;
 
+      try {
+        const { recordMetaApiHttp } = await import("./metaapi-metrics");
+        recordMetaApiHttp({ method, pathName, status: res.status });
+      } catch {
+        /* metrics optional */
+      }
+
       const retryable = res.status === 429 || res.status === 503 || res.status === 502;
       if (retryable && attempt < maxAttempts) {
         const ra = res.headers.get("retry-after");
@@ -178,6 +185,12 @@ async function api(
       const msg = e instanceof Error ? e.message : "network";
       lastStatus = 0;
       lastData = { message: msg, details: "NETWORK" };
+      try {
+        const { recordMetaApiHttp } = await import("./metaapi-metrics");
+        recordMetaApiHttp({ method, pathName, status: 0 });
+      } catch {
+        /* ignore */
+      }
       // Abort / fetch failed: at most 2 quick retries
       if (attempt < Math.min(maxAttempts, 2)) {
         await sleep(600 * attempt);
@@ -1161,11 +1174,34 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
 }
 
 /**
- * Always fresh — used by DCA engine, close, provision, cron.
- * Never serve stale positions to trading decisions.
+ * Always fresh by default — trading decisions.
+ * allowStaleMs>0: short TTL coalesce (HOLD/reconcile) to cut duplicate snaps.
+ * Trades invalidate via invalidateSnapshotCache.
  */
-export async function fetchSnapshot(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
-  return fetchSnapshotUncached(String(metaApiAccountId));
+export async function fetchSnapshot(
+  metaApiAccountId: string,
+  opts?: { allowStaleMs?: number },
+): Promise<MetaSnap | MetaErr> {
+  const id = String(metaApiAccountId);
+  const staleMs = Math.max(0, opts?.allowStaleMs ?? 0);
+  if (staleMs <= 0) return fetchSnapshotUncached(id);
+
+  const hit = snapCache.get(id);
+  if (hit?.value?.ok && Date.now() - hit.at < staleMs) return hit.value;
+  if (hit?.inflight) return hit.inflight;
+
+  const inflight = fetchSnapshotUncached(id)
+    .then((value) => {
+      if (value.ok) snapCache.set(id, { at: Date.now(), value });
+      else snapCache.delete(id);
+      return value;
+    })
+    .catch((err) => {
+      snapCache.delete(id);
+      throw err;
+    });
+  snapCache.set(id, { at: Date.now(), inflight });
+  return inflight;
 }
 
 /**
@@ -1319,18 +1355,29 @@ export async function placeMarketOrder(input: {
   direction: "BUY" | "SELL";
   lots: number;
   comment?: string;
+  /** 진입과 동시에 브로커 지정가 심기 (나체 창 최소화) */
+  stopLoss?: number | null;
+  takeProfit?: number | null;
 }) {
   const base = clientBase();
   const brokerSym = await resolveBrokerSymbol(input.metaApiAccountId, input.symbol);
   const actionType = input.direction === "BUY" ? "ORDER_TYPE_BUY" : "ORDER_TYPE_SELL";
-  const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, {
+  const body: Record<string, unknown> = {
     actionType,
     symbol: brokerSym,
     volume: input.lots,
     comment: input.comment || "SuperAlpha",
-  });
+  };
+  if (input.stopLoss != null && Number.isFinite(input.stopLoss) && input.stopLoss > 0) {
+    body.stopLoss = input.stopLoss;
+  }
+  if (input.takeProfit != null && Number.isFinite(input.takeProfit) && input.takeProfit > 0) {
+    body.takeProfit = input.takeProfit;
+  }
+  const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
   invalidateSnapshotCache(input.metaApiAccountId);
   if (res.status >= 400) {
+    // 동봉 TP/SL 거절 시 나체로라도 진입 재시도하지 않음 — 호출측이 보호 없이 재시도 판단
     return {
       ok: false as const,
       message: toKoreanError(res.data, "주문에 실패했습니다."),
@@ -1339,6 +1386,48 @@ export async function placeMarketOrder(input: {
     };
   }
   return { ok: true as const, data: res.data, brokerSymbol: brokerSym };
+}
+
+/** 심볼 거래 스펙 (stopsLevel / digits) — modify 거절 방지용 캐시 */
+const symbolSpecCache = new Map<
+  string,
+  { at: number; stopsLevel: number; digits: number; point: number }
+>();
+
+export async function getSymbolTradeSpec(metaApiAccountId: string, symbol: string) {
+  const brokerSym = await resolveBrokerSymbol(metaApiAccountId, symbol);
+  const key = `${metaApiAccountId}|${brokerSym}`;
+  const hit = symbolSpecCache.get(key);
+  if (hit && Date.now() - hit.at < 30 * 60_000) return { ...hit, brokerSymbol: brokerSym };
+
+  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
+  const bases = clientApiBases(region);
+  for (const base of bases) {
+    const res = await api(
+      base,
+      "GET",
+      `/users/current/accounts/${metaApiAccountId}/symbols/${encodeURIComponent(brokerSym)}`,
+    );
+    if (res.status < 400 && res.data && typeof res.data === "object") {
+      const d = res.data as Record<string, unknown>;
+      const digits = Number(d.digits ?? d.symbolDigits ?? 5);
+      const point = Number(d.point ?? d.tradeTickSize ?? (digits >= 0 ? 10 ** -digits : 0.00001));
+      const stopsLevel = Number(
+        d.stopsLevel ?? d.tradeStopsLevel ?? d.stopLevel ?? 0,
+      );
+      const spec = {
+        at: Date.now(),
+        stopsLevel: Number.isFinite(stopsLevel) && stopsLevel > 0 ? stopsLevel : 0,
+        digits: Number.isFinite(digits) ? digits : 5,
+        point: Number.isFinite(point) && point > 0 ? point : 0.00001,
+      };
+      symbolSpecCache.set(key, spec);
+      return { ...spec, brokerSymbol: brokerSym };
+    }
+  }
+  const fallback = { at: Date.now(), stopsLevel: 0, digits: 5, point: 0.00001 };
+  symbolSpecCache.set(key, fallback);
+  return { ...fallback, brokerSymbol: brokerSym };
 }
 
 export async function closePosition(metaApiAccountId: string, positionId: string) {
@@ -1590,6 +1679,8 @@ export type MetaDeal = {
   commission: number;
   time: string;
   volume: number;
+  price?: number;
+  reason?: string;
 };
 
 const TRADE_DEAL_TYPES = new Set(["DEAL_TYPE_BUY", "DEAL_TYPE_SELL"]);
@@ -1619,6 +1710,8 @@ function mapDeals(raw: unknown[]): MetaDeal[] {
       commission: Number(x.commission || 0),
       time: String(x.time || ""),
       volume: Number(x.volume || 0),
+      price: Number(x.price || x.openPrice || 0) || undefined,
+      reason: x.reason != null ? String(x.reason) : undefined,
     };
   });
 }
