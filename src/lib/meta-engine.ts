@@ -374,6 +374,9 @@ async function tryGhostBasketSoftExit(opts: {
   stopLossPct: number;
   stopLossEnabled: boolean;
   brokerLeverage?: number;
+  allowReentry?: boolean;
+  repeatEnabled?: boolean;
+  reentryLots?: number;
 }) {
   const lots = opts.legs.reduce((s, l) => s + l.lots, 0);
   const avg = avgPrice(opts.legs);
@@ -470,6 +473,39 @@ async function tryGhostBasketSoftExit(opts: {
       where: { id: opts.accountId },
       data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
     });
+    if (opts.allowReentry !== false && opts.repeatEnabled !== false) {
+      const re = await placeTpReentry({
+        accountId: opts.accountId,
+        metaId: opts.metaId,
+        symbol: opts.symbol,
+        direction: opts.direction,
+        logic: opts.logic,
+        reentryLots: opts.reentryLots ?? opts.legs[0]?.lots ?? 0.01,
+        tpRoi: opts.takeProfitPct,
+        stopLossPct: opts.stopLossPct,
+        stopLossEnabled: opts.stopLossEnabled,
+        brokerLeverage: opts.brokerLeverage,
+        bid: opts.bid,
+        ask: opts.ask,
+        noteTag: "reentry_after_ghost_soft_tp",
+      });
+      if (!re.ok) {
+        console.warn(
+          `[engine] soft-TP reentry skip account=${opts.accountId} ${opts.symbol}: ${re.error}`,
+        );
+      } else {
+        return {
+          handled: true as const,
+          result: {
+            ok: true as const,
+            action: "tp" as const,
+            symbol: opts.symbol,
+            floatingPnl: pnlSum,
+            reentered: true,
+          },
+        };
+      }
+    }
   } else {
     await prisma.brokerAccount.update({
       where: { id: opts.accountId },
@@ -709,6 +745,38 @@ async function healGhostBaskets(
         where: { id: accountId },
         data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
       });
+      // Broker-side TP left DB ghost — reenter L0 immediately when bot/symbol still ON.
+      const bot = await prisma.symbolBot.findFirst({
+        where: {
+          accountId,
+          symbol: g.symbol,
+          enabled: true,
+          OR: [{ direction: dir }, { dualDirection: true }],
+        },
+      });
+      if (bot && bot.repeatEnabled !== false) {
+        const logic = bot.logic || "dubai_bruno_313";
+        const lots = Math.max(0.01, Number(bot.startLots || 0.01));
+        const tpRoi = resolveLiveTakeProfitPct(logic, bot.takeProfitPct ?? 0);
+        const slPct = resolveLiveStopLossPct(logic, bot.stopLossPct ?? 0);
+        const re = await placeTpReentry({
+          accountId,
+          metaId,
+          symbol: g.symbol,
+          direction: dir,
+          logic,
+          reentryLots: lots,
+          tpRoi,
+          stopLossPct: slPct,
+          stopLossEnabled: bot.stopLossEnabled ?? true,
+          noteTag: "reentry_after_broker_tp",
+        });
+        if (!re.ok) {
+          console.warn(
+            `[engine] broker-TP reentry skip account=${accountId} ${g.symbol} ${dir}: ${re.error}`,
+          );
+        }
+      }
     } else {
       await prisma.brokerAccount.update({
         where: { id: accountId },
@@ -731,6 +799,139 @@ async function healGhostBaskets(
     `[engine] healed ${stillGhost.length} ghost basket(s) account=${accountId} via deals — bot stays ON`,
   );
   return true;
+}
+
+/**
+ * Same-tick L0 reentry after TP (broker soft/ghost or engine TP).
+ */
+async function placeTpReentry(opts: {
+  accountId: string;
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  logic: string;
+  reentryLots: number;
+  tpRoi: number;
+  stopLossPct?: number;
+  stopLossEnabled?: boolean;
+  brokerLeverage?: number;
+  bid?: number;
+  ask?: number;
+  noteTag?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const {
+    accountId,
+    metaId,
+    symbol,
+    direction,
+    logic,
+    reentryLots,
+    tpRoi,
+    stopLossPct,
+    stopLossEnabled = true,
+    brokerLeverage,
+    noteTag = "reentry_after_tp",
+  } = opts;
+
+  if (!(await canOpenNewRisk(accountId, symbol, direction))) {
+    return { ok: false, error: "reentry_blocked_toggle" };
+  }
+
+  let bid = opts.bid ?? 0;
+  let ask = opts.ask ?? 0;
+  if (!(bid > 0 && ask > 0)) {
+    const price = await getSymbolPrice(metaId, symbol);
+    if (!price || !(price.bid > 0 && price.ask > 0)) {
+      return { ok: false, error: `${symbol} 재진입 시세 없음` };
+    }
+    bid = price.bid;
+    ask = price.ask;
+  }
+
+  const lots = Math.max(0.01, Math.round(reentryLots * 100) / 100);
+  const fillPrice = mt5EntryQuote(direction, bid, ask);
+  const reentryTpPct = tpRoi > 0 ? tpRoi : 20;
+  const reentrySlPct =
+    stopLossPct != null && stopLossPct > 0 ? stopLossPct : DCA1000_DEFAULT_SL_ROI;
+  const reentryLive = liveBasketTpSlUsd({
+    symbol,
+    lots,
+    avgPrice: fillPrice,
+    takeProfitPct: reentryTpPct,
+    stopLossPct: reentrySlPct,
+    brokerLeverage: brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
+    brokerMarginSum: null,
+  });
+  let stopsLevelPoints = 0;
+  try {
+    stopsLevelPoints = (await getSymbolTradeSpec(metaId, symbol)).stopsLevel;
+  } catch {
+    /* ignore */
+  }
+  const reentryPx = previewProtectPrices({
+    symbol,
+    direction,
+    avgPrice: fillPrice,
+    lots,
+    takeProfitUsd: reentryLive.takeProfitUsd,
+    stopLossUsd: stopLossEnabled ? reentryLive.stopLossUsd : 0,
+    openPrices: [fillPrice],
+    stopsLevelPoints,
+  });
+  let order = await placeMarketOrder({
+    metaApiAccountId: metaId,
+    symbol,
+    direction,
+    lots,
+    comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
+    takeProfit: reentryPx.takeProfit,
+    stopLoss: reentryPx.stopLoss,
+  });
+  if (!order.ok && (reentryPx.takeProfit != null || reentryPx.stopLoss != null)) {
+    order = await placeMarketOrder({
+      metaApiAccountId: metaId,
+      symbol,
+      direction,
+      lots,
+      comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
+    });
+  }
+  if (!order.ok) {
+    return { ok: false, error: order.message || "익절 후 재진입 주문 실패" };
+  }
+  await prisma.basket.create({
+    data: {
+      accountId,
+      symbol,
+      direction,
+      filledLevel: 0,
+      firstEntryPrice: fillPrice,
+      status: "open",
+      legs: { create: [{ level: 0, lots, price: fillPrice }] },
+    },
+  });
+  await prisma.fill.create({
+    data: {
+      accountId,
+      symbol,
+      side: direction,
+      lots,
+      price: fillPrice,
+      kind: "ENTRY",
+      level: 0,
+      note: `${logic}|${noteTag}|brokerTP=${reentryPx.takeProfit ?? "-"}`,
+    },
+  });
+  await refreshAndProtectBasket({
+    metaId,
+    symbol,
+    direction,
+    takeProfitPct: reentryTpPct,
+    stopLossPct: reentrySlPct,
+    stopLossEnabled,
+    brokerLeverage,
+  });
+  return { ok: true };
 }
 
 /**
@@ -833,99 +1034,28 @@ async function closeBasketTp(opts: {
     return { closed: true as const, reentered: false as const };
   }
 
-  // 틱 도중 사용자가 전체/종목을 끈 경우 재진입 금지
-  if (!(await canOpenNewRisk(accountId, symbol, direction))) {
-    return { closed: true as const, reentered: false as const, note: "reentry_blocked_toggle" };
-  }
-
-  // 같은 틱에서 시작 포지션 재진입 (다음 틱 의존 시 엔진 공백으로 재시작 누락 가능)
-  const lots = Math.max(0.01, Math.round(reentryLots * 100) / 100);
-  const fillPrice = mt5EntryQuote(direction, bid, ask);
-  const reentryTpPct = tpRoi > 0 ? tpRoi : 20;
-  const reentrySlPct =
-    stopLossPct != null && stopLossPct > 0 ? stopLossPct : DCA1000_DEFAULT_SL_ROI;
-  const reentryLive = liveBasketTpSlUsd({
-    symbol,
-    lots,
-    avgPrice: fillPrice,
-    takeProfitPct: reentryTpPct,
-    stopLossPct: reentrySlPct,
-    brokerLeverage: brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
-    brokerMarginSum: null,
-  });
-  let stopsLevelPoints = 0;
-  try {
-    stopsLevelPoints = (await getSymbolTradeSpec(metaId, symbol)).stopsLevel;
-  } catch {
-    /* ignore */
-  }
-  const reentryPx = previewProtectPrices({
-    symbol,
-    direction,
-    avgPrice: fillPrice,
-    lots,
-    takeProfitUsd: reentryLive.takeProfitUsd,
-    stopLossUsd: stopLossEnabled ? reentryLive.stopLossUsd : 0,
-    openPrices: [fillPrice],
-    stopsLevelPoints,
-  });
-  let order = await placeMarketOrder({
-    metaApiAccountId: metaId,
-    symbol,
-    direction,
-    lots,
-    comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
-    takeProfit: reentryPx.takeProfit,
-    stopLoss: reentryPx.stopLoss,
-  });
-  if (!order.ok && (reentryPx.takeProfit != null || reentryPx.stopLoss != null)) {
-    order = await placeMarketOrder({
-      metaApiAccountId: metaId,
-      symbol,
-      direction,
-      lots,
-      comment: `SA-${logic.replace(/[^a-z0-9_]/gi, "").slice(0, 10) || "tp"}-L0`,
-    });
-  }
-  if (!order.ok) {
-    return {
-      closed: true as const,
-      reentered: false as const,
-      error: order.message || "익절 후 재진입 주문 실패",
-    };
-  }
-  await prisma.basket.create({
-    data: {
-      accountId,
-      symbol,
-      direction,
-      filledLevel: 0,
-      firstEntryPrice: fillPrice,
-      status: "open",
-      legs: { create: [{ level: 0, lots, price: fillPrice }] },
-    },
-  });
-  await prisma.fill.create({
-    data: {
-      accountId,
-      symbol,
-      side: direction,
-      lots,
-      price: fillPrice,
-      kind: "ENTRY",
-      level: 0,
-      note: `${logic}|reentry_after_tp|brokerTP=${reentryPx.takeProfit ?? "-"}`,
-    },
-  });
-  await refreshAndProtectBasket({
+  const re = await placeTpReentry({
+    accountId,
     metaId,
     symbol,
     direction,
-    takeProfitPct: reentryTpPct,
-    stopLossPct: reentrySlPct,
+    logic,
+    reentryLots,
+    tpRoi,
+    stopLossPct,
     stopLossEnabled,
     brokerLeverage,
+    bid,
+    ask,
+    noteTag: "reentry_after_tp",
   });
+  if (!re.ok) {
+    return {
+      closed: true as const,
+      reentered: false as const,
+      error: re.error,
+    };
+  }
   return { closed: true as const, reentered: true as const };
 }
 
@@ -1015,6 +1145,9 @@ async function runSymbolTableDca(
         stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: cfg.brokerLeverage,
+        allowReentry: !cfg.manageOnly,
+        repeatEnabled: cfg.repeatEnabled,
+        reentryLots: levelLots(0),
       });
       if (ghostExit.handled) return ghostExit.result;
       return {
@@ -1676,6 +1809,9 @@ async function runSymbolDca(
         stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: cfg.brokerLeverage,
+        allowReentry: !cfg.manageOnly,
+        repeatEnabled: cfg.repeatEnabled,
+        reentryLots: lotsAtLevel(cfg.startLots, cfg.entryMultiplier, 0, logic),
       });
       if (ghostExit.handled) return ghostExit.result;
       return {
