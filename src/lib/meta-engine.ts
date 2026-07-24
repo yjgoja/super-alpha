@@ -1112,31 +1112,13 @@ async function runSymbolTableDca(
   }
 
   const legs = basket.legs.sort((a, b) => a.level - b.level);
-  // 브로커가 일부만 닫은 orphan → ROI와 무관하게 잔여 전량 정리
+  // DB 레그 > 라이브 포지션: 대부분 진입/DCA 직후 스냅샷 지연.
+  // 절대 강제청산하지 않음(과거에 partial_orphan_force_close로 정상 바스켓을 죽임).
+  // 라이브가 더 많으면 아래 orphan-adopt 경로가 처리. 라이브가 0이면 ghost 경로.
   if (ourPositions.length > 0 && legs.length > ourPositions.length) {
-    console.error(
-      `[engine] partial basket account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} — force close`,
+    console.warn(
+      `[engine] leg/pos lag account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} — skip force close`,
     );
-    const fc = await forceCloseRemainder({ metaId, symbol, direction, rounds: 3 });
-    if (fc.ok && (fc.remaining ?? 0) === 0) {
-      await prisma.basket.update({
-        where: { id: basket.id },
-        data: { status: "closed", lastExitAt: new Date(), unrealizedPnl: 0 },
-      });
-      await prisma.fill.create({
-        data: {
-          accountId,
-          symbol,
-          side: direction === "BUY" ? "SELL" : "BUY",
-          lots: ourPositions.reduce((s, p) => s + p.lots, 0),
-          price: direction === "BUY" ? price.bid : price.ask,
-          pnl: ourPositions.reduce((s, p) => s + p.profit, 0),
-          kind: "GUARD",
-          note: "partial_orphan_force_close",
-        },
-      });
-      return { ok: true as const, action: "partial_force_close", symbol };
-    }
   }
   // MT5 실포지션 평단·손익 우선
   const posVol = ourPositions.reduce((s, p) => s + p.lots, 0);

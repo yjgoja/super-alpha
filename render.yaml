@@ -25,7 +25,7 @@ services:
       - key: STREAM_OPEN_BASKETS
         value: "1"
       - key: STREAM_OPEN_INTERVAL_MS
-        value: "400"
+        value: "800"
       - key: STREAM_OPEN_MAX
         value: "50"
       - key: ENGINE_SNAP_STALE_MS

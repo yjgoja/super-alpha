@@ -39,8 +39,8 @@ const INTERVAL_MS = Math.max(
   ),
 );
 const STREAM_INTERVAL_MS = Math.max(
-  200,
-  Number(process.env.STREAM_OPEN_INTERVAL_MS || 400),
+  500,
+  Number(process.env.STREAM_OPEN_INTERVAL_MS || 800),
 );
 const STREAM_MAX = Math.min(
   100,
