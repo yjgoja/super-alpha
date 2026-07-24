@@ -2508,21 +2508,47 @@ async function runDcaTickInner(accountId: string) {
   const failNotes = results
     .filter((r) => r && typeof r === "object" && "error" in r && (r as { error?: string }).error)
     .map((r) => `${(r as { symbol?: string }).symbol}: ${(r as { error?: string }).error}`);
-  if (failNotes.length) {
-    await prisma.brokerAccount.update({
-      where: { id: account.id },
-      data: {
-        statusMessage: `${masterOn ? "봇 실행 중" : "포지션 관리 중"} · 일부 종목 오류: ${failNotes[0]}`.slice(
-          0,
-          180,
-        ),
-      },
-    });
-  }
+
+  const tradedOk = results.some(
+    (r) =>
+      r &&
+      typeof r === "object" &&
+      "action" in r &&
+      ["tp", "sl", "entry", "dca", "ghost_tp", "ghost_sl"].includes(
+        String((r as { action?: string }).action || ""),
+      ),
+  );
+
+  /** Soft/transient — do not sticky-alarm the UI when trading otherwise works. */
+  const hardFailNotes = failNotes.filter((n) => {
+    const s = n.toLowerCase();
+    if (/시세를 가져오지|no_price|trade context busy|요청 한도|too many|rate limit/i.test(s)) {
+      return false;
+    }
+    // Duplicate entry / already in market while open basket is fine
+    if (/already|position|no money|not enough money|margin/i.test(s) && liveBaskets.length > 0) {
+      return false;
+    }
+    return true;
+  });
+
+  await prisma.brokerAccount.update({
+    where: { id: account.id },
+    data: {
+      statusMessage: tradedOk || hardFailNotes.length === 0
+        ? masterOn
+          ? "클라우드 연결 · 봇 실행 중"
+          : "봇 중지 · 열린 포지션 익절·손절만 관리"
+        : `${masterOn ? "봇 실행 중" : "포지션 관리 중"} · 일부 종목 오류: ${hardFailNotes[0]}`.slice(
+            0,
+            180,
+          ),
+    },
+  });
 
   // 오늘 실현 = MT5 딜 히스토리 (스로틀; 청산 틱만 force)
   try {
-    const traded = results.some(
+    const traded = tradedOk || results.some(
       (r) =>
         r &&
         typeof r === "object" &&
