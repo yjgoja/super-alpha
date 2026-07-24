@@ -234,6 +234,131 @@ export function mt5FloatingRoiPct(pnl: number, usedMargin: number) {
   return (pnl / usedMargin) * 100;
 }
 
+/** 심볼 POINT (가격 반올림용) */
+export function pointForSymbol(symbol: string) {
+  const raw = (symbol || "EURUSD").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const key =
+    raw === "GOLD" || raw.startsWith("XAU")
+      ? "XAUUSD"
+      : raw.startsWith("XAG") || raw === "SILVER"
+        ? "XAGUSD"
+        : raw;
+  return MT5_POINT[key] ?? (key.includes("JPY") ? 0.001 : key.startsWith("XAU") ? 0.01 : 0.00001);
+}
+
+/** 가격을 심볼 point 단위로 반올림 */
+export function roundPriceToPoint(price: number, point: number) {
+  if (!(price > 0) || !(point > 0)) return price;
+  return Math.round(price / point) * point;
+}
+
+/**
+ * 바스켓 TP$/SL$ → 전 레그에 심을 동일 브로커 지정가.
+ * BUY: tp = avg + TP$/(lots·cs), sl = avg − SL$/(lots·cs)
+ * SELL: 반대.
+ */
+export function basketExitPricesFromUsd(opts: {
+  symbol: string;
+  direction: "BUY" | "SELL";
+  avgPrice: number;
+  lots: number;
+  takeProfitUsd: number;
+  stopLossUsd: number;
+}) {
+  const lots = Math.max(0, opts.lots);
+  const avg = Math.max(0, opts.avgPrice);
+  const cs = contractSizeForSymbol(opts.symbol);
+  const point = pointForSymbol(opts.symbol);
+  const denom = lots * cs;
+  if (!(denom > 0) || !(avg > 0)) {
+    return {
+      takeProfit: null as number | null,
+      stopLoss: null as number | null,
+      point,
+      denom: 0,
+    };
+  }
+  const tpMove = opts.takeProfitUsd > 0 ? opts.takeProfitUsd / denom : 0;
+  const slMove = opts.stopLossUsd > 0 ? opts.stopLossUsd / denom : 0;
+  let takeProfit: number | null = null;
+  let stopLoss: number | null = null;
+  if (opts.direction === "BUY") {
+    if (tpMove > 0) takeProfit = roundPriceToPoint(avg + tpMove, point);
+    if (slMove > 0) stopLoss = roundPriceToPoint(avg - slMove, point);
+    if (takeProfit != null && !(takeProfit > avg)) takeProfit = null;
+    if (stopLoss != null && !(stopLoss < avg)) stopLoss = null;
+  } else {
+    if (tpMove > 0) takeProfit = roundPriceToPoint(avg - tpMove, point);
+    if (slMove > 0) stopLoss = roundPriceToPoint(avg + slMove, point);
+    if (takeProfit != null && !(takeProfit < avg)) takeProfit = null;
+    if (stopLoss != null && !(stopLoss > avg)) stopLoss = null;
+  }
+  return { takeProfit, stopLoss, point, denom, tpMove, slMove };
+}
+
+/**
+ * 바스켓 공통 지정가를 전 레그 openPrice 기준으로 브로커 유효 범위에 맞춤.
+ * SELL TP는 모든 open 미만, BUY TP는 모든 open 초과여야 MT5가 수락한다.
+ * (분산 진입 시 목표가 일부 레그에 무효 → 전 레그 유효한 쪽으로 클램프; 소프트 ROI가 정밀 보정)
+ */
+export function clampBasketProtectForLegs(opts: {
+  direction: "BUY" | "SELL";
+  openPrices: number[];
+  takeProfit: number | null;
+  stopLoss: number | null;
+  point: number;
+}) {
+  const opens = opts.openPrices.filter((p) => p > 0);
+  if (opens.length === 0) {
+    return { takeProfit: opts.takeProfit, stopLoss: opts.stopLoss };
+  }
+  const point = opts.point > 0 ? opts.point : 0.00001;
+  const pad = point * 2;
+  const minOpen = Math.min(...opens);
+  const maxOpen = Math.max(...opens);
+  let takeProfit = opts.takeProfit;
+  let stopLoss = opts.stopLoss;
+  if (opts.direction === "BUY") {
+    if (takeProfit != null) {
+      const floor = roundPriceToPoint(maxOpen + pad, point);
+      takeProfit = roundPriceToPoint(Math.max(takeProfit, floor), point);
+    }
+    if (stopLoss != null) {
+      const ceil = roundPriceToPoint(minOpen - pad, point);
+      stopLoss = roundPriceToPoint(Math.min(stopLoss, ceil), point);
+      if (!(stopLoss < minOpen)) stopLoss = null;
+    }
+  } else {
+    if (takeProfit != null) {
+      const ceil = roundPriceToPoint(minOpen - pad, point);
+      takeProfit = roundPriceToPoint(Math.min(takeProfit, ceil), point);
+      if (!(takeProfit < minOpen)) takeProfit = null;
+    }
+    if (stopLoss != null) {
+      const floor = roundPriceToPoint(maxOpen + pad, point);
+      stopLoss = roundPriceToPoint(Math.max(stopLoss, floor), point);
+    }
+  }
+  return { takeProfit, stopLoss };
+}
+
+/** 브로커에 심긴 TP/SL이 목표와 허용오차(틱) 이내인지 */
+export function brokerProtectionMatches(opts: {
+  current: number | null | undefined;
+  target: number | null | undefined;
+  point: number;
+  /** 허용 틱 수 (기본 2) */
+  tolTicks?: number;
+}) {
+  const target = opts.target;
+  if (target == null || !(target > 0)) return true; // 목표 없음 = 비교 스킵
+  const cur = opts.current;
+  if (cur == null || !(cur > 0)) return false;
+  const point = opts.point > 0 ? opts.point : 0.00001;
+  const tol = Math.max(1, opts.tolTicks ?? 2) * point;
+  return Math.abs(cur - target) <= tol + 1e-12;
+}
+
 /** ROI% → 달러 (증거금 × ROI%/100). 코인: 마진10 × ROI20% = $2 */
 export function roiPctToUsd(marginUsd: number, roiPct: number) {
   if (!(marginUsd > 0) || !(roiPct > 0)) return 0;

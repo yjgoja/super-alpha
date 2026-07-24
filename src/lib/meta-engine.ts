@@ -8,6 +8,9 @@ import {
   shouldTriggerStopLossUsd,
   shouldTriggerTakeProfit,
   spreadPct,
+  basketExitPricesFromUsd,
+  brokerProtectionMatches,
+  clampBasketProtectForLegs,
   MT5_BROKER_LEVERAGE_DEFAULT,
   DCA1000_DEFAULT_SL_ROI,
 } from "./dca1000";
@@ -26,6 +29,7 @@ import {
   ensureCloudLive,
   fetchSnapshot,
   getSymbolPrice,
+  modifyPositionProtection,
   placeMarketOrder,
   resolveBrokerSymbol,
   symbolsMatch,
@@ -33,6 +37,12 @@ import {
 import { prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
+
+/** 브로커 지정가 TP/SL — 기본 ON. BROKER_PROTECT_TP_SL=0 이면 끔 */
+function brokerProtectEnabled() {
+  const v = (process.env.BROKER_PROTECT_TP_SL || "1").trim().toLowerCase();
+  return v !== "0" && v !== "false" && v !== "off" && v !== "no";
+}
 
 function lotsAtLevel(
   startLots: number,
@@ -101,13 +111,175 @@ type BasketRow = {
 };
 
 type PosRow = {
+  id?: string;
   symbol: string;
   direction: "BUY" | "SELL";
   lots: number;
   price: number;
   profit: number;
   margin?: number;
+  stopLoss?: number;
+  takeProfit?: number;
 };
+
+/**
+ * 열린 바스켓 전 레그에 동일 브로커 TP/SL 지정가 동기화.
+ * 드리프트(미설정·오차 > 2틱)만 modify. 소프트웨어 ROI 청산과 병행.
+ */
+async function syncBrokerBasketProtection(opts: {
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  positions: PosRow[];
+  avgPrice: number;
+  lots: number;
+  takeProfitUsd: number;
+  stopLossUsd: number;
+  stopLossEnabled: boolean;
+}) {
+  if (!brokerProtectEnabled()) {
+    return { synced: 0, skipped: true as const, drift: false, targets: null };
+  }
+  const targetsRaw = basketExitPricesFromUsd({
+    symbol: opts.symbol,
+    direction: opts.direction,
+    avgPrice: opts.avgPrice,
+    lots: opts.lots,
+    takeProfitUsd: opts.takeProfitUsd,
+    stopLossUsd: opts.stopLossEnabled ? opts.stopLossUsd : 0,
+  });
+  const legs = opts.positions.filter(
+    (p) => p.id && symbolsMatch(p.symbol, opts.symbol) && p.direction === opts.direction,
+  );
+  const clamped = clampBasketProtectForLegs({
+    direction: opts.direction,
+    openPrices: legs.map((p) => p.price),
+    takeProfit: targetsRaw.takeProfit,
+    stopLoss: targetsRaw.stopLoss,
+    point: targetsRaw.point,
+  });
+  const targets = {
+    ...targetsRaw,
+    takeProfit: clamped.takeProfit,
+    stopLoss: clamped.stopLoss,
+  };
+  if (targets.takeProfit == null && targets.stopLoss == null) {
+    return { synced: 0, skipped: true as const, drift: false, targets };
+  }
+  let synced = 0;
+  let drift = false;
+  let failed = 0;
+  for (const p of legs) {
+    const tpOk = brokerProtectionMatches({
+      current: p.takeProfit,
+      target: targets.takeProfit,
+      point: targets.point,
+    });
+    const slOk = brokerProtectionMatches({
+      current: p.stopLoss,
+      target: targets.stopLoss,
+      point: targets.point,
+    });
+    if (tpOk && slOk) continue;
+    drift = true;
+    const mod = await modifyPositionProtection({
+      metaApiAccountId: opts.metaId,
+      positionId: String(p.id),
+      takeProfit: targets.takeProfit,
+      stopLoss: targets.stopLoss,
+    });
+    if (mod.ok) {
+      synced += 1;
+      p.takeProfit = targets.takeProfit ?? undefined;
+      p.stopLoss = targets.stopLoss ?? undefined;
+    } else {
+      failed += 1;
+      console.warn(
+        `[engine] broker protect fail id=${p.id} ${opts.symbol} ${opts.direction}: ${mod.message}`,
+      );
+    }
+  }
+  return { synced, skipped: false as const, drift, failed, targets };
+}
+
+/** 진입/DCA 직후 스냅샷 재조회 → 브로커 TP/SL 즉시 재설정 */
+async function refreshAndProtectBasket(opts: {
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  takeProfitPct: number;
+  stopLossPct: number;
+  stopLossEnabled: boolean;
+  brokerLeverage?: number;
+}) {
+  if (!brokerProtectEnabled()) return { ok: false as const, reason: "disabled" };
+  const snap = await fetchSnapshot(opts.metaId);
+  if (!snap.ok) return { ok: false as const, reason: snap.message };
+  const positions = snap.positions.filter(
+    (p) => symbolsMatch(p.symbol, opts.symbol) && p.direction === opts.direction,
+  ) as PosRow[];
+  if (positions.length === 0) return { ok: false as const, reason: "no_positions" };
+  const lots = positions.reduce((s, p) => s + p.lots, 0);
+  const avg =
+    lots > 0 ? positions.reduce((s, p) => s + p.lots * p.price, 0) / lots : 0;
+  const brokerMarginSum = positions.reduce(
+    (s, p) => s + (typeof p.margin === "number" && p.margin > 0 ? p.margin : 0),
+    0,
+  );
+  const liveUsd = liveBasketTpSlUsd({
+    symbol: opts.symbol,
+    lots,
+    avgPrice: avg,
+    takeProfitPct: opts.takeProfitPct,
+    stopLossPct: opts.stopLossPct,
+    brokerLeverage: opts.brokerLeverage,
+    brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
+  });
+  const sync = await syncBrokerBasketProtection({
+    metaId: opts.metaId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    positions,
+    avgPrice: avg,
+    lots,
+    takeProfitUsd: liveUsd.takeProfitUsd,
+    stopLossUsd: liveUsd.stopLossUsd,
+    stopLossEnabled: opts.stopLossEnabled,
+  });
+  return { ok: true as const, sync, liveUsd };
+}
+
+async function logTpMissGuard(opts: {
+  accountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  logic: string;
+  floatingRoi: number;
+  tpRoi: number;
+  tpMoney: number;
+  pnl: number;
+  brokerTpMissing: boolean;
+  reason: string;
+}) {
+  const note = `tp_miss_guard|${opts.reason}|${opts.logic}|roi=${opts.floatingRoi.toFixed(2)}%>=${opts.tpRoi}%|pnl=${opts.pnl.toFixed(2)}|tp$${opts.tpMoney}|brokerTpMissing=${opts.brokerTpMissing ? 1 : 0}`;
+  console.error(`[engine] ${note} account=${opts.accountId} ${opts.symbol} ${opts.direction}`);
+  try {
+    await prisma.fill.create({
+      data: {
+        accountId: opts.accountId,
+        symbol: opts.symbol,
+        side: opts.direction === "BUY" ? "SELL" : "BUY",
+        lots: 0,
+        price: 0,
+        pnl: opts.pnl,
+        kind: "GUARD",
+        note: note.slice(0, 500),
+      },
+    });
+  } catch (e) {
+    console.warn("[engine] tp_miss_guard fill skip", e instanceof Error ? e.message : e);
+  }
+}
 
 function positionsForSymbol(
   positions: PosRow[],
@@ -379,6 +551,14 @@ async function closeBasketTp(opts: {
       note: `${logic}|reentry_after_tp`,
     },
   });
+  await refreshAndProtectBasket({
+    metaId,
+    symbol,
+    direction,
+    takeProfitPct: tpRoi > 0 ? tpRoi : 20,
+    stopLossPct: DCA1000_DEFAULT_SL_ROI,
+    stopLossEnabled: true,
+  });
   return { closed: true as const, reentered: true as const };
 }
 
@@ -521,6 +701,20 @@ async function runSymbolTableDca(
         note: `${logic}|spr=${spr.toFixed(4)}`,
       },
     });
+    const entryTp = isBulkLogic(logic)
+      ? levels[0]?.profit && levels[0].profit > 0
+        ? levels[0].profit
+        : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct)
+      : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
+    await refreshAndProtectBasket({
+      metaId,
+      symbol,
+      direction,
+      takeProfitPct: entryTp,
+      stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+      stopLossEnabled: cfg.stopLossEnabled,
+      brokerLeverage: cfg.brokerLeverage,
+    });
     return { ok: true as const, action: "entry", symbol, spreadPct: spr };
   }
 
@@ -592,6 +786,20 @@ async function runSymbolTableDca(
     ask: price.ask,
   });
   const floatingRoi = mt5FloatingRoiPct(tpPnl.pnl, usedMargin);
+
+  // 1차 방어: 브로커 지정가 TP/SL 동기화 (폴링 지연 대비)
+  const protect = await syncBrokerBasketProtection({
+    metaId,
+    symbol,
+    direction,
+    positions: ourPositions,
+    avgPrice: midRef,
+    lots: lotsForTp,
+    takeProfitUsd: liveUsd.takeProfitUsd,
+    stopLossUsd: liveUsd.stopLossUsd,
+    stopLossEnabled: cfg.stopLossEnabled,
+  });
+
   const tpDecision = shouldTriggerTakeProfit({
     pnl: tpPnl.pnl,
     takeProfitUsd: liveUsd.takeProfitUsd,
@@ -600,6 +808,30 @@ async function runSymbolTableDca(
   });
   // 익절 우선: BasketROI ≥ TP% → 바스켓 전량 청산 → 재진입
   if (tpDecision.hit) {
+    const brokerTpMissing =
+      !protect.targets?.takeProfit ||
+      ourPositions.some(
+        (p) =>
+          !brokerProtectionMatches({
+            current: p.takeProfit,
+            target: protect.targets?.takeProfit,
+            point: protect.targets?.point ?? 0.01,
+          }),
+      );
+    if (brokerTpMissing) {
+      await logTpMissGuard({
+        accountId,
+        symbol,
+        direction,
+        logic,
+        floatingRoi: tpDecision.floatingRoi,
+        tpRoi: tpDecision.tpRoi,
+        tpMoney: tpDecision.tpMoney,
+        pnl: tpPnl.pnl,
+        brokerTpMissing: true,
+        reason: "soft_tp_hit_broker_unset",
+      });
+    }
     const tpClose = await closeBasketTp({
       accountId,
       metaId,
@@ -621,6 +853,18 @@ async function runSymbolTableDca(
       allowReentry: !cfg.manageOnly,
     });
     if (!tpClose.closed) {
+      await logTpMissGuard({
+        accountId,
+        symbol,
+        direction,
+        logic,
+        floatingRoi: tpDecision.floatingRoi,
+        tpRoi: tpDecision.tpRoi,
+        tpMoney: tpDecision.tpMoney,
+        pnl: tpPnl.pnl,
+        brokerTpMissing,
+        reason: "soft_close_failed",
+      });
       return {
         ok: false as const,
         error: tpClose.error || "익절 청산 실패",
@@ -796,6 +1040,20 @@ async function runSymbolTableDca(
         unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0),
       },
     });
+    const dcaTp = isBulkLogic(logic)
+      ? levels[filled]?.profit && levels[filled].profit > 0
+        ? levels[filled].profit
+        : tpRoiFallback
+      : tpRoiFallback;
+    await refreshAndProtectBasket({
+      metaId,
+      symbol,
+      direction,
+      takeProfitPct: dcaTp,
+      stopLossPct: slRoiFallback,
+      stopLossEnabled: cfg.stopLossEnabled,
+      brokerLeverage: brokerLev,
+    });
     return {
       ok: true as const,
       action: "dca",
@@ -943,6 +1201,15 @@ async function runSymbolDca(
         note: logic,
       },
     });
+    await refreshAndProtectBasket({
+      metaId,
+      symbol,
+      direction,
+      takeProfitPct: resolveLiveTakeProfitPct(logic, cfg.takeProfitPct),
+      stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+      stopLossEnabled: cfg.stopLossEnabled,
+      brokerLeverage: cfg.brokerLeverage,
+    });
     return { ok: true as const, action: "entry", symbol };
   }
 
@@ -985,6 +1252,19 @@ async function runSymbolDca(
     ask: price.ask,
   });
   const floatingRoi = mt5FloatingRoiPct(tpPnl.pnl, usedMargin);
+
+  const protect = await syncBrokerBasketProtection({
+    metaId,
+    symbol,
+    direction,
+    positions: ourPositions,
+    avgPrice: midRef,
+    lots: lotsForTp,
+    takeProfitUsd: liveUsd.takeProfitUsd,
+    stopLossUsd: liveUsd.stopLossUsd,
+    stopLossEnabled: cfg.stopLossEnabled,
+  });
+
   const tpDecision = shouldTriggerTakeProfit({
     pnl: tpPnl.pnl,
     takeProfitUsd: liveUsd.takeProfitUsd,
@@ -993,6 +1273,30 @@ async function runSymbolDca(
   });
 
   if (tpDecision.hit) {
+    const brokerTpMissing =
+      !protect.targets?.takeProfit ||
+      ourPositions.some(
+        (p) =>
+          !brokerProtectionMatches({
+            current: p.takeProfit,
+            target: protect.targets?.takeProfit,
+            point: protect.targets?.point ?? 0.01,
+          }),
+      );
+    if (brokerTpMissing) {
+      await logTpMissGuard({
+        accountId,
+        symbol,
+        direction,
+        logic,
+        floatingRoi: tpDecision.floatingRoi,
+        tpRoi: tpDecision.tpRoi,
+        tpMoney: tpDecision.tpMoney,
+        pnl: tpPnl.pnl,
+        brokerTpMissing: true,
+        reason: "soft_tp_hit_broker_unset",
+      });
+    }
     const tpClose = await closeBasketTp({
       accountId,
       metaId,
@@ -1013,6 +1317,18 @@ async function runSymbolDca(
       allowReentry: !cfg.manageOnly,
     });
     if (!tpClose.closed) {
+      await logTpMissGuard({
+        accountId,
+        symbol,
+        direction,
+        logic,
+        floatingRoi: tpDecision.floatingRoi,
+        tpRoi: tpDecision.tpRoi,
+        tpMoney: tpDecision.tpMoney,
+        pnl: tpPnl.pnl,
+        brokerTpMissing,
+        reason: "soft_close_failed",
+      });
       return {
         ok: false as const,
         error: tpClose.error || "익절 청산 실패",
@@ -1157,6 +1473,15 @@ async function runSymbolDca(
           level: nextLevel,
           note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}`,
         },
+      });
+      await refreshAndProtectBasket({
+        metaId,
+        symbol,
+        direction,
+        takeProfitPct: resolveLiveTakeProfitPct(logic, cfg.takeProfitPct),
+        stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+        stopLossEnabled: cfg.stopLossEnabled,
+        brokerLeverage: brokerLev,
       });
       return { ok: true as const, action: "dca", level: nextLevel, symbol };
     }
@@ -1706,6 +2031,22 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
       });
     }
   }
+
+  // 열린 바스켓 계정 우선 — TP/SL 지정가 동기화·소프트 청산 지연 최소화
+  const openBasketIds = await prisma.basket.groupBy({
+    by: ["accountId"],
+    where: {
+      status: "open",
+      accountId: { in: accounts.map((a) => a.id) },
+    },
+  });
+  const openSet = new Set(openBasketIds.map((b) => b.accountId));
+  accounts.sort((a, b) => {
+    const ao = openSet.has(a.id) ? 0 : 1;
+    const bo = openSet.has(b.id) ? 0 : 1;
+    return ao - bo;
+  });
+
   const results: Array<Record<string, unknown>> = [];
   let deferred = 0;
   const concurrency = resolveEngineConcurrency();

@@ -89,6 +89,10 @@ export type MetaSnap = {
     /** MetaAPI/브로커 포지션 사용증거금 (있으면 바스켓 ROI 분모 우선) */
     margin?: number;
     magic?: number;
+    /** 브로커 지정 손절가 (없으면 0/미설정) */
+    stopLoss?: number;
+    /** 브로커 지정 익절가 (없으면 0/미설정) */
+    takeProfit?: number;
   }>;
 };
 
@@ -1034,6 +1038,8 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
     const direction: "BUY" | "SELL" =
       type.toLowerCase().includes("sell") || type === "POSITION_TYPE_SELL" ? "SELL" : "BUY";
     const marginRaw = Number(x.margin ?? x.usedMargin ?? 0);
+    const slRaw = Number(x.stopLoss ?? x.sl ?? 0);
+    const tpRaw = Number(x.takeProfit ?? x.tp ?? 0);
     return {
       id: String(x.id || x.positionId || ""),
       symbol: String(x.symbol || ""),
@@ -1043,6 +1049,8 @@ function mapPositions(raw: unknown[]): MetaSnap["positions"] {
       profit: Number(x.profit || 0) + Number(x.swap || 0) + Number(x.commission || 0),
       margin: Number.isFinite(marginRaw) && marginRaw > 0 ? marginRaw : undefined,
       magic: x.magic != null ? Number(x.magic) : undefined,
+      stopLoss: Number.isFinite(slRaw) && slRaw > 0 ? slRaw : undefined,
+      takeProfit: Number.isFinite(tpRaw) && tpRaw > 0 ? tpRaw : undefined,
     };
   });
 }
@@ -1344,6 +1352,41 @@ export async function closePosition(metaApiAccountId: string, positionId: string
     return { ok: false as const, message: toKoreanError(res.data, "청산에 실패했습니다.") };
   }
   return { ok: true as const };
+}
+
+/**
+ * 브로커 포지션에 지정 손절/익절가 설정 (MT5 POSITION_MODIFY).
+ * 엔진 폴링과 무관하게 서버에서 TP/SL 체결되게 하는 1차 방어.
+ */
+export async function modifyPositionProtection(input: {
+  metaApiAccountId: string;
+  positionId: string;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+}) {
+  const base = clientBase();
+  const body: Record<string, unknown> = {
+    actionType: "POSITION_MODIFY",
+    positionId: input.positionId,
+  };
+  if (input.stopLoss != null && Number.isFinite(input.stopLoss) && input.stopLoss > 0) {
+    body.stopLoss = input.stopLoss;
+  }
+  if (input.takeProfit != null && Number.isFinite(input.takeProfit) && input.takeProfit > 0) {
+    body.takeProfit = input.takeProfit;
+  }
+  if (body.stopLoss == null && body.takeProfit == null) {
+    return { ok: false as const, message: "stopLoss/takeProfit 값이 없습니다." };
+  }
+  const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
+  if (res.status >= 400) {
+    return {
+      ok: false as const,
+      message: toKoreanError(res.data, "포지션 TP/SL 수정에 실패했습니다."),
+      data: res.data,
+    };
+  }
+  return { ok: true as const, data: res.data };
 }
 
 /**
