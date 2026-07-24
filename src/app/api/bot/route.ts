@@ -53,7 +53,9 @@ export async function POST(req: Request) {
           login: account.login,
           password: account.syncToken,
           server: account.server,
-          waitMs: 50000,
+          waitMs: 60000,
+          // Recreate only when previously failed / missing cloud
+          allowRecreate: account.status === "failed" || !account.metaApiAccountId,
         });
         if (!repaired.ok) {
           errMsg = repaired.message;

@@ -1274,6 +1274,7 @@ async function runDcaTickInner(accountId: string) {
         password: account.syncToken,
         server: account.server,
         waitMs,
+        allowRecreate: false,
       });
       if (live.ok) {
         snap = live.snap;
@@ -1602,9 +1603,34 @@ function resolveTickBudgetMs(optsBudget?: number): number {
   if (optsBudget != null && Number.isFinite(optsBudget)) return optsBudget;
   const fromEnv = Number(process.env.ENGINE_BUDGET_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
-  // Local direct engine: do not starve accounts (serverless cron keeps 52s)
-  if (process.env.ENGINE_MODE === "direct") return 600_000;
+  // Local direct engine: long window; fairness via concurrency + round-robin
+  if (process.env.ENGINE_MODE === "direct") return 900_000;
   return 52_000;
+}
+
+function resolveEngineConcurrency(): number {
+  const n = Number(process.env.ENGINE_CONCURRENCY || 12);
+  if (!Number.isFinite(n) || n < 1) return 12;
+  return Math.min(32, Math.floor(n));
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const n = Math.min(concurrency, Math.max(1, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
 }
 
 export async function runAllBots(opts: RunAllBotsOpts = {}) {
@@ -1682,80 +1708,66 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
   }
   const results: Array<Record<string, unknown>> = [];
   let deferred = 0;
-  for (const a of accounts) {
+  const concurrency = resolveEngineConcurrency();
+  const coldWaitCap =
+    process.env.ENGINE_MODE === "direct"
+      ? Math.min(20_000, Number(process.env.ENGINE_CLOUD_WAIT_MS || 15_000))
+      : 8_000;
+
+  const tickResults = await mapPool(accounts, concurrency, async (a) => {
     const elapsed = Date.now() - started;
     if (elapsed > budgetMs) {
-      deferred += 1;
-      results.push({ id: a.id, skipped: true, reason: "budget" });
-      continue;
+      // Advance fairness cursor so deferred accounts rotate next cycle
+      await prisma.brokerAccount
+        .update({
+          where: { id: a.id },
+          data: { updatedAt: new Date() },
+        })
+        .catch(() => null);
+      return { id: a.id, skipped: true as const, reason: "budget" };
     }
     try {
       if (a.status === "undeployed" && a.metaApiAccountId) {
-        // Local engine can wait longer; serverless cron must stay under ~52s
-        const maxWait =
-          process.env.ENGINE_MODE === "direct"
-            ? Math.min(70_000, Number(process.env.ENGINE_CLOUD_WAIT_MS || 60_000))
-            : 12_000;
-        const remaining = Math.max(3_000, Math.min(maxWait, budgetMs - elapsed - 2_000));
-        let liveOk = false;
-        if (a.syncToken) {
-          const live = await ensureAccountCloudLive({
-            metaApiAccountId: String(a.metaApiAccountId),
-            login: a.login,
-            password: a.syncToken,
-            server: a.server,
-            waitMs: remaining,
-          });
-          if (live.ok) {
-            liveOk = true;
-            if (live.metaApiAccountId !== a.metaApiAccountId) {
-              await prisma.brokerAccount.update({
-                where: { id: a.id },
-                data: { metaApiAccountId: live.metaApiAccountId },
-              });
-            }
-          } else {
-            results.push({
-              id: a.id,
-              ok: false,
-              error: live.message || "redeploy failed",
-            });
-            continue;
-          }
-        } else {
-          const live = await ensureCloudLive(String(a.metaApiAccountId), remaining);
-          if (!live.ok) {
-            results.push({
-              id: a.id,
-              ok: false,
-              error: live.message || "redeploy failed",
-            });
-            continue;
-          }
-          liveOk = true;
+        const remaining = Math.max(
+          3_000,
+          Math.min(coldWaitCap, budgetMs - elapsed - 1_000),
+        );
+        // Never wipe/recreate in trade loop — redeploy only
+        const live = await ensureCloudLive(String(a.metaApiAccountId), remaining);
+        if (!live.ok) {
+          return {
+            id: a.id,
+            ok: false as const,
+            error: live.message || "redeploy failed",
+          };
         }
-        if (liveOk) {
-          await prisma.brokerAccount.update({
-            where: { id: a.id },
-            data: {
-              status: "connected",
-              botStoppedAt: null,
-              statusMessage: "클라우드 재활성화 · 봇 실행 중",
-            },
-          });
-        }
+        await prisma.brokerAccount.update({
+          where: { id: a.id },
+          data: {
+            status: "connected",
+            botStoppedAt: null,
+            statusMessage: "클라우드 재활성화 · 봇 실행 중",
+          },
+        });
       }
-      results.push({ id: a.id, ...(await runDcaTick(a.id)) });
+      return { id: a.id, ...(await runDcaTick(a.id)) };
     } catch (e) {
-      results.push({
+      return {
         id: a.id,
-        ok: false,
+        ok: false as const,
         error: e instanceof Error ? e.message : "tick error",
-      });
+      };
     }
+  });
+
+  for (const r of tickResults) {
+    if (r && typeof r === "object" && "skipped" in r && (r as { skipped?: boolean }).skipped) {
+      deferred += 1;
+    }
+    results.push(r);
   }
   if (deferred > 0) {
-    results.push({ deferred, reason: "time_budget", budgetMs });
+    results.push({ deferred, reason: "time_budget", budgetMs, concurrency });
   }
   return results;
 }

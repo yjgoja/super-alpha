@@ -354,7 +354,7 @@ export default function AdminPage() {
                   {overview.cost.fmt.afterOptimize} (절감 {overview.cost.fmt.save})
                 </p>
                 <p className="mt-2 text-xs text-[var(--muted)]">
-                  규칙: 연동 직후 즉시 undeploy · 봇 OFF 후 24시간 미사용 시 undeploy · 봇 시작 시 재활성화 · 삭제 시 MetaAPI 완전 제거
+                  규칙: 승인 시 CONNECTED 확인 후 클라우드 유지 · 봇 ON 중 undeploy/삭제 금지 · 봇 OFF 24시간 미사용 시만 undeploy · 삭제 시 MetaAPI 완전 제거
                 </p>
               </div>
               <button

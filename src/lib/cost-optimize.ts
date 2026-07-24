@@ -14,6 +14,7 @@ export async function undeployIdleAccounts(idleHours = IDLE_BOT_HOURS) {
   const idle = await prisma.brokerAccount.findMany({
     where: {
       metaApiAccountId: { not: null },
+      // NEVER undeploy while bot is trading
       botEnabled: false,
       status: { in: ["connected"] },
       // 열린 바스켓이 있으면 절대 undeploy 금지 (익절·손절 관리 중)
@@ -30,6 +31,11 @@ export async function undeployIdleAccounts(idleHours = IDLE_BOT_HOURS) {
   const results: Array<{ id: string; login: string; ok: boolean; error?: string }> = [];
 
   for (const a of idle) {
+    // Defense in depth — skip if somehow bot turned on
+    if (a.botEnabled) {
+      results.push({ id: a.id, login: a.login, ok: false, error: "bot_on_skip" });
+      continue;
+    }
     try {
       await undeployAccount(a.metaApiAccountId!);
       await prisma.brokerAccount.update({

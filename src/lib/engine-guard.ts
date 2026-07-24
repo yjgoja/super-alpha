@@ -89,11 +89,13 @@ export function isFatalEngineError(err: unknown): boolean {
 export function isCloudColdError(message: string): boolean {
   const m = message.toLowerCase();
   return (
-    m.includes("클라우드") ||
-    m.includes("cloud") ||
     m.includes("not connected") ||
     m.includes("undeploy") ||
-    m.includes("deploy") ||
-    m.includes("계좌 정보를 가져오지")
+    m.includes("not deployed") ||
+    m.includes("계좌 정보를 가져오지") ||
+    m.includes("브로커에 연결되지") ||
+    m.includes("클라우드가 브로커") ||
+    m.includes("timeouterror") ||
+    (m.includes("cloud") && (m.includes("cold") || m.includes("disconnect")))
   );
 }

@@ -1,11 +1,9 @@
 import { prisma } from "./db";
 import { toKoreanError } from "./ko-errors";
 import {
-  deployAccount,
   fetchSnapshot,
   findMetaAccountByLogin,
   getMetaAccountStatus,
-  startCloudAccount,
 } from "./metaapi";
 
 function looksLikeUuid(id: string) {
@@ -17,20 +15,15 @@ async function markLinked(
   snap: { metaApiAccountId: string; balance: number; equity: number },
 ) {
   const metaId = String(snap.metaApiAccountId);
-  // Undeploy after link — no MetaAPI burn until user starts the trading bot
-  try {
-    const { undeployAccount } = await import("./metaapi");
-    await undeployAccount(metaId);
-  } catch {
-    /* ignore */
-  }
+  // Keep DEPLOYED after approval — 500-user scale needs instant start-all,
+  // MetaAPI must show Connected (idle undeploy only after bot OFF 24h).
   await prisma.brokerAccount.update({
     where: { id: accountId },
     data: {
       metaApiAccountId: metaId,
-      status: "undeployed",
+      status: "connected",
       statusMessage:
-        "연동 완료 · 클라우드 대기(비용 절감). 봇을 시작하면 API가 활성화됩니다.",
+        "연동 완료 · 클라우드 연결됨. 앱에서 전체 시작을 누르면 봇이 실행됩니다.",
       mode: "live",
       balance: snap.balance,
       equity: snap.equity,
@@ -83,10 +76,9 @@ export async function finalizeProvisionIfReady(accountId: string) {
     conn === "CONNECTED" || conn === "CONNECTED_NEW_ACCOUNT";
 
   // Only accept real broker connect + readable snapshot.
-  // DEPLOYED+DISCONNECTED must NOT soft-link (causes start-all failures later).
   if (st.state === "DEPLOYED" && connected) {
     const snap = await fetchSnapshot(metaId);
-    if (snap.ok) {
+    if (snap.ok && (snap.balance > 0 || snap.equity > 0 || snap.login || snap.leverage > 0)) {
       await markLinked(account.id, snap);
       return { done: true as const, status: "connected" as const };
     }
@@ -97,7 +89,7 @@ export async function finalizeProvisionIfReady(accountId: string) {
         statusMessage: "브로커 연결됨 · 잔고 동기화 대기 중…",
       },
     });
-    return { done: false as const, status: "provisioning" as const, message: snap.message };
+    return { done: false as const, status: "provisioning" as const, message: snap.ok ? "empty snap" : snap.message };
   }
 
   if (st.state === "DEPLOY_FAILED") {
@@ -143,7 +135,7 @@ export async function finalizeAllProvisioning() {
 }
 
 /**
- * Admin approve: verify MT5 password via MetaAPI (g2), then undeploy to save cost.
+ * Admin approve: prove CONNECTED + live snapshot, keep cloud DEPLOYED.
  * Retries rate-limits; never soft-links a DISCONNECTED cloud.
  */
 export async function runAdminProvision(accountId: string) {
@@ -161,14 +153,15 @@ export async function runAdminProvision(accountId: string) {
     data: { status: "provisioning", statusMessage: "비밀번호·브로커 검증 중…" },
   });
 
-  const { ensureAccountCloudLive, undeployAccount } = await import("./metaapi");
+  const { ensureAccountCloudLive } = await import("./metaapi");
 
   let repaired = await ensureAccountCloudLive({
     metaApiAccountId: account.metaApiAccountId,
     login: account.login,
     password: account.syncToken,
     server: account.server,
-    waitMs: 70000,
+    waitMs: 90000,
+    allowRecreate: true,
   });
 
   if (!repaired.ok && /너무 많|rate|429/i.test(repaired.message)) {
@@ -182,7 +175,8 @@ export async function runAdminProvision(accountId: string) {
       login: account.login,
       password: account.syncToken,
       server: account.server,
-      waitMs: 70000,
+      waitMs: 90000,
+      allowRecreate: true,
     });
   }
 
@@ -192,7 +186,6 @@ export async function runAdminProvision(accountId: string) {
       data: {
         status: "failed",
         statusMessage: repaired.message,
-        metaApiAccountId: null,
         botEnabled: false,
       },
     });
@@ -203,39 +196,48 @@ export async function runAdminProvision(accountId: string) {
   const balance = repaired.snap.balance;
   const equity = repaired.snap.equity;
 
-  try {
-    await undeployAccount(metaId);
-  } catch {
-    /* ignore */
+  if (!(balance > 0 || equity > 0 || repaired.snap.login || repaired.snap.leverage > 0)) {
+    await prisma.brokerAccount.update({
+      where: { id: account.id },
+      data: {
+        status: "failed",
+        statusMessage: "브로커 계좌 정보를 확인하지 못했습니다. 비밀번호·서버명을 확인하세요.",
+        botEnabled: false,
+      },
+    });
+    return {
+      ok: false as const,
+      error: "브로커 계좌 정보를 확인하지 못했습니다. 비밀번호·서버명을 확인하세요.",
+    };
   }
 
+  // Keep DEPLOYED — do not undeploy on approve (instant bot start for scale)
   await prisma.brokerAccount.update({
     where: { id: account.id },
     data: {
       metaApiAccountId: metaId,
-      status: "undeployed",
+      status: "connected",
       mode: "live",
       balance,
       equity,
       startingBalance:
-        account.startingBalance > 0 ? account.startingBalance : balance > 0 ? balance : account.startingBalance,
+        account.startingBalance > 0
+          ? account.startingBalance
+          : balance > 0
+            ? balance
+            : account.startingBalance,
       lastSyncAt: new Date(),
       botEnabled: false,
       botStoppedAt: new Date(),
       statusMessage:
-        balance > 0 || equity > 0
-          ? "연동 완료 · 잔고 동기화됨 · 클라우드 대기(비용 절감). 봇을 시작하면 API가 활성화됩니다."
-          : "연동 완료 · 클라우드 대기. 잔고는 봇 시작 시 동기화됩니다.",
+        "연동 완료 · 클라우드 연결됨. 앱에서 전체 시작을 누르면 봇이 실행됩니다.",
     },
   });
 
   return {
     ok: true as const,
     pending: false,
-    message:
-      balance > 0 || equity > 0
-        ? `계좌 연동 완료 · 평가금액 $${equity.toFixed(2)}`
-        : "계좌 연동이 완료되었습니다. 잔고는 봇 시작 시 동기화됩니다.",
-    status: "undeployed" as const,
+    message: `계좌 연동 완료 · 평가금액 $${equity.toFixed(2)} · 클라우드 연결 유지`,
+    status: "connected" as const,
   };
 }

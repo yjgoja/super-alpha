@@ -7,7 +7,7 @@ import { gateErrorKo, toKoreanError } from "@/lib/ko-errors";
 import { undeployAccount } from "@/lib/metaapi";
 import { finalizeAllProvisioning, runAdminProvision } from "@/lib/provision";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET() {
   const gate = await requireAdmin();
@@ -155,6 +155,12 @@ export async function PATCH(req: Request) {
       });
       if (!account?.metaApiAccountId) {
         return NextResponse.json({ error: "클라우드 계좌가 없습니다." }, { status: 400 });
+      }
+      if (account.botEnabled) {
+        return NextResponse.json(
+          { error: "봇이 실행 중일 때는 클라우드를 중지할 수 없습니다. 먼저 전체 중지를 하세요." },
+          { status: 400 },
+        );
       }
       await undeployAccount(account.metaApiAccountId);
       await prisma.brokerAccount.update({

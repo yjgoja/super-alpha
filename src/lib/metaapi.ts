@@ -161,9 +161,11 @@ async function api(
       if (retryable && attempt < maxAttempts) {
         const ra = res.headers.get("retry-after");
         const parsed = ra ? Number(ra) * 1000 : NaN;
+        // Provisioning/rate storms need longer waits than trade ticks
+        const cap = Number(process.env.METAAPI_RETRY_CAP_MS || 30_000);
         const backoff = Number.isFinite(parsed)
-          ? Math.min(parsed, 8_000)
-          : Math.min(1000 * 2 ** (attempt - 1), 8_000);
+          ? Math.min(parsed, cap)
+          : Math.min(1000 * 2 ** attempt, cap);
         await sleep(backoff);
         continue;
       }
@@ -625,34 +627,44 @@ async function verifyPasswordOnExistingAccount(input: {
   };
 }
 
-/** Deploy + wait until MetaAPI can read the broker account (for live sync). */
+/** Deploy + wait until MetaAPI reports CONNECTED and account-information works. */
 export async function ensureCloudLive(metaApiAccountId: string, waitMs = 45000) {
   const id = String(metaApiAccountId);
   await deployAccount(id);
   const waited = await waitUntilConnected(id, waitMs);
-  if (!waited.ok) {
-    // Still try snapshot — sometimes DEPLOYED works before connectionStatus updates
-    const snap = await fetchSnapshot(id);
-    if (snap.ok) return { ok: true as const, snap };
-    const st = await getMetaAccountStatus(id).catch(() => null);
-    if (st && String(st.connectionStatus).toUpperCase() === "DISCONNECTED") {
-      return {
-        ok: false as const,
-        code: "DISCONNECTED" as const,
-        message:
-          "MT5 클라우드가 브로커에 연결되지 않았습니다. 마이페이지에서 계좌를 다시 연결하거나, MT5 비밀번호(투자자 비번 아님)·서버명을 확인 후 전체 시작을 다시 눌러주세요.",
-      };
-    }
-    return { ok: false as const, code: waited.code, message: waited.message };
+  const st = await getMetaAccountStatus(id).catch(() => null);
+  const connected = !!(st && isMetaConnectedStatus(st.connectionStatus));
+
+  if (!waited.ok && !connected) {
+    return {
+      ok: false as const,
+      code: (waited.code || "DISCONNECTED") as string,
+      message:
+        waited.code === "E_AUTH"
+          ? waited.message
+          : "MT5 클라우드가 브로커에 연결되지 않았습니다. 마이페이지에서 계좌를 다시 연결하거나, MT5 비밀번호(투자자 비번 아님)·서버명을 확인 후 다시 시도해주세요.",
+    };
   }
-  const snap = await fetchSnapshot(id);
-  if (!snap.ok) return { ok: false as const, message: snap.message };
-  return { ok: true as const, snap };
+
+  for (let i = 0; i < 6; i++) {
+    const snap = await fetchSnapshot(id);
+    if (snap.ok) {
+      if (snap.login || snap.leverage > 0 || snap.balance > 0 || snap.equity > 0) {
+        return { ok: true as const, snap };
+      }
+    }
+    await sleep(2000);
+  }
+  return {
+    ok: false as const,
+    code: "TIMEOUT",
+    message: "브로커 연결 후 계좌 정보를 읽지 못했습니다. 잠시 후 다시 시도해주세요.",
+  };
 }
 
 /**
- * Start-all path: keep working clouds; only re-auth / recreate when needed.
- * Never overwrite password on an already-live cloud (stale syncToken can brick it).
+ * Keep/repair a live cloud. By default NEVER deletes MetaAPI accounts
+ * (engine / bot ON must not wipe). Set allowRecreate for admin repair only.
  */
 export async function ensureAccountCloudLive(input: {
   metaApiAccountId: string | null | undefined;
@@ -660,19 +672,20 @@ export async function ensureAccountCloudLive(input: {
   password: string;
   server: string;
   waitMs?: number;
+  /** Only admin/repair scripts — never true in engine tick while trading */
+  allowRecreate?: boolean;
 }): Promise<
   | { ok: true; snap: MetaSnap; metaApiAccountId: string }
   | { ok: false; message: string }
 > {
   const waitMs = input.waitMs ?? 60000;
   const metaId = input.metaApiAccountId ? String(input.metaApiAccountId) : "";
+  const allowRecreate = !!input.allowRecreate;
 
-  // 1) Try existing cloud as-is (no password PUT)
   if (metaId) {
     const live = await ensureCloudLive(metaId, waitMs);
     if (live.ok) return { ok: true, snap: live.snap, metaApiAccountId: metaId };
 
-    // 2) Re-push credentials once, then redeploy
     await api(PROVISIONING, "PUT", `/users/current/accounts/${metaId}`, {
       password: input.password,
       login: input.login,
@@ -681,9 +694,22 @@ export async function ensureAccountCloudLive(input: {
     }).catch(() => null);
     const livePw = await ensureCloudLive(metaId, waitMs);
     if (livePw.ok) return { ok: true, snap: livePw.snap, metaApiAccountId: metaId };
+
+    if (!allowRecreate) {
+      return {
+        ok: false,
+        message:
+          livePw.message ||
+          "클라우드 재연결에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.",
+      };
+    }
+  } else if (!allowRecreate) {
+    return {
+      ok: false,
+      message: "클라우드 계좌가 없습니다. 관리자 연동 승인 후 다시 시도하세요.",
+    };
   }
 
-  // 3) Wipe stuck clouds for this login, then create g2/high fresh
   const existing = await findAllMetaAccountsByLogin(input.login);
   for (const c of existing) {
     try {
@@ -706,7 +732,6 @@ export async function ensureAccountCloudLive(input: {
   if (!created.ok) return { ok: false, message: created.message };
 
   const newId = String(created.metaApiAccountId);
-  // Deploy + prove with snapshot (skip verifyPassword which undeploys mid-flow)
   await api(PROVISIONING, "PUT", `/users/current/accounts/${newId}`, {
     password: input.password,
     login: input.login,
@@ -717,6 +742,7 @@ export async function ensureAccountCloudLive(input: {
   if (!live2.ok) return { ok: false, message: live2.message };
   return { ok: true, snap: live2.snap, metaApiAccountId: newId };
 }
+
 
 export async function deployAccount(metaApiAccountId: string) {
   return api(PROVISIONING, "POST", `/users/current/accounts/${metaApiAccountId}/deploy`);
