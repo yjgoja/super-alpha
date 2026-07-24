@@ -24,8 +24,18 @@ import {
   countRecentGuards,
   logEngineObservability,
 } from "../src/lib/engine-obs";
+import {
+  isMetaStreamEnabled,
+  pruneStreams,
+  streamPoolSize,
+  warmStreams,
+} from "../src/lib/metaapi-stream";
 
 process.env.ENGINE_MODE = "direct";
+// Prefer streaming terminalState for snaps (0 REST credits) unless explicitly off.
+if (process.env.METAAPI_STREAM == null || process.env.METAAPI_STREAM === "") {
+  process.env.METAAPI_STREAM = "1";
+}
 
 /** Reconcile interval. With open-basket stream on, default 60s; else 2s. */
 const STREAM_ON =
@@ -172,25 +182,64 @@ async function mapPool<T>(
   await Promise.all(workers);
 }
 
+async function tradingStreamTargets() {
+  const rows = await prisma.brokerAccount.findMany({
+    where: {
+      OR: [
+        { botEnabled: true },
+        { baskets: { some: { status: "open" } } },
+      ],
+      metaApiAccountId: { not: null },
+      NOT: { status: "failed" },
+    },
+    select: {
+      id: true,
+      metaApiAccountId: true,
+      metaApiRegion: true,
+      baskets: { where: { status: "open" }, select: { id: true } },
+    },
+    take: STREAM_MAX * 2,
+  });
+  return rows
+    .filter((r) => r.metaApiAccountId)
+    .slice(0, STREAM_MAX)
+    .map((r) => ({
+      accountId: r.id,
+      metaApiAccountId: String(r.metaApiAccountId),
+      region: r.metaApiRegion,
+      hasOpen: r.baskets.length > 0,
+    }));
+}
+
+async function warmMetaStreams() {
+  if (!isMetaStreamEnabled()) return;
+  const targets = await tradingStreamTargets();
+  const warmed = await warmStreams(
+    targets.map((t) => ({
+      metaApiAccountId: t.metaApiAccountId,
+      region: t.region,
+    })),
+    2,
+  );
+  pruneStreams(new Set(targets.map((t) => t.metaApiAccountId)));
+  console.log(
+    `[direct] meta-stream pool=${streamPoolSize()} warmed ok=${warmed.ok} fail=${warmed.fail}`,
+  );
+}
+
 async function streamOpenBasketsTick() {
   if (!STREAM_ON || streamRunning || shuttingDown) return;
   streamRunning = true;
   try {
-    const open = await prisma.basket.findMany({
-      where: { status: "open" },
-      select: {
-        accountId: true,
-        account: { select: { metaApiAccountId: true, status: true } },
-      },
-      take: STREAM_MAX * 3,
-    });
-    const ids = [
-      ...new Set(
-        open
-          .filter((b) => b.account.metaApiAccountId && b.account.status !== "failed")
-          .map((b) => b.accountId),
-      ),
-    ].slice(0, STREAM_MAX);
+    // Keep streaming sockets warm so runDcaTick reads terminalState (no REST credits).
+    if (isMetaStreamEnabled()) {
+      await warmMetaStreams().catch((e) =>
+        console.warn("[stream] warm fail", e instanceof Error ? e.message : e),
+      );
+    }
+    const targets = await tradingStreamTargets();
+    // Hot path: open baskets first for DCA; bot-on without open still ticks for ENTRY.
+    const ids = targets.map((t) => t.accountId);
     await mapPool(ids, STREAM_CONCURRENCY, async (id) => {
       try {
         await runDcaTick(id);
@@ -291,9 +340,19 @@ async function main() {
   }
 
   console.log(
-    `[direct] start reconcile=${INTERVAL_MS}ms stream=${STREAM_ON ? STREAM_INTERVAL_MS + "ms" : "off"} maxOpen=${STREAM_MAX} concurrency=${STREAM_CONCURRENCY} pid=${process.pid}`,
+    `[direct] start reconcile=${INTERVAL_MS}ms stream=${STREAM_ON ? STREAM_INTERVAL_MS + "ms" : "off"} maxOpen=${STREAM_MAX} concurrency=${STREAM_CONCURRENCY} metaStream=${isMetaStreamEnabled() ? "on" : "off"} pid=${process.pid}`,
   );
-  writeHeartbeat({ started: true, streamOn: STREAM_ON });
+  writeHeartbeat({
+    started: true,
+    streamOn: STREAM_ON,
+    metaStream: isMetaStreamEnabled(),
+  });
+  // Attach streaming sockets before first REST tick (avoids 429 burn).
+  if (isMetaStreamEnabled()) {
+    await warmMetaStreams().catch((e) =>
+      console.warn("[direct] initial stream warm", e instanceof Error ? e.message : e),
+    );
+  }
   void tick();
   setInterval(() => {
     void tick();

@@ -32,6 +32,10 @@ services:
         value: "2"
       - key: ENGINE_SNAP_STALE_MS
         value: "15000"
+      - key: METAAPI_STREAM
+        value: "1"
+      - key: METAAPI_REGION
+        value: "london"
       - key: METAAPI_SNAP_MIN_MS
         value: "10000"
       - key: METAAPI_ACCOUNT_INFO_TTL_MS

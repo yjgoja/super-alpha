@@ -1341,7 +1341,9 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
 }
 
 /**
- * Trading snapshot. Always applies a min interval floor to avoid MetaAPI 429.
+ * Trading snapshot.
+ * Prefer MetaAPI streaming terminalState (0 REST credits) when connected.
+ * REST applies a min interval floor to avoid MetaAPI 429.
  * allowStaleMs raises the floor further for HOLD/reconcile coalescing.
  * Trades invalidate via invalidateSnapshotCache.
  */
@@ -1353,6 +1355,18 @@ export async function fetchSnapshot(
   const floor = snapMinIntervalMs();
   const want = Math.max(0, opts?.allowStaleMs ?? 0);
   const staleMs = Math.max(floor, want || floor);
+
+  // Streaming first — no CPU credits (client rateLimiting docs).
+  try {
+    const { readStreamSnapshot } = await import("./metaapi-stream");
+    const streamSnap = readStreamSnapshot(id);
+    if (streamSnap?.ok) {
+      snapCache.set(id, { at: Date.now(), value: streamSnap });
+      return streamSnap;
+    }
+  } catch {
+    /* stream module optional at build edge */
+  }
 
   const hit = snapCache.get(id);
   if (hit?.value?.ok && Date.now() - hit.at < staleMs) return hit.value;
@@ -1531,6 +1545,13 @@ export async function resolveBrokerSymbol(metaApiAccountId: string, logical: str
 const priceCache = new Map<string, { at: number; bid: number; ask: number }>();
 
 async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
+  try {
+    const { readStreamPrice } = await import("./metaapi-stream");
+    const streamPx = readStreamPrice(metaApiAccountId, symbol);
+    if (streamPx) return streamPx;
+  } catch {
+    /* ignore */
+  }
   if (metaApiRateLimited()) {
     const hit = priceCache.get(`${metaApiAccountId}|${symbol}`);
     if (hit) return { bid: hit.bid, ask: hit.ask };
