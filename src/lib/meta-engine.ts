@@ -2170,7 +2170,10 @@ async function runDcaTickInner(accountId: string) {
   }
 
   const metaId = account.metaApiAccountId;
-  const snapStaleMs = Math.max(0, Number(process.env.ENGINE_SNAP_STALE_MS || 2500));
+  const snapStaleMs = Math.max(
+    8_000,
+    Number(process.env.ENGINE_SNAP_STALE_MS || 15_000),
+  );
   let snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });
   // Wrong cached/DB region can timeout; refresh+retry once.
   // Skip fan-out retry on RATE_LIMIT (would burn more credits).

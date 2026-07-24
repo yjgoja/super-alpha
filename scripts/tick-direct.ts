@@ -39,12 +39,16 @@ const INTERVAL_MS = Math.max(
   ),
 );
 const STREAM_INTERVAL_MS = Math.max(
-  500,
-  Number(process.env.STREAM_OPEN_INTERVAL_MS || 800),
+  2000,
+  Number(process.env.STREAM_OPEN_INTERVAL_MS || 12_000),
 );
 const STREAM_MAX = Math.min(
   100,
-  Math.max(1, Number(process.env.STREAM_OPEN_MAX || 50)),
+  Math.max(1, Number(process.env.STREAM_OPEN_MAX || 20)),
+);
+const STREAM_CONCURRENCY = Math.min(
+  8,
+  Math.max(1, Number(process.env.STREAM_OPEN_CONCURRENCY || 2)),
 );
 const OUT_DIR = path.join(process.cwd(), "scripts", "out");
 const PID_FILE = path.join(OUT_DIR, "engine.pid");
@@ -152,6 +156,22 @@ function fatalExit(reason: unknown, code = 1): never {
 
 let streamRunning = false;
 
+async function mapPool<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+) {
+  const q = [...items];
+  const workers = Array.from({ length: Math.min(concurrency, q.length) }, async () => {
+    while (q.length) {
+      const item = q.shift();
+      if (item === undefined) break;
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
 async function streamOpenBasketsTick() {
   if (!STREAM_ON || streamRunning || shuttingDown) return;
   streamRunning = true;
@@ -171,18 +191,16 @@ async function streamOpenBasketsTick() {
           .map((b) => b.accountId),
       ),
     ].slice(0, STREAM_MAX);
-    await Promise.all(
-      ids.map(async (id) => {
-        try {
-          await runDcaTick(id);
-        } catch (e) {
-          console.warn(
-            `[stream] tick fail ${id}`,
-            e instanceof Error ? e.message : e,
-          );
-        }
-      }),
-    );
+    await mapPool(ids, STREAM_CONCURRENCY, async (id) => {
+      try {
+        await runDcaTick(id);
+      } catch (e) {
+        console.warn(
+          `[stream] tick fail ${id}`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    });
   } finally {
     streamRunning = false;
   }
@@ -273,7 +291,7 @@ async function main() {
   }
 
   console.log(
-    `[direct] start reconcile=${INTERVAL_MS}ms stream=${STREAM_ON ? STREAM_INTERVAL_MS + "ms" : "off"} maxOpen=${STREAM_MAX} pid=${process.pid}`,
+    `[direct] start reconcile=${INTERVAL_MS}ms stream=${STREAM_ON ? STREAM_INTERVAL_MS + "ms" : "off"} maxOpen=${STREAM_MAX} concurrency=${STREAM_CONCURRENCY} pid=${process.pid}`,
   );
   writeHeartbeat({ started: true, streamOn: STREAM_ON });
   void tick();

@@ -1,4 +1,4 @@
-# Super Alpha always-on trading engine (PC 불필요, ~2초 틱)
+# Super Alpha always-on trading engine (PC 불필요; MetaAPI 한도 회피 간격)
 # Deploy: push to GitHub → Render Blueprint / `render services create`
 # Cost: Background Worker Starter ≈ $7/mo (always-on; Free tier 없음)
 services:
@@ -21,17 +21,25 @@ services:
       - key: ENGINE_MODE
         value: direct
       - key: ENGINE_INTERVAL_MS
-        value: "20000"
+        value: "60000"
       - key: STREAM_OPEN_BASKETS
         value: "1"
       - key: STREAM_OPEN_INTERVAL_MS
-        value: "4000"
+        value: "12000"
       - key: STREAM_OPEN_MAX
-        value: "50"
+        value: "20"
+      - key: STREAM_OPEN_CONCURRENCY
+        value: "2"
       - key: ENGINE_SNAP_STALE_MS
-        value: "8000"
-      - key: PNL_SYNC_THROTTLE_MS
+        value: "15000"
+      - key: METAAPI_SNAP_MIN_MS
+        value: "10000"
+      - key: METAAPI_ACCOUNT_INFO_TTL_MS
         value: "90000"
+      - key: METAAPI_PRICE_CACHE_MS
+        value: "5000"
+      - key: PNL_SYNC_THROTTLE_MS
+        value: "180000"
       - key: IDLE_BOT_UNDEPLOY_HOURS
         value: "2"
       - key: BROKER_PROTECT_TP_SL

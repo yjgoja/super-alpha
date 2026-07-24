@@ -1121,6 +1121,45 @@ const snapCache = new Map<
   string,
   { at: number; value?: MetaSnap | MetaErr; inflight?: Promise<MetaSnap | MetaErr> }
 >();
+/** Last successful account-information fields — reused so hot ticks can fetch positions only. */
+const accountInfoCache = new Map<
+  string,
+  {
+    at: number;
+    balance: number;
+    equity: number;
+    margin: number;
+    freeMargin: number;
+    leverage: number;
+    currency: string;
+    name: string;
+    server: string;
+    login: string;
+  }
+>();
+/** Global pause after 429 — stop REST burn until retry time. */
+let metaApiRateLimitUntil = 0;
+
+export function metaApiRateLimited(): boolean {
+  return Date.now() < metaApiRateLimitUntil;
+}
+
+export function noteMetaApiRateLimit(retryAfterMs = 60_000) {
+  const until = Date.now() + Math.max(15_000, Math.min(retryAfterMs, 15 * 60_000));
+  if (until > metaApiRateLimitUntil) metaApiRateLimitUntil = until;
+}
+
+function accountInfoTtlMs() {
+  return Math.max(15_000, Number(process.env.METAAPI_ACCOUNT_INFO_TTL_MS || 60_000));
+}
+
+function snapMinIntervalMs() {
+  return Math.max(2_000, Number(process.env.METAAPI_SNAP_MIN_MS || 8_000));
+}
+
+function priceCacheTtlMs() {
+  return Math.max(500, Number(process.env.METAAPI_PRICE_CACHE_MS || 3_000));
+}
 
 function uiSnapTtlMs() {
   const raw = process.env.LIVE_SNAPSHOT_CACHE_MS;
@@ -1137,11 +1176,32 @@ export function invalidateSnapshotCache(metaApiAccountId?: string) {
     return;
   }
   snapCache.delete(String(metaApiAccountId));
+  // Keep accountInfoCache — balance can lag one tick after trade; positions refetch is enough
 }
 
 async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
-  const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
-  const bases = clientApiBases(region);
+  const id = String(metaApiAccountId);
+  if (metaApiRateLimited()) {
+    const hit = snapCache.get(id)?.value;
+    if (hit?.ok) return hit;
+    return {
+      ok: false,
+      code: "RATE_LIMIT",
+      message:
+        "MetaAPI 요청 한도에 도달했습니다. 잠시 후 자동 재시도됩니다. (봇·브로커 TP/SL 유지)",
+    };
+  }
+
+  const region = await resolveAccountRegion(id).catch(() => null);
+  // Prefer live region only — do not fan-out to other regions (credits)
+  const preferred = clientApiBases(region).slice(0, 1);
+  const bases =
+    preferred.length > 0 ? preferred : [clientBase(region || REGION)];
+
+  const infoCached = accountInfoCache.get(id);
+  const reuseInfo =
+    !!infoCached && Date.now() - infoCached.at < accountInfoTtlMs();
+
   let info: unknown = null;
   let positionsRaw: unknown[] = [];
   let positionsErr: string | null = null;
@@ -1149,15 +1209,50 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
   let lastBody: unknown = null;
 
   for (const base of bases) {
-    // Account info + positions in parallel (was sequential — ~2× MetaAPI RTT)
+    if (reuseInfo) {
+      const posRes = await api(
+        base,
+        "GET",
+        `/users/current/accounts/${id}/positions`,
+      );
+      lastStatus = posRes.status;
+      lastBody = posRes.data;
+      if (posRes.status === 429) {
+        noteMetaApiRateLimit(120_000);
+        return {
+          ok: false,
+          code: "RATE_LIMIT",
+          message:
+            "MetaAPI 요청 한도에 도달했습니다. 잠시 후 자동 재시도됩니다. (봇·브로커 TP/SL 유지)",
+        };
+      }
+      if (posRes.status < 400 && Array.isArray(posRes.data)) {
+        info = {
+          balance: infoCached!.balance,
+          equity: infoCached!.equity,
+          margin: infoCached!.margin,
+          freeMargin: infoCached!.freeMargin,
+          leverage: infoCached!.leverage,
+          currency: infoCached!.currency,
+          name: infoCached!.name,
+          server: infoCached!.server,
+          login: infoCached!.login,
+        };
+        positionsRaw = posRes.data;
+        positionsErr = null;
+        break;
+      }
+      // positions fail → fall through to full snap once
+    }
+
     const [infoRes, posRes] = await Promise.all([
-      api(base, "GET", `/users/current/accounts/${metaApiAccountId}/account-information`),
-      api(base, "GET", `/users/current/accounts/${metaApiAccountId}/positions`),
+      api(base, "GET", `/users/current/accounts/${id}/account-information`),
+      api(base, "GET", `/users/current/accounts/${id}/positions`),
     ]);
     lastStatus = infoRes.status;
     lastBody = infoRes.data;
-    // Rate limit: do NOT fan-out to other regions (burns more credits)
     if (infoRes.status === 429 || posRes.status === 429) {
+      noteMetaApiRateLimit(120_000);
       return {
         ok: false,
         code: "RATE_LIMIT",
@@ -1183,10 +1278,12 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
 
   if (!info) {
     if (lastStatus === 429) {
+      noteMetaApiRateLimit(120_000);
       return {
         ok: false,
         code: "RATE_LIMIT",
-        message: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+        message:
+          "MetaAPI 요청 한도에 도달했습니다. 잠시 후 자동 재시도됩니다. (봇·브로커 TP/SL 유지)",
       };
     }
     if (lastStatus === 404 || lastStatus === 504 || lastStatus === 502) {
@@ -1207,15 +1304,14 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
     };
   }
 
-  // Positions failure should not wipe balance/equity display
   if (positionsErr) {
     positionsRaw = [];
   }
 
   const i = info as Record<string, unknown>;
-  return {
+  const snap: MetaSnap = {
     ok: true,
-    metaApiAccountId,
+    metaApiAccountId: id,
     balance: Number(i.balance || 0),
     equity: Number(i.equity || 0),
     margin: Number(i.margin || 0),
@@ -1227,11 +1323,26 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
     login: String(i.login || ""),
     positions: mapPositions(positionsRaw),
   };
+  if (!reuseInfo) {
+    accountInfoCache.set(id, {
+      at: Date.now(),
+      balance: snap.balance,
+      equity: snap.equity,
+      margin: snap.margin,
+      freeMargin: snap.freeMargin,
+      leverage: snap.leverage,
+      currency: snap.currency,
+      name: snap.name,
+      server: snap.server,
+      login: snap.login,
+    });
+  }
+  return snap;
 }
 
 /**
- * Always fresh by default — trading decisions.
- * allowStaleMs>0: short TTL coalesce (HOLD/reconcile) to cut duplicate snaps.
+ * Trading snapshot. Always applies a min interval floor to avoid MetaAPI 429.
+ * allowStaleMs raises the floor further for HOLD/reconcile coalescing.
  * Trades invalidate via invalidateSnapshotCache.
  */
 export async function fetchSnapshot(
@@ -1239,24 +1350,44 @@ export async function fetchSnapshot(
   opts?: { allowStaleMs?: number },
 ): Promise<MetaSnap | MetaErr> {
   const id = String(metaApiAccountId);
-  const staleMs = Math.max(0, opts?.allowStaleMs ?? 0);
-  if (staleMs <= 0) return fetchSnapshotUncached(id);
+  const floor = snapMinIntervalMs();
+  const want = Math.max(0, opts?.allowStaleMs ?? 0);
+  const staleMs = Math.max(floor, want || floor);
 
   const hit = snapCache.get(id);
   if (hit?.value?.ok && Date.now() - hit.at < staleMs) return hit.value;
   if (hit?.inflight) return hit.inflight;
 
+  if (metaApiRateLimited()) {
+    if (hit?.value?.ok) return hit.value;
+    return {
+      ok: false,
+      code: "RATE_LIMIT",
+      message:
+        "MetaAPI 요청 한도에 도달했습니다. 잠시 후 자동 재시도됩니다. (봇·브로커 TP/SL 유지)",
+    };
+  }
+
+  const prevOk = hit?.value?.ok ? hit.value : undefined;
+  const prevAt = hit?.value?.ok ? hit.at : Date.now();
   const inflight = fetchSnapshotUncached(id)
     .then((value) => {
-      if (value.ok) snapCache.set(id, { at: Date.now(), value });
-      else snapCache.delete(id);
+      if (value.ok) {
+        snapCache.set(id, { at: Date.now(), value });
+      } else if (value.code === "RATE_LIMIT" && prevOk) {
+        // Keep last good snap — do not blank the engine on 429.
+        snapCache.set(id, { at: prevAt, value: prevOk });
+      } else {
+        snapCache.delete(id);
+      }
       return value;
     })
     .catch((err) => {
-      snapCache.delete(id);
+      if (prevOk) snapCache.set(id, { at: prevAt, value: prevOk });
+      else snapCache.delete(id);
       throw err;
     });
-  snapCache.set(id, { at: Date.now(), inflight });
+  snapCache.set(id, { at: prevAt, value: prevOk, inflight });
   return inflight;
 }
 
@@ -1273,17 +1404,35 @@ export async function fetchSnapshotCached(metaApiAccountId: string): Promise<Met
   if (hit?.value?.ok && Date.now() - hit.at < ttl) return hit.value;
   if (hit?.inflight) return hit.inflight;
 
+  if (metaApiRateLimited()) {
+    if (hit?.value?.ok) return hit.value;
+    return {
+      ok: false,
+      code: "RATE_LIMIT",
+      message:
+        "MetaAPI 요청 한도에 도달했습니다. 잠시 후 자동 재시도됩니다. (봇·브로커 TP/SL 유지)",
+    };
+  }
+
+  const prevOk = hit?.value?.ok ? hit.value : undefined;
+  const prevAt = hit?.value?.ok ? hit.at : Date.now();
   const inflight = fetchSnapshotUncached(id)
     .then((value) => {
-      if (value.ok) snapCache.set(id, { at: Date.now(), value });
-      else snapCache.delete(id);
+      if (value.ok) {
+        snapCache.set(id, { at: Date.now(), value });
+      } else if (value.code === "RATE_LIMIT" && prevOk) {
+        snapCache.set(id, { at: prevAt, value: prevOk });
+      } else {
+        snapCache.delete(id);
+      }
       return value;
     })
     .catch((err) => {
-      snapCache.delete(id);
+      if (prevOk) snapCache.set(id, { at: prevAt, value: prevOk });
+      else snapCache.delete(id);
       throw err;
     });
-  snapCache.set(id, { at: Date.now(), inflight });
+  snapCache.set(id, { at: prevAt, value: prevOk, inflight });
   return inflight;
 }
 
@@ -1379,20 +1528,42 @@ export async function resolveBrokerSymbol(metaApiAccountId: string, logical: str
   return logical;
 }
 
+const priceCache = new Map<string, { at: number; bid: number; ask: number }>();
+
 async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
+  if (metaApiRateLimited()) {
+    const hit = priceCache.get(`${metaApiAccountId}|${symbol}`);
+    if (hit) return { bid: hit.bid, ask: hit.ask };
+    return null;
+  }
+  const cacheKey = `${metaApiAccountId}|${symbol}`;
+  const cached = priceCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < priceCacheTtlMs()) {
+    return { bid: cached.bid, ask: cached.ask };
+  }
+
   const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
-  const bases = clientApiBases(region);
+  const preferred = clientApiBases(region).slice(0, 1);
+  const bases =
+    preferred.length > 0 ? preferred : [clientBase(region || REGION)];
   for (const base of bases) {
     const res = await api(
       base,
       "GET",
       `/users/current/accounts/${metaApiAccountId}/symbols/${encodeURIComponent(symbol)}/current-price?keepSubscription=true`,
     );
+    if (res.status === 429) {
+      noteMetaApiRateLimit(120_000);
+      return cached ? { bid: cached.bid, ask: cached.ask } : null;
+    }
     if (res.status < 400 && res.data && typeof res.data === "object") {
-      const d = res.data as { bid?: number; ask?: number };
-      const bid = Number(d.bid || 0);
-      const ask = Number(d.ask || 0);
-      if (bid > 0 && ask > 0) return { bid, ask, symbol };
+      const d = res.data as Record<string, unknown>;
+      const bid = Number(d.bid ?? d.Bid ?? 0);
+      const ask = Number(d.ask ?? d.Ask ?? 0);
+      if (bid > 0 && ask > 0) {
+        priceCache.set(cacheKey, { at: Date.now(), bid, ask });
+        return { bid, ask };
+      }
     }
   }
   return null;
