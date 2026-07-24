@@ -27,7 +27,7 @@ import {
 
 process.env.ENGINE_MODE = "direct";
 
-/** Reconcile interval. With open-basket stream on, default 20s; else 2s. */
+/** Reconcile interval. With open-basket stream on, default 60s; else 2s. */
 const STREAM_ON =
   (process.env.STREAM_OPEN_BASKETS || "1").trim() !== "0" &&
   (process.env.STREAM_OPEN_BASKETS || "1").toLowerCase() !== "false";
@@ -35,7 +35,7 @@ const INTERVAL_MS = Math.max(
   STREAM_ON ? 5000 : 1500,
   Number(
     process.env.ENGINE_INTERVAL_MS ||
-      (STREAM_ON ? 20_000 : 2000),
+      (STREAM_ON ? 60_000 : 2000),
   ),
 );
 const STREAM_INTERVAL_MS = Math.max(
