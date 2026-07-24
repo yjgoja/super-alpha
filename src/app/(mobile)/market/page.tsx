@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
+import { subscribeLive } from "@/lib/live-bus";
 
 type Position = {
   id?: string;
@@ -72,7 +73,8 @@ export default function MarketPage() {
 
   const loadLive = useCallback(async () => {
     try {
-      const res = await fetch("/api/stats?live=1");
+      // Force MetaAPI refresh (e.g. after close) — lite path is enough for positions
+      const res = await fetch("/api/stats?live=1&lite=1", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setAccount((prev) =>
@@ -94,26 +96,34 @@ export default function MarketPage() {
   }, []);
 
   useEffect(() => {
-    loadFast();
-    const live = setTimeout(() => {
-      loadLive();
-    }, 100);
-    const id = setInterval(() => {
-      loadLive();
-      fetch("/api/stats")
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.account?.botEnabled) {
-            fetch("/api/stats", { method: "POST" }).catch(() => null);
-          }
-        })
-        .catch(() => null);
-    }, 10_000);
+    // Defer initial DB fetch so the effect only subscribes synchronously
+    const boot = window.setTimeout(() => {
+      void loadFast();
+    }, 0);
+    // BotHeartbeat owns MetaAPI + tick; we only subscribe for UI updates
+    const unsub = subscribeLive((detail) => {
+      const next = detail.account;
+      if (!next) {
+        setAccount(null);
+        setLoaded(true);
+        return;
+      }
+      setAccount((prev) => ({
+        ...(prev || ({} as Account)),
+        ...(next as Account),
+        // Keep last MetaAPI positions when SSE frame has none
+        livePositions:
+          detail.source === "meta" || next.livePositions?.length
+            ? (next.livePositions as Position[] | undefined) || []
+            : prev?.livePositions || [],
+      }));
+      setLoaded(true);
+    });
     return () => {
-      clearTimeout(live);
-      clearInterval(id);
+      clearTimeout(boot);
+      unsub();
     };
-  }, [loadFast, loadLive]);
+  }, [loadFast]);
 
   function requireLinked() {
     if (isMt5Linked(account)) return true;
