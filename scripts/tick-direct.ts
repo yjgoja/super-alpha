@@ -196,19 +196,29 @@ async function tradingStreamTargets() {
       id: true,
       metaApiAccountId: true,
       metaApiRegion: true,
-      baskets: { where: { status: "open" }, select: { id: true } },
+      baskets: { where: { status: "open" }, select: { id: true, symbol: true } },
+      symbolBots: { where: { enabled: true }, select: { symbol: true } },
     },
     take: STREAM_MAX * 2,
   });
   return rows
     .filter((r) => r.metaApiAccountId)
     .slice(0, STREAM_MAX)
-    .map((r) => ({
-      accountId: r.id,
-      metaApiAccountId: String(r.metaApiAccountId),
-      region: r.metaApiRegion,
-      hasOpen: r.baskets.length > 0,
-    }));
+    .map((r) => {
+      const symbols = [
+        ...new Set([
+          ...r.baskets.map((b) => b.symbol),
+          ...r.symbolBots.map((b) => b.symbol),
+        ]),
+      ].filter(Boolean);
+      return {
+        accountId: r.id,
+        metaApiAccountId: String(r.metaApiAccountId),
+        region: r.metaApiRegion,
+        hasOpen: r.baskets.length > 0,
+        symbols,
+      };
+    });
 }
 
 async function warmMetaStreams() {
@@ -218,6 +228,7 @@ async function warmMetaStreams() {
     targets.map((t) => ({
       metaApiAccountId: t.metaApiAccountId,
       region: t.region,
+      symbols: t.symbols,
     })),
     2,
   );

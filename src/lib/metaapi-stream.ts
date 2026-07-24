@@ -13,6 +13,11 @@ type StreamConn = {
   close: () => Promise<void>;
   waitSynchronized: (opts?: { timeoutInSeconds?: number }) => Promise<unknown>;
   synchronized: boolean;
+  subscribeToMarketData?: (
+    symbol: string,
+    subscriptions: Array<{ type: string }>,
+    timeoutInSeconds?: number,
+  ) => Promise<unknown>;
   terminalState: {
     connected: boolean;
     connectedToBroker: boolean;
@@ -27,6 +32,7 @@ type Handle = {
   region: string;
   lastUsed: number;
   ready: boolean;
+  symbols: Set<string>;
   inflight?: Promise<boolean>;
 };
 
@@ -116,13 +122,19 @@ export function readStreamPrice(
   if (!isMetaStreamEnabled()) return null;
   const h = handles.get(String(metaApiAccountId));
   if (!h?.ready || !h.conn.terminalState?.price) return null;
+  const candidates = [symbol];
+  const u = symbol.toUpperCase();
+  if (u === "XAUUSD") candidates.push("GOLD");
+  if (u === "GOLD") candidates.push("XAUUSD");
   try {
-    const p = h.conn.terminalState.price(symbol);
-    const bid = Number(p?.bid || 0);
-    const ask = Number(p?.ask || 0);
-    if (bid > 0 && ask > 0) {
-      h.lastUsed = Date.now();
-      return { bid, ask };
+    for (const sym of candidates) {
+      const p = h.conn.terminalState.price(sym);
+      const bid = Number(p?.bid || 0);
+      const ask = Number(p?.ask || 0);
+      if (bid > 0 && ask > 0) {
+        h.lastUsed = Date.now();
+        return { bid, ask };
+      }
     }
   } catch {
     /* ignore */
@@ -130,15 +142,39 @@ export function readStreamPrice(
   return null;
 }
 
+async function subscribeSymbols(conn: StreamConn, symbols: string[]) {
+  if (!conn.subscribeToMarketData) return;
+  const expand = (s: string) => {
+    const u = s.toUpperCase();
+    if (u === "XAUUSD" || u === "GOLD") return ["XAUUSD", "GOLD"];
+    return [s];
+  };
+  const all = [...new Set(symbols.flatMap(expand))];
+  for (const symbol of all) {
+    if (!symbol) continue;
+    try {
+      await conn.subscribeToMarketData(symbol, [{ type: "quotes" }], 30);
+    } catch {
+      // Broker alias — ignore
+    }
+  }
+}
+
 export async function ensureStreamConnected(
   metaApiAccountId: string,
   _region?: string | null,
+  symbols: string[] = [],
 ): Promise<boolean> {
   if (!isMetaStreamEnabled()) return false;
   const id = String(metaApiAccountId);
   const existing = handles.get(id);
   if (existing?.ready) {
     existing.lastUsed = Date.now();
+    const newSyms = symbols.filter((s) => s && !existing.symbols.has(s));
+    if (newSyms.length) {
+      for (const s of newSyms) existing.symbols.add(s);
+      await subscribeSymbols(existing.conn, newSyms);
+    }
     return true;
   }
   if (existing?.inflight) return existing.inflight;
@@ -151,6 +187,13 @@ export async function ensureStreamConnected(
       const conn = account.getStreamingConnection() as unknown as StreamConn;
       await conn.connect();
       await conn.waitSynchronized({ timeoutInSeconds: 90 });
+      const symSet = new Set(symbols.filter(Boolean));
+      // Also subscribe open position symbols so prices are present for DCA/ENTRY
+      const posSyms = (conn.terminalState.positions || [])
+        .map((p) => String(p.symbol || ""))
+        .filter(Boolean);
+      for (const s of posSyms) symSet.add(s);
+      await subscribeSymbols(conn, [...symSet]);
       const acctRegion = String(
         (account as { region?: string }).region || "auto",
       );
@@ -159,8 +202,11 @@ export async function ensureStreamConnected(
         region: acctRegion,
         lastUsed: Date.now(),
         ready: true,
+        symbols: symSet,
       });
-      console.log(`[meta-stream] connected ${id.slice(0, 8)}… region=${acctRegion}`);
+      console.log(
+        `[meta-stream] connected ${id.slice(0, 8)}… region=${acctRegion} syms=${[...symSet].join(",") || "-"}`,
+      );
       return true;
     } catch (e) {
       handles.delete(id);
@@ -177,13 +223,18 @@ export async function ensureStreamConnected(
     region: "pending",
     lastUsed: Date.now(),
     ready: false,
+    symbols: new Set(symbols.filter(Boolean)),
     inflight,
   });
   return inflight;
 }
 
 export async function warmStreams(
-  accounts: Array<{ metaApiAccountId: string; region?: string | null }>,
+  accounts: Array<{
+    metaApiAccountId: string;
+    region?: string | null;
+    symbols?: string[];
+  }>,
   concurrency = 2,
 ) {
   if (!isMetaStreamEnabled()) return { ok: 0, fail: 0 };
@@ -196,7 +247,11 @@ export async function warmStreams(
       while (q.length) {
         const a = q.shift();
         if (!a) break;
-        const good = await ensureStreamConnected(a.metaApiAccountId, a.region);
+        const good = await ensureStreamConnected(
+          a.metaApiAccountId,
+          a.region,
+          a.symbols || [],
+        );
         if (good) ok += 1;
         else fail += 1;
         // Subscribe rate limits: pause between attaches
