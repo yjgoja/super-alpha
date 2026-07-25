@@ -26,6 +26,7 @@ function roundLots(n: number) {
 export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [botEnabled, setBotEnabled] = useState(false);
+  const [skipOpenBurst, setSkipOpenBurst] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [edit, setEdit] = useState<string | null>(null);
@@ -54,9 +55,10 @@ export default function BotPage() {
 
   useEffect(() => {
     if (availableSymbols.length === 0) return;
-    if (!(availableSymbols as string[]).includes(addSymbol)) {
-      setAddSymbol(availableSymbols[0]!);
-    }
+    if ((availableSymbols as string[]).includes(addSymbol)) return;
+    const next = availableSymbols[0]!;
+    const t = window.setTimeout(() => setAddSymbol(next), 0);
+    return () => clearTimeout(t);
   }, [availableSymbols, addSymbol]);
 
   const load = useCallback(async () => {
@@ -78,13 +80,17 @@ export default function BotPage() {
     }
     setBots(botsData.bots || []);
     setBotEnabled(!!statsData.account?.botEnabled);
+    setSkipOpenBurst(!!statsData.account?.skipOpenBurstEntries);
     setLinked(isMt5Linked(statsData.account));
     setApproved(me.role === "admin" || me.approvalStatus === "approved");
     setReady(true);
   }, []);
 
   useEffect(() => {
-    load();
+    const t = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(t);
   }, [load]);
 
   function requireLinked() {
@@ -115,12 +121,42 @@ export default function BotPage() {
         return;
       }
       setBotEnabled(!!data.botEnabled);
+      if (typeof data.skipOpenBurstEntries === "boolean") {
+        setSkipOpenBurst(data.skipOpenBurstEntries);
+      }
       setMsg(
         data.botEnabled
           ? "전체 시작: 켜 둔 종목만 매매합니다. 클라우드 API가 활성화되었습니다."
           : Number(data.openBaskets) > 0
             ? `전체 중지: 신규·물타기는 멈춥니다. 열린 포지션 ${data.openBaskets}건은 익절·손절만 계속 관리합니다.`
             : "전체 중지: 모든 종목 매매가 멈춥니다. 24시간 미사용 시 클라우드가 자동 중지되어 비용이 나가지 않습니다.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleSkipOpenBurst() {
+    if (!requireLinked() || busy) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const next = !skipOpenBurst;
+      const res = await fetch("/api/bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skipOpenBurstEntries: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.error || "실패");
+        return;
+      }
+      setSkipOpenBurst(!!data.skipOpenBurstEntries);
+      setMsg(
+        data.skipOpenBurstEntries
+          ? "개장 직후 제한 ON: 09:00·17:00·22:30(한국시간)부터 15분간 신규 진입·물타기를 하지 않습니다. 익절·손절은 계속됩니다."
+          : "개장 직후 제한 OFF: 개장 직후에도 바로 진입합니다.",
       );
     } finally {
       setBusy(false);
@@ -387,6 +423,31 @@ export default function BotPage() {
         {msg && (
           <p style={{ margin: "0.75rem 0 0", fontSize: "0.85rem", color: "var(--gold)" }}>{msg}</p>
         )}
+      </section>
+
+      <section className="m-card" style={{ marginBottom: "0.85rem" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700 }}>개장 직후 15분 진입 제한</div>
+            <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem", lineHeight: 1.45 }}>
+              켜면 한국시간 09:00 · 17:00 · 22:30 개장 직후 15분 동안 신규 진입·물타기를 하지 않습니다.
+              이미 열린 포지션의 익절·손절은 그대로 관리합니다.
+            </div>
+            <div
+              className={`m-status-text${skipOpenBurst ? " is-on" : " is-off"}`}
+              style={{ marginTop: "0.55rem" }}
+            >
+              {skipOpenBurst ? "● 개장 직후 제한 중" : "○ 개장 직후 제한 끔"}
+            </div>
+          </div>
+          <button
+            type="button"
+            className={`m-switch${skipOpenBurst ? " is-on" : ""}`}
+            aria-label="개장 직후 15분 진입 제한"
+            disabled={busy || !ready}
+            onClick={toggleSkipOpenBurst}
+          />
+        </div>
       </section>
 
       {!ready ? (

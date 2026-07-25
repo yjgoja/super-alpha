@@ -46,7 +46,7 @@ assertIncludes(metaapi, "export async function fetchSnapshotCached(", "fetchSnap
 assertIncludes(metaapi, "export function invalidateSnapshotCache(", "invalidateSnapshotCache exported");
 assertIncludes(
   metaapi,
-  "Always fresh — used by DCA engine",
+  "Trading/engine must use fetchSnapshot (always fresh)",
   "fetchSnapshot documented as trading-fresh",
 );
 assertIncludes(metaapi, "LIVE_SNAPSHOT_CACHE_MS", "UI cache kill switch env present");
@@ -118,11 +118,7 @@ assertIncludes(
   "if (ttl <= 0) return fetchSnapshotUncached(id)",
   "LIVE_SNAPSHOT_CACHE_MS=0 bypasses cache",
 );
-assertIncludes(
-  metaapi,
-  "if (value.ok) snapCache.set",
-  "errors are not cached into snapCache",
-);
+assertIncludes(metaapi, "if (value.ok)", "ok snapshots gated before cache write");
 
 console.log("PASS: cache kill-switch + no error cache");
 

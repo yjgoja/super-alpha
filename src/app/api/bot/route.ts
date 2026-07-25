@@ -3,28 +3,22 @@ import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
+import { isInOpenBurstQuietPeriod } from "@/lib/market-hours";
 import { ensureAccountCloudLive, ensureCloudLive } from "@/lib/metaapi";
 import { withAccountToggleLock } from "@/lib/toggle-lock";
 
 export const maxDuration = 90;
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
-  const gate = await requireApprovedUser();
-  if (!gate.user) {
-    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
-  }
-
-  const body = z.object({ enabled: z.boolean() }).parse(await req.json());
-  const account = await prisma.brokerAccount.findFirst({
+async function findUserAccount(userId: string) {
+  return prisma.brokerAccount.findFirst({
     where: {
-      userId: gate.user.id,
+      userId,
       OR: [
         {
           status: { in: ["connected", "undeployed"] },
           metaApiAccountId: { not: null },
         },
-        // Allow recovery of failed links when password is still stored
         {
           status: "failed",
           syncToken: { not: null },
@@ -36,8 +30,44 @@ export async function POST(req: Request) {
       baskets: { where: { status: "open" }, select: { id: true } },
     },
   });
+}
+
+export async function POST(req: Request) {
+  const gate = await requireApprovedUser();
+  if (!gate.user) {
+    return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
+  }
+
+  const body = z
+    .object({
+      enabled: z.boolean().optional(),
+      skipOpenBurstEntries: z.boolean().optional(),
+    })
+    .refine(
+      (v) => v.enabled !== undefined || v.skipOpenBurstEntries !== undefined,
+      { message: "enabled 또는 skipOpenBurstEntries 필요" },
+    )
+    .parse(await req.json());
+
+  const account = await findUserAccount(gate.user.id);
   if (!account || (!account.metaApiAccountId && !account.syncToken)) {
     return NextResponse.json({ error: "연결된 계좌가 없습니다." }, { status: 400 });
+  }
+
+  // Settings-only toggle (no cloud wake)
+  if (body.skipOpenBurstEntries !== undefined && body.enabled === undefined) {
+    const updated = await prisma.brokerAccount.update({
+      where: { id: account.id },
+      data: { skipOpenBurstEntries: body.skipOpenBurstEntries },
+      select: { botEnabled: true, skipOpenBurstEntries: true },
+    });
+    const quiet = isInOpenBurstQuietPeriod();
+    return NextResponse.json({
+      ok: true,
+      botEnabled: updated.botEnabled,
+      skipOpenBurstEntries: updated.skipOpenBurstEntries,
+      openBurstQuiet: quiet,
+    });
   }
 
   return withAccountToggleLock(account.id, async () => {
@@ -54,11 +84,9 @@ export async function POST(req: Request) {
           password: account.syncToken,
           server: account.server,
           waitMs: 60000,
-          // Recreate only when previously failed / missing cloud
           allowRecreate: account.status === "failed" || !account.metaApiAccountId,
         });
         if (!repaired.ok) {
-          // Rate-limit on reconnect: if cloud already exists, still turn bot ON.
           if (
             /너무 많|rate|429|요청 한도/i.test(repaired.message) &&
             account.metaApiAccountId
@@ -104,6 +132,9 @@ export async function POST(req: Request) {
           botStoppedAt: null,
           status: "connected",
           statusMessage: "클라우드 연결 · 봇 실행 중",
+          ...(body.skipOpenBurstEntries !== undefined
+            ? { skipOpenBurstEntries: body.skipOpenBurstEntries }
+            : {}),
           ...(snapBalance != null && snapEquity != null
             ? {
                 balance: snapBalance,
@@ -113,7 +144,11 @@ export async function POST(req: Request) {
             : {}),
         },
       });
-      return NextResponse.json({ ok: true, botEnabled: updated.botEnabled });
+      return NextResponse.json({
+        ok: true,
+        botEnabled: updated.botEnabled,
+        skipOpenBurstEntries: updated.skipOpenBurstEntries,
+      });
     }
 
     const openCount = account.baskets.length;
@@ -126,11 +161,15 @@ export async function POST(req: Request) {
           openCount > 0
             ? `봇 중지 · 열린 포지션 ${openCount}건 익절·손절만 계속 관리`
             : "봇 중지됨 · 24시간 후 클라우드 자동 중지(비용 절감)",
+        ...(body.skipOpenBurstEntries !== undefined
+          ? { skipOpenBurstEntries: body.skipOpenBurstEntries }
+          : {}),
       },
     });
     return NextResponse.json({
       ok: true,
       botEnabled: updated.botEnabled,
+      skipOpenBurstEntries: updated.skipOpenBurstEntries,
       openBaskets: openCount,
     });
   });
