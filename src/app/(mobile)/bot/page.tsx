@@ -55,9 +55,10 @@ export default function BotPage() {
 
   useEffect(() => {
     if (availableSymbols.length === 0) return;
-    if (!(availableSymbols as string[]).includes(addSymbol)) {
-      setAddSymbol(availableSymbols[0]!);
-    }
+    if ((availableSymbols as string[]).includes(addSymbol)) return;
+    const next = availableSymbols[0]!;
+    const t = window.setTimeout(() => setAddSymbol(next), 0);
+    return () => clearTimeout(t);
   }, [availableSymbols, addSymbol]);
 
   const load = useCallback(async () => {
