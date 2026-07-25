@@ -40,6 +40,8 @@ model BrokerAccount {
   metaApiAccountId String?
   metaApiRegion    String?   @default("new-york")
   botEnabled       Boolean   @default(false)
+  /// When ON: block new entries for 15m after KST open bursts (09:00 / 17:00 / 22:30). TP/SL still managed.
+  skipOpenBurstEntries Boolean @default(false)
   /// When bot was last turned OFF (null while bot running). Used for 24h idle undeploy.
   botStoppedAt     DateTime?
   /// Cross-process tick mutex (local engine + GHA + Vercel). Stale after ~90s.

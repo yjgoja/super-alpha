@@ -24,7 +24,8 @@
     "ticks:backtest": "tsx scripts/_backtest-ticks.ts",
     "seed:admin": "tsx --env-file=.env scripts/seed-admin.ts",
     "verify:tpsl": "tsx scripts/_verify-all-logic-tpsl.ts",
-    "verify:live-ui": "tsx scripts/verify-live-ui-safety.ts"
+    "verify:live-ui": "tsx scripts/verify-live-ui-safety.ts",
+    "verify:market-hours": "tsx scripts/_verify-market-hours.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

@@ -41,7 +41,46 @@ import {
 } from "./metaapi";
 import { prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
+import { isInOpenBurstQuietPeriod, isMarketSessionBlockedError } from "./market-hours";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
+
+/** Soft TP market-close backoff — stops trade-API storms when market is closed. */
+const softCloseCooldown = new Map<
+  string,
+  { until: number; reason: string; loggedAt: number }
+>();
+
+function softCloseKey(accountId: string, symbol: string, direction: string) {
+  return `${accountId}|${symbol}|${direction}`;
+}
+
+function getSoftCloseCooldown(key: string) {
+  const hit = softCloseCooldown.get(key);
+  if (!hit) return null;
+  if (Date.now() >= hit.until) {
+    softCloseCooldown.delete(key);
+    return null;
+  }
+  return hit;
+}
+
+function noteSoftCloseBackoff(key: string, reason: string, ms: number) {
+  const prev = softCloseCooldown.get(key);
+  softCloseCooldown.set(key, {
+    until: Date.now() + ms,
+    reason,
+    loggedAt: prev?.loggedAt ?? 0,
+  });
+}
+
+function markSoftCloseLogged(key: string) {
+  const prev = softCloseCooldown.get(key);
+  if (!prev) {
+    softCloseCooldown.set(key, { until: 0, reason: "", loggedAt: Date.now() });
+    return;
+  }
+  prev.loggedAt = Date.now();
+}
 
 /** 브로커 지정가 TP/SL — 기본 ON. BROKER_PROTECT_TP_SL=0 이면 끔 */
 function brokerProtectEnabled() {
@@ -550,9 +589,19 @@ async function logTpMissGuard(opts: {
   pnl: number;
   brokerTpMissing: boolean;
   reason: string;
+  /** Skip spam when same key logged recently (market-closed storms). */
+  throttleKey?: string;
+  throttleMs?: number;
 }) {
+  const key = opts.throttleKey || softCloseKey(opts.accountId, opts.symbol, opts.direction);
+  const throttleMs = opts.throttleMs ?? 5 * 60_000;
+  const prev = softCloseCooldown.get(key);
+  if (prev && prev.loggedAt > 0 && Date.now() - prev.loggedAt < throttleMs) {
+    return;
+  }
   const note = `tp_miss_guard|${opts.reason}|${opts.logic}|roi=${opts.floatingRoi.toFixed(2)}%>=${opts.tpRoi}%|pnl=${opts.pnl.toFixed(2)}|tp$${opts.tpMoney}|brokerTpMissing=${opts.brokerTpMissing ? 1 : 0}`;
   console.error(`[engine] ${note} account=${opts.accountId} ${opts.symbol} ${opts.direction}`);
+  markSoftCloseLogged(key);
   try {
     await prisma.fill.create({
       data: {
@@ -569,6 +618,150 @@ async function logTpMissGuard(opts: {
   } catch (e) {
     console.warn("[engine] tp_miss_guard fill skip", e instanceof Error ? e.message : e);
   }
+}
+
+/** Soft TP hit → market close with cooldown when session closed / broker TP already set. */
+async function runSoftTpCloseAttempt(opts: {
+  accountId: string;
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  basket: BasketRow;
+  legs: { level: number; lots: number; price: number }[];
+  ourPositions: PosRow[];
+  bid: number;
+  ask: number;
+  logic: string;
+  repeatEnabled: boolean;
+  reentryLots: number;
+  tpRoi: number;
+  tpMoney: number;
+  floatingRoi: number;
+  pnlSum: number;
+  pnlForGuard: number;
+  allowReentry: boolean;
+  stopLossPct?: number;
+  stopLossEnabled?: boolean;
+  brokerLeverage?: number;
+  brokerTpMissing: boolean;
+  spr?: number;
+  profit?: number;
+  tpPnl: { apiProfit: number; quotePnl: number; spreadCost: number; pnl: number };
+}) {
+  const key = softCloseKey(opts.accountId, opts.symbol, opts.direction);
+  const cool = getSoftCloseCooldown(key);
+  if (cool) {
+    return {
+      ok: true as const,
+      action: "tp_await_session" as const,
+      symbol: opts.symbol,
+      note: cool.reason,
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      floatingPnl: opts.pnlForGuard,
+      floatingRoi: opts.floatingRoi,
+      spreadPct: opts.spr,
+    };
+  }
+
+  if (opts.brokerTpMissing) {
+    await logTpMissGuard({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      logic: opts.logic,
+      floatingRoi: opts.floatingRoi,
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      pnl: opts.pnlForGuard,
+      brokerTpMissing: true,
+      reason: "soft_tp_hit_broker_unset",
+      throttleKey: key,
+    });
+  }
+
+  const tpClose = await closeBasketTp({
+    accountId: opts.accountId,
+    metaId: opts.metaId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    basket: opts.basket,
+    legs: opts.legs,
+    ourPositions: opts.ourPositions,
+    bid: opts.bid,
+    ask: opts.ask,
+    logic: opts.logic,
+    repeatEnabled: opts.repeatEnabled,
+    reentryLots: opts.reentryLots,
+    tpRoi: opts.tpRoi,
+    tpMoney: opts.tpMoney,
+    pnlSum: opts.pnlSum,
+    floatingRoi: opts.floatingRoi,
+    allowReentry: opts.allowReentry,
+    stopLossPct: opts.stopLossPct,
+    stopLossEnabled: opts.stopLossEnabled,
+    brokerLeverage: opts.brokerLeverage,
+  });
+
+  if (!tpClose.closed) {
+    const marketClosed = isMarketSessionBlockedError(tpClose.error);
+    const reason = marketClosed
+      ? "market_closed_await_broker_tp"
+      : opts.brokerTpMissing
+        ? "soft_close_failed"
+        : "soft_close_failed_broker_tp_set";
+    // Market closed / broker TP already on → long backoff (no trade storm).
+    const backoffMs = marketClosed
+      ? 20 * 60_000
+      : opts.brokerTpMissing
+        ? 45_000
+        : 10 * 60_000;
+    noteSoftCloseBackoff(key, reason, backoffMs);
+    await logTpMissGuard({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      logic: opts.logic,
+      floatingRoi: opts.floatingRoi,
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      pnl: opts.pnlForGuard,
+      brokerTpMissing: opts.brokerTpMissing,
+      reason,
+      throttleKey: key,
+      throttleMs: 5 * 60_000,
+    });
+    return {
+      ok: true as const,
+      action: "tp_await_session" as const,
+      symbol: opts.symbol,
+      error: tpClose.error || "익절 청산 실패",
+      note: reason,
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      floatingPnl: opts.pnlForGuard,
+      floatingRoi: opts.floatingRoi,
+      spreadPct: opts.spr,
+    };
+  }
+
+  softCloseCooldown.delete(key);
+  return {
+    ok: true as const,
+    action: "tp" as const,
+    symbol: opts.symbol,
+    tpRoi: opts.tpRoi,
+    tpMoney: opts.tpMoney,
+    floatingPnl: opts.tpPnl.apiProfit,
+    floatingRoi: opts.floatingRoi,
+    apiProfit: opts.tpPnl.apiProfit,
+    quotePnl: opts.tpPnl.quotePnl,
+    spreadCost: opts.tpPnl.spreadCost,
+    profit: opts.profit,
+    reentered: tpClose.reentered,
+    reentryError: tpClose.error,
+    spreadPct: opts.spr,
+  };
 }
 
 function positionsForSymbol(
@@ -590,7 +783,7 @@ async function canOpenNewRisk(
   const [account, bots] = await Promise.all([
     prisma.brokerAccount.findUnique({
       where: { id: accountId },
-      select: { botEnabled: true },
+      select: { botEnabled: true, skipOpenBurstEntries: true },
     }),
     prisma.symbolBot.findMany({
       where: { accountId, symbol },
@@ -598,6 +791,11 @@ async function canOpenNewRisk(
     }),
   ]);
   if (!account?.botEnabled) return false;
+  // Open-burst quiet: block ENTRY/DCA/reentry only — TP/SL management continues.
+  if (account.skipOpenBurstEntries) {
+    const quiet = isInOpenBurstQuietPeriod();
+    if (quiet.active) return false;
+  }
   return bots.some((b) => {
     if (!b.enabled) return false;
     if (b.dualDirection) return true;
@@ -1395,6 +1593,7 @@ async function runSymbolTableDca(
     tpRoiPct: liveUsd.takeProfitPct,
   });
   // 익절 우선: BasketROI ≥ TP% → 바스켓 전량 청산 → 재진입
+  // 폐장/세션 차단 시 시장가 청산 재시도 폭풍 방지 (브로커 TP가 1차 방어).
   if (tpDecision.hit) {
     const brokerTpMissing =
       (protect.failed ?? 0) > 0 ||
@@ -1407,21 +1606,7 @@ async function runSymbolTableDca(
             point: protect.targets?.point ?? 0.01,
           }),
       );
-    if (brokerTpMissing) {
-      await logTpMissGuard({
-        accountId,
-        symbol,
-        direction,
-        logic,
-        floatingRoi: tpDecision.floatingRoi,
-        tpRoi: tpDecision.tpRoi,
-        tpMoney: tpDecision.tpMoney,
-        pnl: tpPnl.pnl,
-        brokerTpMissing: true,
-        reason: "soft_tp_hit_broker_unset",
-      });
-    }
-    const tpClose = await closeBasketTp({
+    return runSoftTpCloseAttempt({
       accountId,
       metaId,
       symbol,
@@ -1436,55 +1621,18 @@ async function runSymbolTableDca(
       reentryLots: levelLots(0),
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
-      // 기록용: MetaAPI 포지션 수익(수수료·스왑 포함). 익절 판정은 위에서 tpPnl.pnl 사용.
-      pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
+      pnlSum: tpPnl.apiProfit,
+      pnlForGuard: tpPnl.pnl,
       allowReentry: !cfg.manageOnly,
       stopLossPct: liveUsd.stopLossPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: brokerLev,
-    });
-    if (!tpClose.closed) {
-      await logTpMissGuard({
-        accountId,
-        symbol,
-        direction,
-        logic,
-        floatingRoi: tpDecision.floatingRoi,
-        tpRoi: tpDecision.tpRoi,
-        tpMoney: tpDecision.tpMoney,
-        pnl: tpPnl.pnl,
-        brokerTpMissing,
-        reason: "soft_close_failed",
-      });
-      return {
-        ok: false as const,
-        error: tpClose.error || "익절 청산 실패",
-        action: "tp_close_failed",
-        symbol,
-        tpRoi: tpDecision.tpRoi,
-        tpMoney: tpDecision.tpMoney,
-        floatingPnl: tpPnl.pnl,
-        floatingRoi: tpDecision.floatingRoi,
-        spreadPct: spr,
-      };
-    }
-    return {
-      ok: true as const,
-      action: "tp",
-      symbol,
-      tpRoi: tpDecision.tpRoi,
-      tpMoney: tpDecision.tpMoney,
-      floatingPnl: tpPnl.apiProfit,
-      floatingRoi: tpDecision.floatingRoi,
-      apiProfit: tpPnl.apiProfit,
-      quotePnl: tpPnl.quotePnl,
-      spreadCost: tpPnl.spreadCost,
+      brokerTpMissing,
+      spr,
       profit,
-      reentered: tpClose.reentered,
-      reentryError: tpClose.error,
-      spreadPct: spr,
-    };
+      tpPnl,
+    });
   }
 
   // 손절: BasketROI ≤ -SL% (마진 ROI, 바이낸스식) → 바스켓 전량 청산
@@ -1988,21 +2136,7 @@ async function runSymbolDca(
             point: protect.targets?.point ?? 0.01,
           }),
       );
-    if (brokerTpMissing) {
-      await logTpMissGuard({
-        accountId,
-        symbol,
-        direction,
-        logic,
-        floatingRoi: tpDecision.floatingRoi,
-        tpRoi: tpDecision.tpRoi,
-        tpMoney: tpDecision.tpMoney,
-        pnl: tpPnl.pnl,
-        brokerTpMissing: true,
-        reason: "soft_tp_hit_broker_unset",
-      });
-    }
-    const tpClose = await closeBasketTp({
+    return runSoftTpCloseAttempt({
       accountId,
       metaId,
       symbol,
@@ -2017,43 +2151,16 @@ async function runSymbolDca(
       reentryLots: lotsAtLevel(cfg.startLots, cfg.entryMultiplier, 0, logic),
       tpRoi: tpDecision.tpRoi,
       tpMoney: tpDecision.tpMoney,
-      pnlSum: tpPnl.apiProfit,
       floatingRoi: tpDecision.floatingRoi,
+      pnlSum: tpPnl.apiProfit,
+      pnlForGuard: tpPnl.pnl,
       allowReentry: !cfg.manageOnly,
       stopLossPct: liveUsd.stopLossPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: brokerLev,
+      brokerTpMissing,
+      tpPnl,
     });
-    if (!tpClose.closed) {
-      await logTpMissGuard({
-        accountId,
-        symbol,
-        direction,
-        logic,
-        floatingRoi: tpDecision.floatingRoi,
-        tpRoi: tpDecision.tpRoi,
-        tpMoney: tpDecision.tpMoney,
-        pnl: tpPnl.pnl,
-        brokerTpMissing,
-        reason: "soft_close_failed",
-      });
-      return {
-        ok: false as const,
-        error: tpClose.error || "익절 청산 실패",
-        action: "tp_close_failed",
-        symbol,
-      };
-    }
-    return {
-      ok: true as const,
-      action: "tp",
-      symbol,
-      reentered: tpClose.reentered,
-      tpRoi: tpDecision.tpRoi,
-      tpMoney: tpDecision.tpMoney,
-      floatingPnl: tpPnl.apiProfit,
-      floatingRoi,
-    };
   }
 
   const slDecision = shouldTriggerStopLossUsd({
