@@ -39,6 +39,20 @@ export async function undeployIdleAccounts(idleHours = IDLE_BOT_HOURS) {
       results.push({ id: a.id, login: a.login, ok: false, error: "bot_on_skip" });
       continue;
     }
+    // Open DB baskets already filtered; also skip if equity≠balance (likely live float / orphan).
+    if (
+      a.balance > 0 &&
+      a.equity > 0 &&
+      Math.abs(a.balance - a.equity) > 1
+    ) {
+      results.push({
+        id: a.id,
+        login: a.login,
+        ok: false,
+        error: "float_skip",
+      });
+      continue;
+    }
     try {
       await undeployAccount(a.metaApiAccountId!);
       await prisma.brokerAccount.update({

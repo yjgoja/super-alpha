@@ -43,6 +43,7 @@ import { ensureTradingSchema, prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
 import { isInOpenBurstQuietPeriod, isMarketSessionBlockedError } from "./market-hours";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
+import { setAccountLiveState } from "./state-cache";
 
 /** Soft TP market-close backoff — stops trade-API storms when market is closed. */
 const softCloseCooldown = new Map<
@@ -461,7 +462,11 @@ async function tryGhostBasketSoftExit(opts: {
     opts.symbol,
     opts.direction,
   );
-  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+  const emptyUnverified =
+    closeRes.ok &&
+    (closeRes as { emptyWithoutClose?: boolean }).emptyWithoutClose === true &&
+    (closeRes.closed ?? 0) === 0;
+  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0 || emptyUnverified) {
     await logTpMissGuard({
       accountId: opts.accountId,
       symbol: opts.symbol,
@@ -472,7 +477,9 @@ async function tryGhostBasketSoftExit(opts: {
       tpMoney: tpDecision.tpMoney,
       pnl: tpDecision.hit ? tpPnl.pnl : tpPnl.pnlForSl,
       brokerTpMissing: true,
-      reason: `ghost_${kind.toLowerCase()}_close_failed`,
+      reason: emptyUnverified
+        ? `ghost_${kind.toLowerCase()}_empty_snap`
+        : `ghost_${kind.toLowerCase()}_close_failed`,
     });
     return {
       handled: true as const,
@@ -480,7 +487,9 @@ async function tryGhostBasketSoftExit(opts: {
         ok: false as const,
         action: "ghost_close_failed",
         symbol: opts.symbol,
-        error: ("message" in closeRes && closeRes.message) || "ghost close failed",
+        error: emptyUnverified
+          ? "ghost empty snap — skip basket close/reentry"
+          : ("message" in closeRes && closeRes.message) || "ghost close failed",
       },
     };
   }
@@ -2332,9 +2341,10 @@ async function runSymbolDca(
 const tickLocks = new Set<string>();
 const lastEquitySnapAt = new Map<string, number>();
 
+// Must exceed ENGINE_CLOUD_WAIT_MS (~45s) so a second worker cannot steal the lock mid-tick.
 const TICK_LOCK_STALE_MS = Math.max(
-  20_000,
-  Number(process.env.ENGINE_TICK_LOCK_STALE_MS || 45_000),
+  90_000,
+  Number(process.env.ENGINE_TICK_LOCK_STALE_MS || 180_000),
 );
 
 /** In-process + DB mutex so local engine / GHA / serverless don't double-trade. */
@@ -2531,12 +2541,22 @@ async function runDcaTickInner(accountId: string) {
     return { ok: false as const, error: snap.message };
   }
 
+  // Publish shared state for web UI (?live=1) — Redis/Postgres, not MetaAPI.
+  await setAccountLiveState({
+    accountId: account.id,
+    metaApiAccountId: metaId,
+    balance: snap.balance,
+    equity: snap.equity,
+    margin: snap.margin,
+    freeMargin: snap.freeMargin,
+    leverage: snap.leverage,
+    currency: snap.currency,
+    connectionStatus: snap.connectionStatus,
+    positions: snap.positions,
+  });
   await prisma.brokerAccount.update({
     where: { id: account.id },
     data: {
-      balance: snap.balance,
-      equity: snap.equity,
-      lastSyncAt: new Date(),
       mode: "live",
       status: "connected",
       startingBalance: account.startingBalance > 0 ? account.startingBalance : snap.balance,

@@ -125,6 +125,9 @@ export type MetaSnap = {
   server: string;
   login: string;
   connectionStatus?: string;
+  /** True when served from engine-written shared state cache (no MetaAPI call). */
+  fromStateCache?: boolean;
+  stateCacheAt?: string;
   positions: Array<{
     id: string;
     symbol: string;
@@ -1368,17 +1371,33 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
     };
   }
 
+  const i = info as Record<string, unknown>;
+  const balance = Number(i.balance || 0);
+  const equity = Number(i.equity || 0);
+  const margin = Number(i.margin || 0);
+
+  // Never return ok+empty positions when the book may still be open — feeds false ghost exits.
   if (positionsErr) {
+    const likelyOpen =
+      margin > 1 || (balance > 0 && equity > 0 && Math.abs(balance - equity) > 1);
+    if (likelyOpen) {
+      return {
+        ok: false,
+        code: "POSITIONS_UNAVAILABLE",
+        message:
+          positionsErr ||
+          "열린 포지션을 가져오지 못했습니다. (브로커 TP/SL 유지 · 강제 종료 안 함)",
+      };
+    }
     positionsRaw = [];
   }
 
-  const i = info as Record<string, unknown>;
   const snap: MetaSnap = {
     ok: true,
     metaApiAccountId: id,
-    balance: Number(i.balance || 0),
-    equity: Number(i.equity || 0),
-    margin: Number(i.margin || 0),
+    balance,
+    equity,
+    margin,
     freeMargin: Number(i.freeMargin || 0),
     leverage: Number(i.leverage || 0),
     currency: String(i.currency || "USD"),
@@ -1500,11 +1519,28 @@ export async function fetchSnapshot(
 }
 
 /**
- * UI live polls only. Short TTL + inflight coalesce to cut MetaAPI load.
+ * UI live polls only. Prefers engine-written shared state cache (Redis/Postgres),
+ * then short in-process TTL + inflight coalesce. Trading/engine must use fetchSnapshot.
  * Disabled when LIVE_SNAPSHOT_CACHE_MS=0. Errors are never cached.
  */
 export async function fetchSnapshotCached(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
   const id = String(metaApiAccountId);
+
+  // Cross-process cache published by the Render engine — skip MetaAPI when fresh.
+  if (process.env.STATE_CACHE_READ !== "0") {
+    try {
+      const { getAccountLiveStateByMetaId, liveStateToMetaSnap } = await import("./state-cache");
+      const shared = await getAccountLiveStateByMetaId(id);
+      if (shared) {
+        const snap = liveStateToMetaSnap(shared);
+        snapCache.set(id, { at: Date.now(), value: snap });
+        return snap;
+      }
+    } catch {
+      /* fall through to MetaAPI */
+    }
+  }
+
   const ttl = uiSnapTtlMs();
   if (ttl <= 0) return fetchSnapshotUncached(id);
 
@@ -2148,7 +2184,14 @@ export async function closePositionsBySymbolDirection(
       (x) => symbolsMatch(x.symbol, symbol) && x.direction === direction,
     );
     if (targets.length === 0) {
-      return { ok: true as const, closed: closedTotal, remaining: 0 };
+      // After we closed something → verified flat. First-look empty → unverified
+      // (snap lag) — callers must not treat as a successful ghost TP + reentry.
+      return {
+        ok: true as const,
+        closed: closedTotal,
+        remaining: 0,
+        emptyWithoutClose: closedTotal === 0,
+      };
     }
 
     const ids = targets.map((t) => t.id).filter(Boolean);
