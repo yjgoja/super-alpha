@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PUBLIC_LOGIC_OPTIONS, publicLogicLabel } from "@/lib/strategy-public";
 import { SYMBOL_GROUPS, normalizeLogicId } from "@/lib/strategies";
 import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
+import { TradingViewSymbolChart } from "@/components/TradingViewSymbolChart";
 
 type Bot = {
   id: string;
@@ -32,6 +33,7 @@ export default function BotPage() {
   const [edit, setEdit] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<Bot>>({});
   const [addSymbol, setAddSymbol] = useState("GBPUSD");
+  const [chartSymbol, setChartSymbol] = useState("XAUUSD");
   const [ready, setReady] = useState(false);
   const [linked, setLinked] = useState(false);
   const [approved, setApproved] = useState(true);
@@ -57,9 +59,25 @@ export default function BotPage() {
     if (availableSymbols.length === 0) return;
     if ((availableSymbols as string[]).includes(addSymbol)) return;
     const next = availableSymbols[0]!;
-    const t = window.setTimeout(() => setAddSymbol(next), 0);
+    const t = window.setTimeout(() => {
+      setAddSymbol(next);
+      setChartSymbol(next);
+    }, 0);
     return () => clearTimeout(t);
   }, [availableSymbols, addSymbol]);
+
+  // Keep chart on a valid symbol when bots load / add-list empties.
+  useEffect(() => {
+    if (!ready) return;
+    const pool = [
+      ...availableSymbols,
+      ...bots.map((b) => b.symbol),
+    ];
+    if (pool.length === 0) return;
+    if (pool.includes(chartSymbol)) return;
+    const t = window.setTimeout(() => setChartSymbol(pool[0]!), 0);
+    return () => clearTimeout(t);
+  }, [ready, availableSymbols, bots, chartSymbol]);
 
   const load = useCallback(async () => {
     try {
@@ -351,7 +369,10 @@ export default function BotPage() {
                         type="button"
                         className="sa-btn"
                         disabled={busy}
-                        onClick={() => setAddSymbol(s)}
+                        onClick={() => {
+                          setAddSymbol(s);
+                          setChartSymbol(s);
+                        }}
                         style={{
                           borderRadius: 12,
                           padding: "0.55rem 0.85rem",
@@ -385,6 +406,69 @@ export default function BotPage() {
           </div>
         )}
       </section>
+
+      {ready && chartSymbol ? (
+        <section className="m-card" style={{ marginBottom: "0.85rem" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: "0.75rem",
+              marginBottom: "0.55rem",
+            }}
+          >
+            <div style={{ fontWeight: 650 }}>{chartSymbol} 실시간 차트</div>
+            <div style={{ fontSize: "0.7rem", color: "var(--muted)" }}>TradingView</div>
+          </div>
+          {bots.length > 0 ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.35rem",
+                marginBottom: "0.65rem",
+              }}
+            >
+              {[...new Set(bots.map((b) => b.symbol))].map((s) => {
+                const on = chartSymbol === s;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className="sa-btn"
+                    onClick={() => setChartSymbol(s)}
+                    style={{
+                      borderRadius: 10,
+                      padding: "0.35rem 0.65rem",
+                      fontSize: "0.78rem",
+                      border: on
+                        ? "1px solid var(--gold)"
+                        : "1px solid rgba(255,255,255,0.12)",
+                      background: on ? "rgba(232,195,106,0.16)" : "rgba(255,255,255,0.04)",
+                      color: on ? "var(--gold)" : "var(--ink)",
+                      fontWeight: 650,
+                    }}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <TradingViewSymbolChart symbol={chartSymbol} height={300} interval="5" />
+          <p
+            style={{
+              margin: "0.55rem 0 0",
+              fontSize: "0.7rem",
+              color: "var(--muted)",
+              lineHeight: 1.4,
+            }}
+          >
+            참고용 시세입니다. Zero Markets 체결가와 다를 수 있습니다.
+          </p>
+        </section>
+      ) : null}
 
       <section className="m-card" style={{ marginBottom: "0.85rem" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem" }}>
@@ -480,7 +564,25 @@ export default function BotPage() {
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
-                        <strong style={{ fontSize: "1.05rem" }}>{bot.symbol}</strong>
+                        <button
+                          type="button"
+                          onClick={() => setChartSymbol(bot.symbol)}
+                          style={{
+                            all: "unset",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                            fontSize: "1.05rem",
+                            color:
+                              chartSymbol === bot.symbol ? "var(--gold)" : "inherit",
+                            borderBottom:
+                              chartSymbol === bot.symbol
+                                ? "1px solid var(--gold)"
+                                : "1px solid transparent",
+                          }}
+                          title="차트 보기"
+                        >
+                          {bot.symbol}
+                        </button>
                         <span
                           className="m-chip"
                           style={{
