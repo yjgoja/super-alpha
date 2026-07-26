@@ -54,6 +54,20 @@ export function isInOpenBurstQuietPeriod(d: Date = new Date()): {
   return { active: false, label: null, endsInMin: null };
 }
 
+/**
+ * Rough FX/CFD weekly closure (UTC) — Fri ≥21:00 → Sun <22:00, all Saturday.
+ * Broker holiday edges still confirmed via isMarketSessionBlockedError after a trade fail.
+ * Pure Date check — 0 MetaAPI credits.
+ */
+export function isWeeklyMarketClosed(d: Date = new Date()): boolean {
+  const day = d.getUTCDay(); // 0 Sun .. 6 Sat
+  const h = d.getUTCHours();
+  if (day === 6) return true; // Saturday
+  if (day === 0 && h < 22) return true; // Sunday before ~22:00 UTC reopen
+  if (day === 5 && h >= 21) return true; // Friday after ~21:00 UTC close
+  return false;
+}
+
 /** MetaAPI / broker errors that mean market session cannot trade (close/entry). */
 export function isMarketSessionBlockedError(msg: unknown): boolean {
   const text = typeof msg === "string" ? msg : msg == null ? "" : String(msg);
@@ -72,4 +86,9 @@ export function isMarketSessionBlockedError(msg: unknown): boolean {
     text.includes("거래가 불가능") ||
     text.includes("거래 불가")
   );
+}
+
+/** Soft-close / entry backoff reasons that mean "do not spend trade credits". */
+export function isSessionTradeBackoffReason(reason: string): boolean {
+  return /market_closed|weekly_closed|session_closed/.test(reason || "");
 }

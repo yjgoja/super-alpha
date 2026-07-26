@@ -43,7 +43,12 @@ import {
 } from "./metaapi";
 import { ensureTradingSchema, prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
-import { isInOpenBurstQuietPeriod, isMarketSessionBlockedError } from "./market-hours";
+import {
+  isInOpenBurstQuietPeriod,
+  isMarketSessionBlockedError,
+  isSessionTradeBackoffReason,
+  isWeeklyMarketClosed,
+} from "./market-hours";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
 import { setAccountLiveState } from "./state-cache";
 import {
@@ -633,6 +638,92 @@ async function forceCloseRemainder(opts: {
   return last!;
 }
 
+/**
+ * Soft SL market-close with session backoff (mirrors soft TP).
+ * Never force-closes through a closed session — broker SL remains the real protection.
+ */
+async function runSoftSlCloseAttempt(opts: {
+  accountId: string;
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+}): Promise<
+  | { ok: true; closed: true }
+  | { ok: true; awaitSession: true; note: string }
+  | { ok: false; message: string; remaining?: number }
+> {
+  const cool = await getSoftCloseCooldownShared({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+  });
+  if (cool && isSessionTradeBackoffReason(cool.reason)) {
+    return { ok: true, awaitSession: true, note: cool.reason };
+  }
+  if (isWeeklyMarketClosed()) {
+    await noteSessionTradeBackoff({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      reason: "weekly_closed_await_broker_sl",
+      ms: 30 * 60_000,
+    });
+    return { ok: true, awaitSession: true, note: "weekly_closed" };
+  }
+
+  let slClose = await closePositionsBySymbolDirection(
+    opts.metaId,
+    opts.symbol,
+    opts.direction,
+  );
+  if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+    slClose = await forceCloseRemainder({
+      metaId: opts.metaId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+    });
+  }
+  if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+    const message =
+      ("message" in slClose && slClose.message) ||
+      `${opts.symbol} 손절 청산 실패(잔여 ${"remaining" in slClose ? slClose.remaining : "?"})`;
+    if (isMarketSessionBlockedError(message)) {
+      await noteSessionTradeBackoff({
+        accountId: opts.accountId,
+        symbol: opts.symbol,
+        direction: opts.direction,
+        reason: "market_closed_await_broker_sl",
+        ms: 20 * 60_000,
+      });
+      return { ok: true, awaitSession: true, note: "market_closed" };
+    }
+    return {
+      ok: false,
+      message,
+      remaining: "remaining" in slClose ? slClose.remaining : undefined,
+    };
+  }
+  return { ok: true, closed: true };
+}
+
+/** After ENTRY/DCA order reject — back off when session is closed (holiday etc.). */
+async function noteOrderRejectIfSessionClosed(opts: {
+  accountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  message?: string;
+  kind: "entry" | "dca";
+}) {
+  if (!isMarketSessionBlockedError(opts.message || "")) return;
+  await noteSessionTradeBackoff({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    reason: `market_closed_${opts.kind}`,
+    ms: 20 * 60_000,
+  });
+}
+
 async function logTpMissGuard(opts: {
   accountId: string;
   symbol: string;
@@ -715,6 +806,28 @@ async function runSoftTpCloseAttempt(opts: {
       action: "tp_await_session" as const,
       symbol: opts.symbol,
       note: cool.reason,
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      floatingPnl: opts.pnlForGuard,
+      floatingRoi: opts.floatingRoi,
+      spreadPct: opts.spr,
+    };
+  }
+
+  // Weekly FX close — do not spend trade credits on market soft-close; broker TP holds.
+  if (isWeeklyMarketClosed()) {
+    await noteSoftCloseBackoffShared({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      reason: "weekly_closed_await_broker_tp",
+      ms: 30 * 60_000,
+    });
+    return {
+      ok: true as const,
+      action: "tp_await_session" as const,
+      symbol: opts.symbol,
+      note: "weekly_closed",
       tpRoi: opts.tpRoi,
       tpMoney: opts.tpMoney,
       floatingPnl: opts.pnlForGuard,
@@ -867,6 +980,8 @@ async function canOpenNewRisk(
   symbol: string,
   direction: "BUY" | "SELL",
 ) {
+  // Weekend / weekly FX close — 0 MetaAPI cost. TP/SL manage paths do not call this.
+  if (isWeeklyMarketClosed()) return false;
   const [account, bots] = await Promise.all([
     prisma.brokerAccount.findUnique({
       where: { id: accountId },
@@ -887,6 +1002,23 @@ async function canOpenNewRisk(
     if (!b.enabled) return false;
     if (b.dualDirection) return true;
     return (b.direction === "SELL" ? "SELL" : "BUY") === direction;
+  });
+}
+
+/** Persist backoff so ENTRY/DCA/SL do not burn trade credits every tick while closed. */
+async function noteSessionTradeBackoff(opts: {
+  accountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  reason: string;
+  ms?: number;
+}) {
+  await noteSoftCloseBackoffShared({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    reason: opts.reason,
+    ms: opts.ms ?? 20 * 60_000,
   });
 }
 
@@ -1094,6 +1226,17 @@ async function gateNewRiskOrder(opts: {
   level: number;
   livePositions?: Array<{ takeProfit?: number; stopLoss?: number }>;
 }): Promise<{ ok: true } | { ok: false; note: string }> {
+  if (isWeeklyMarketClosed()) {
+    return { ok: false, note: "weekly_market_closed" };
+  }
+  const sessionCool = await getSoftCloseCooldownShared({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+  });
+  if (sessionCool && isSessionTradeBackoffReason(sessionCool.reason)) {
+    return { ok: false, note: sessionCool.reason };
+  }
   await syncTradeCreditPauseFromDb();
   if (metaApiTradeCreditBlocked()) {
     return { ok: false, note: "trade_credit_blocked" };
@@ -1228,6 +1371,13 @@ async function placeTpReentry(opts: {
     });
   }
   if (!order.ok) {
+    await noteOrderRejectIfSessionClosed({
+      accountId,
+      symbol,
+      direction,
+      message: order.message,
+      kind: "entry",
+    });
     return { ok: false, error: order.message || "익절 후 재진입 주문 실패" };
   }
   await prisma.basket.create({
@@ -1599,7 +1749,16 @@ async function runSymbolTableDca(
         comment: `SA-${tag}-L0`,
       });
     }
-    if (!order.ok) return { ok: false as const, error: order.message, symbol };
+    if (!order.ok) {
+      await noteOrderRejectIfSessionClosed({
+        accountId,
+        symbol,
+        direction,
+        message: order.message,
+        kind: "entry",
+      });
+      return { ok: false as const, error: order.message, symbol };
+    }
     await prisma.basket.create({
       data: {
         accountId,
@@ -1797,16 +1956,27 @@ async function runSymbolTableDca(
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    let slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
-    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
-      slClose = await forceCloseRemainder({ metaId, symbol, direction });
+    const slAttempt = await runSoftSlCloseAttempt({
+      accountId,
+      metaId,
+      symbol,
+      direction,
+    });
+    if ("awaitSession" in slAttempt && slAttempt.awaitSession) {
+      return {
+        ok: true as const,
+        action: "sl_await_session" as const,
+        symbol,
+        note: slAttempt.note,
+        stopLossUsd: slDecision.stopLossUsd,
+        floatingPnl: tpPnl.apiProfit,
+        floatingRoi: slDecision.floatingRoi,
+      };
     }
-    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+    if (!slAttempt.ok) {
       return {
         ok: false as const,
-        error:
-          ("message" in slClose && slClose.message) ||
-          `${symbol} 손절 청산 실패(잔여 ${"remaining" in slClose ? slClose.remaining : "?"})`,
+        error: slAttempt.message,
         symbol,
         action: "sl_retry",
       };
@@ -1983,6 +2153,13 @@ async function runSymbolTableDca(
       });
     }
     if (!order.ok) {
+      await noteOrderRejectIfSessionClosed({
+        accountId,
+        symbol,
+        direction,
+        message: order.message,
+        kind: "dca",
+      });
       return {
         ok: false as const,
         error: order.message,
@@ -2247,7 +2424,16 @@ async function runSymbolDca(
         comment: `SA-${logic}-L0`,
       });
     }
-    if (!order.ok) return { ok: false as const, error: order.message, symbol };
+    if (!order.ok) {
+      await noteOrderRejectIfSessionClosed({
+        accountId,
+        symbol,
+        direction,
+        message: order.message,
+        kind: "entry",
+      });
+      return { ok: false as const, error: order.message, symbol };
+    }
     await prisma.basket.create({
       data: {
         accountId,
@@ -2401,16 +2587,27 @@ async function runSymbolDca(
     stopLossRoiPct: cfg.stopLossEnabled ? liveUsd.stopLossPct : 0,
   });
   if (slDecision.hit) {
-    let slClose = await closePositionsBySymbolDirection(metaId, symbol, direction);
-    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
-      slClose = await forceCloseRemainder({ metaId, symbol, direction });
+    const slAttempt = await runSoftSlCloseAttempt({
+      accountId,
+      metaId,
+      symbol,
+      direction,
+    });
+    if ("awaitSession" in slAttempt && slAttempt.awaitSession) {
+      return {
+        ok: true as const,
+        action: "sl_await_session" as const,
+        symbol,
+        note: slAttempt.note,
+        stopLossUsd: slDecision.stopLossUsd,
+        floatingPnl: tpPnl.apiProfit,
+        floatingRoi: slDecision.floatingRoi,
+      };
     }
-    if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
+    if (!slAttempt.ok) {
       return {
         ok: false as const,
-        error:
-          ("message" in slClose && slClose.message) ||
-          `${symbol} 손절 청산 실패(잔여 ${"remaining" in slClose ? slClose.remaining : "?"})`,
+        error: slAttempt.message,
         symbol,
         action: "sl_retry",
       };
@@ -2584,7 +2781,16 @@ async function runSymbolDca(
           comment: `SA-${logic}-L${nextLevel}`,
         });
       }
-      if (!order.ok) return { ok: false as const, error: order.message, symbol };
+      if (!order.ok) {
+        await noteOrderRejectIfSessionClosed({
+          accountId,
+          symbol,
+          direction,
+          message: order.message,
+          kind: "dca",
+        });
+        return { ok: false as const, error: order.message, symbol };
+      }
       const fillPrice = estFill;
       await prisma.basketLeg.create({
         data: { basketId: basket.id, level: nextLevel, lots, price: fillPrice },
@@ -2720,6 +2926,10 @@ async function runDcaTickInner(accountId: string) {
   if (!masterOn && !hasOpenBaskets) {
     return { skipped: true as const, reason: "bot_off" };
   }
+  // Weekly FX close + flat — no ENTRY possible; skip MetaAPI entirely.
+  if (isWeeklyMarketClosed() && !hasOpenBaskets) {
+    return { skipped: true as const, reason: "weekly_market_closed" };
+  }
   // Bot ON + cloud cold: recover here too (not only in runAllBots).
   // Previously status==="undeployed" skipped the whole tick → trading looked "stopped".
   if (account.status !== "connected" && account.status !== "undeployed") {
@@ -2727,10 +2937,10 @@ async function runDcaTickInner(accountId: string) {
   }
 
   const metaId = account.metaApiAccountId;
-  const snapStaleMs = Math.max(
-    8_000,
-    Number(process.env.ENGINE_SNAP_STALE_MS || 15_000),
-  );
+  // Open baskets on weekend: monitor slowly (broker TP/SL still armed). Flat already skipped above.
+  const snapStaleMs = isWeeklyMarketClosed()
+    ? Math.max(60_000, Number(process.env.ENGINE_SNAP_STALE_CLOSED_MS || 120_000))
+    : Math.max(8_000, Number(process.env.ENGINE_SNAP_STALE_MS || 15_000));
   let snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });
   // REST 429 / cold stream: force stream attach then retry — trading must continue.
   if (

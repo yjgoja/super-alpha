@@ -6,6 +6,8 @@ import assert from "assert";
 import {
   isInOpenBurstQuietPeriod,
   isMarketSessionBlockedError,
+  isSessionTradeBackoffReason,
+  isWeeklyMarketClosed,
   OPEN_BURST_WINDOWS_KST,
   seoulParts,
 } from "../src/lib/market-hours";
@@ -38,5 +40,17 @@ assert.ok(isMarketSessionBlockedError("Market is closed"));
 assert.ok(isMarketSessionBlockedError("Trade is disabled"));
 assert.ok(isMarketSessionBlockedError("현재 해당 종목 거래가 불가능합니다(장 마감 등)."));
 assert.ok(!isMarketSessionBlockedError("insufficient margin"));
+
+assert.ok(isSessionTradeBackoffReason("weekly_closed_await_broker_tp"));
+assert.ok(isSessionTradeBackoffReason("market_closed_entry"));
+assert.ok(!isSessionTradeBackoffReason("broker_tp_armed"));
+
+// Weekly FX closure (UTC)
+assert.equal(isWeeklyMarketClosed(new Date("2026-07-24T20:59:00.000Z")), false); // Fri 20:59
+assert.equal(isWeeklyMarketClosed(new Date("2026-07-24T21:00:00.000Z")), true); // Fri 21:00
+assert.equal(isWeeklyMarketClosed(new Date("2026-07-25T12:00:00.000Z")), true); // Sat
+assert.equal(isWeeklyMarketClosed(new Date("2026-07-26T21:59:00.000Z")), true); // Sun 21:59
+assert.equal(isWeeklyMarketClosed(new Date("2026-07-26T22:00:00.000Z")), false); // Sun 22:00
+assert.equal(isWeeklyMarketClosed(new Date("2026-07-27T10:00:00.000Z")), false); // Mon
 
 console.log("OK verify-market-hours");
