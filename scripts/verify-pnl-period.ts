@@ -1,5 +1,5 @@
 /**
- * Local check: padDailyPnl always returns 7 consecutive KST days with zeros.
+ * Local check: padDailyPnl always returns 5 consecutive KST days with zeros.
  * Run: npx tsx scripts/verify-pnl-period.ts
  */
 import { dayKeySeoul } from "../src/lib/day-key";
@@ -13,7 +13,6 @@ import {
 const today = dayKeySeoul();
 const expected = lastKstDayKeys(today, PNL_DAY_COUNT);
 
-// Simulate sparse fills on last two days
 const sparse = [
   { date: expected[PNL_DAY_COUNT - 2], pnl: 12.5, trades: 2 },
   { date: expected[PNL_DAY_COUNT - 1], pnl: -3.1, trades: 1 },
