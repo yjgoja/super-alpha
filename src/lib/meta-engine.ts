@@ -814,7 +814,7 @@ async function runSoftTpCloseAttempt(opts: {
     };
   }
 
-  // Weekly FX close — do not spend trade credits on market soft-close; broker TP holds.
+  // Weekly FX close — cannot market-close; rely on broker-side TP until reopen.
   if (isWeeklyMarketClosed()) {
     await noteSoftCloseBackoffShared({
       accountId: opts.accountId,
@@ -836,27 +836,8 @@ async function runSoftTpCloseAttempt(opts: {
     };
   }
 
-  // Broker TP already armed — do not storm market closes (esp. when session closed).
-  if (!opts.brokerTpMissing) {
-    await noteSoftCloseBackoffShared({
-      accountId: opts.accountId,
-      symbol: opts.symbol,
-      direction: opts.direction,
-      reason: "broker_tp_armed",
-      ms: 10 * 60_000,
-    });
-    return {
-      ok: true as const,
-      action: "tp_await_broker" as const,
-      symbol: opts.symbol,
-      note: "broker_tp_armed",
-      tpRoi: opts.tpRoi,
-      tpMoney: opts.tpMoney,
-      floatingPnl: opts.pnlForGuard,
-      floatingRoi: opts.floatingRoi,
-      spreadPct: opts.spr,
-    };
-  }
+  // Open session: margin-ROI TP must market-close even when broker TP is armed.
+  // Broker TP can be clamped past the lowest DCA leg (farther than ~0.04% / 20% ROI).
 
   if (opts.brokerTpMissing) {
     await logTpMissGuard({
