@@ -33,6 +33,7 @@
     "@react-three/fiber": "^9.6.1",
     "@types/three": "^0.185.1",
     "bcryptjs": "^3.0.3",
+    "ioredis": "^5.11.1",
     "jose": "^6.2.3",
     "metaapi.cloud-sdk": "^29.3.3",
     "next": "16.2.10",

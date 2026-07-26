@@ -90,6 +90,7 @@ async function pullLiveSnapshot(opts: {
   livePositions: LivePos;
   syncError: string | null;
   liveDailyPnl: number | null;
+  fromStateCache: boolean;
   balance?: number;
   equity?: number;
   lastSyncAt?: Date;
@@ -100,23 +101,43 @@ async function pullLiveSnapshot(opts: {
   let livePositions: LivePos = [];
   let liveDailyPnl: number | null = null;
 
-  // UI path only — never wake MetaAPI cloud here (bot/engine owns deploy).
-  // Cold accounts return syncError immediately instead of blocking 45s.
+  // Prefers engine state cache; MetaAPI only on miss/stale. Never wake cloud deploy.
   const snap = await fetchSnapshotCached(metaId);
   if (!snap.ok) {
-    return { livePositions, syncError: snap.message, liveDailyPnl };
+    return { livePositions, syncError: snap.message, liveDailyPnl, fromStateCache: false };
   }
 
-  const updated = await prisma.brokerAccount.update({
-    where: { id: opts.accountId },
-    data: {
+  const fromStateCache = snap.fromStateCache === true;
+
+  // Cache already wrote balance/equity/lastSyncAt — skip redundant write when fresh.
+  let updated: {
+    balance: number;
+    equity: number;
+    lastSyncAt: Date | null;
+    status: string;
+    statusMessage: string | null;
+  };
+  if (fromStateCache) {
+    updated = {
       balance: snap.balance,
       equity: snap.equity,
-      lastSyncAt: new Date(),
+      lastSyncAt: snap.stateCacheAt ? new Date(snap.stateCacheAt) : new Date(),
       status: "connected",
-      ...(opts.botEnabled ? { statusMessage: "클라우드 연결 · 봇 실행 중" } : {}),
-    },
-  });
+      // Keep existing public message; engine owns statusMessage writes.
+      statusMessage: null,
+    };
+  } else {
+    updated = await prisma.brokerAccount.update({
+      where: { id: opts.accountId },
+      data: {
+        balance: snap.balance,
+        equity: snap.equity,
+        lastSyncAt: new Date(),
+        status: "connected",
+        ...(opts.botEnabled ? { statusMessage: "클라우드 연결 · 봇 실행 중" } : {}),
+      },
+    });
+  }
 
   livePositions = snap.positions;
 
@@ -135,34 +156,39 @@ async function pullLiveSnapshot(opts: {
     }
   }
 
-  const recent = await prisma.equitySnapshot.findFirst({
-    where: { accountId: opts.accountId },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!recent || Date.now() - recent.createdAt.getTime() > 50_000) {
-    await prisma.equitySnapshot.create({
-      data: {
-        accountId: opts.accountId,
-        equity: snap.equity,
-        balance: snap.balance,
-      },
+  // Engine already snapshots equity ~60s; skip when serving shared cache.
+  if (!fromStateCache) {
+    const recent = await prisma.equitySnapshot.findFirst({
+      where: { accountId: opts.accountId },
+      orderBy: { createdAt: "desc" },
     });
+    if (!recent || Date.now() - recent.createdAt.getTime() > 50_000) {
+      await prisma.equitySnapshot.create({
+        data: {
+          accountId: opts.accountId,
+          equity: snap.equity,
+          balance: snap.balance,
+        },
+      });
+    }
   }
 
   return {
     livePositions,
     syncError: null,
     liveDailyPnl,
+    fromStateCache,
     balance: updated.balance,
     equity: updated.equity,
     lastSyncAt: updated.lastSyncAt ?? undefined,
     status: updated.status,
-    statusMessage: updated.statusMessage,
+    // Only push statusMessage when we wrote it (MetaAPI fallback path).
+    statusMessage: fromStateCache ? undefined : updated.statusMessage,
   };
 }
 
 /**
- * Fast path: DB only. Pass ?live=1 for MetaAPI snapshot (positions + equity).
+ * Fast path: DB only. Pass ?live=1 for positions + equity (state cache preferred, MetaAPI fallback).
  * ?live=1&lite=1 — light payload for heartbeat / home (no fills/snapshots history).
  * ?pnl=1 — also refresh today's PnL from MT5 deals (throttled).
  * Bot OFF여도 연결된 계좌의 열린 포지션을 표시한다.
@@ -304,6 +330,7 @@ export async function GET(req: NextRequest) {
     let livePositions: LivePos = [];
     let syncError: string | null = null;
     let liveDailyPnl: number | null = null;
+    let liveFromCache = false;
 
     if (!account.metaApiAccountId) {
       syncError = "MetaAPI에 연결된 실계좌가 없습니다.";
@@ -318,6 +345,7 @@ export async function GET(req: NextRequest) {
       livePositions = pulled.livePositions;
       syncError = pulled.syncError;
       liveDailyPnl = pulled.liveDailyPnl;
+      liveFromCache = pulled.fromStateCache;
       if (pulled.balance != null) account.balance = pulled.balance;
       if (pulled.equity != null) account.equity = pulled.equity;
       if (pulled.lastSyncAt) account.lastSyncAt = pulled.lastSyncAt;
@@ -365,6 +393,7 @@ export async function GET(req: NextRequest) {
         dailyPnl,
         baskets: account.baskets,
         livePositions,
+        liveFromCache,
         syncError:
           account.botEnabled || !syncError || isAlarmStatusMessage(syncError)
             ? null
@@ -410,6 +439,7 @@ export async function GET(req: NextRequest) {
   let livePositions: LivePos = [];
   let syncError: string | null = null;
   let liveDailyPnl: number | null = null;
+  let liveFromCache = false;
 
   if (wantLive) {
     if (!account.metaApiAccountId) {
@@ -425,6 +455,7 @@ export async function GET(req: NextRequest) {
       livePositions = pulled.livePositions;
       syncError = pulled.syncError;
       liveDailyPnl = pulled.liveDailyPnl;
+      liveFromCache = pulled.fromStateCache;
       if (pulled.balance != null) account.balance = pulled.balance;
       if (pulled.equity != null) account.equity = pulled.equity;
       if (pulled.lastSyncAt) account.lastSyncAt = pulled.lastSyncAt;
@@ -508,6 +539,7 @@ export async function GET(req: NextRequest) {
       snapshots: wantFull && fullAccount.snapshots ? [...fullAccount.snapshots].reverse() : [],
       dailyStats: account.dailyStats,
       livePositions: wantLive ? livePositions : undefined,
+      liveFromCache: wantLive ? liveFromCache : undefined,
       syncError: wantLive ? syncError : undefined,
     },
   });

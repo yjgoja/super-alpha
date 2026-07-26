@@ -2542,6 +2542,7 @@ async function runDcaTickInner(accountId: string) {
   }
 
   // Publish shared state for web UI (?live=1) — Redis/Postgres, not MetaAPI.
+  // Fail-open: always persist balance/equity even if liveState columns lag migrate.
   await setAccountLiveState({
     accountId: account.id,
     metaApiAccountId: metaId,
@@ -2557,6 +2558,9 @@ async function runDcaTickInner(accountId: string) {
   await prisma.brokerAccount.update({
     where: { id: account.id },
     data: {
+      balance: snap.balance,
+      equity: snap.equity,
+      lastSyncAt: new Date(),
       mode: "live",
       status: "connected",
       startingBalance: account.startingBalance > 0 ? account.startingBalance : snap.balance,

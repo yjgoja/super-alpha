@@ -49,6 +49,9 @@ model BrokerAccount {
   balance          Float     @default(0)
   equity           Float     @default(0)
   startingBalance  Float     @default(0)
+  /// Engine-written live snapshot for UI (positions/margin). Web reads this instead of MetaAPI.
+  liveState        Json?
+  liveStateAt      DateTime?
   tpCount          Int       @default(0)
   slCount          Int       @default(0)
   cycleCount       Int       @default(0)

@@ -30,6 +30,19 @@ export function ensureTradingSchema() {
           e instanceof Error ? e.message : e,
         );
       }
+      try {
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "BrokerAccount" ADD COLUMN IF NOT EXISTS "liveState" JSONB`,
+        );
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "BrokerAccount" ADD COLUMN IF NOT EXISTS "liveStateAt" TIMESTAMP(3)`,
+        );
+      } catch (e) {
+        console.warn(
+          "[db] ensureTradingSchema liveState",
+          e instanceof Error ? e.message : e,
+        );
+      }
     })();
   }
   return globalForPrisma.saSchemaReady;
