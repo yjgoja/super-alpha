@@ -4,7 +4,6 @@ import { dayKeySeoul } from "@/lib/day-key";
 import { ensureTradingSchema, prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
-import { runDcaTick } from "@/lib/meta-engine";
 import { syncTodayPnlFromMt5Deals } from "@/lib/mt5-pnl-sync";
 import { publicBotStatusMessage, isAlarmStatusMessage } from "@/lib/public-status";
 import { redactFillNote } from "@/lib/strategy-public";
@@ -17,8 +16,8 @@ const PNL_SYNC_MIN_MS = 60_000;
 const lastPnlSyncAt = new Map<string, number>();
 
 /**
- * Soft equity sync only — never rebuild baskets (that desynced filledLevel vs engine).
- * When bot is ON, also run one user-scoped DCA tick (supplement to GHA / local engine).
+ * Soft equity sync only — never run trading ticks from the UI.
+ * Engine (Render) owns ENTRY/DCA/TP/SL; multi-instance ticks caused soft-close storms.
  */
 export async function POST() {
   const gate = await requireApprovedUser();
@@ -54,27 +53,9 @@ export async function POST() {
     },
   });
 
-  let tick: unknown = null;
-  if (account.botEnabled && account.status !== "failed") {
-    try {
-      tick = await runDcaTick(account.id);
-    } catch (e) {
-      tick = { ok: false, error: e instanceof Error ? e.message : "tick error" };
-    }
-  }
-
-  // Tick payload can embed ROI/drop notes — never expose to end users
-  const safeTick =
-    gate.user.role === "admin"
-      ? tick
-      : tick && typeof tick === "object"
-        ? { ok: (tick as { ok?: boolean }).ok === true }
-        : null;
-
   return NextResponse.json({
     ok: true,
     at: new Date().toISOString(),
-    tick: safeTick,
   });
 }
 

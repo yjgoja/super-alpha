@@ -186,6 +186,45 @@ export async function PUT(req: Request) {
       delete body.entryCount;
     }
 
+    const direction = body.direction ?? "BUY";
+    // Open basket: freeze mid-cycle risk params (logic / lots / TP·SL / ladder).
+    // Toggles (enabled / repeat / stopOnSl / dualDirection) remain allowed.
+    const openBaskets = await prisma.basket.count({
+      where: {
+        accountId: account.id,
+        symbol: body.symbol,
+        direction,
+        status: "open",
+      },
+    });
+    let openBasketFrozen = false;
+    if (openBaskets > 0) {
+      const riskTouch =
+        (body.logic != null && isLogicId(body.logic)) ||
+        body.startLots != null ||
+        body.takeProfitPct != null ||
+        body.takeProfitUsd != null ||
+        body.stopLossPct != null ||
+        body.stopLossUsd != null ||
+        body.stopLossEnabled != null ||
+        body.entryMultiplier != null ||
+        body.entryIntervalPct != null ||
+        body.entryCount != null;
+      if (riskTouch) {
+        openBasketFrozen = true;
+        delete body.logic;
+        delete body.startLots;
+        delete body.takeProfitPct;
+        delete body.takeProfitUsd;
+        delete body.stopLossPct;
+        delete body.stopLossUsd;
+        delete body.stopLossEnabled;
+        delete body.entryMultiplier;
+        delete body.entryIntervalPct;
+        delete body.entryCount;
+      }
+    }
+
     const logic =
       body.logic && isLogicId(body.logic) ? body.logic : undefined;
     const resolvedLogic = logic ?? "dubai_bruno_313";
@@ -208,7 +247,6 @@ export async function PUT(req: Request) {
       stopLossPct: createSlPct,
     });
 
-    const direction = body.direction ?? "BUY";
     let bot = await prisma.symbolBot.upsert({
       where: {
         accountId_symbol_direction: {
@@ -330,18 +368,11 @@ export async function PUT(req: Request) {
     }
 
     let openBasketHint: string | undefined;
-    if (body.enabled === false) {
-      const open = await prisma.basket.count({
-        where: {
-          accountId: account.id,
-          symbol: bot.symbol,
-          direction: bot.direction,
-          status: "open",
-        },
-      });
-      if (open > 0) {
-        openBasketHint = "열린 포지션은 익절·손절만 계속 관리합니다 (신규·물타기 중지).";
-      }
+    if (openBasketFrozen) {
+      openBasketHint =
+        "열린 바스켓이 있어 로직·로트·TP/SL·물타기 설정 변경을 보류했습니다. 토글만 반영됩니다.";
+    } else if (body.enabled === false && openBaskets > 0) {
+      openBasketHint = "열린 포지션은 익절·손절만 계속 관리합니다 (신규·물타기 중지).";
     }
 
     return NextResponse.json({
@@ -350,6 +381,7 @@ export async function PUT(req: Request) {
         ? bot
         : redactSymbolBot(bot as unknown as Record<string, unknown>),
       ...(openBasketHint ? { note: openBasketHint } : {}),
+      ...(openBasketFrozen ? { frozen: true } : {}),
     });
   });
 }

@@ -1199,7 +1199,25 @@ function recommendedRetryMs(data: unknown): number | null {
   }
 }
 
-export function noteTradeCreditExhausted(data?: unknown) {
+async function resolveCreditAccountId(
+  metaApiAccountId: string,
+): Promise<string | undefined> {
+  try {
+    const { prisma } = await import("./db");
+    const row = await prisma.brokerAccount.findFirst({
+      where: { metaApiAccountId: String(metaApiAccountId) },
+      select: { id: true },
+    });
+    return row?.id;
+  } catch {
+    return undefined;
+  }
+}
+
+export function noteTradeCreditExhausted(
+  data?: unknown,
+  opts?: { accountId?: string },
+) {
   const fromRetry = recommendedRetryMs(data);
   const pauseMs = Math.max(
     60_000,
@@ -1214,6 +1232,28 @@ export function noteTradeCreditExhausted(data?: unknown) {
   console.warn(
     `[metaapi] trade CPU credits exhausted — pause orders ${Math.round(pauseMs / 1000)}s`,
   );
+  if (opts?.accountId) {
+    void import("./trade-guards")
+      .then(({ persistTradeCreditPause }) =>
+        persistTradeCreditPause({
+          accountId: opts.accountId!,
+          untilMs: pauseMs,
+          reason: "6h_trade_cpu",
+        }),
+      )
+      .catch(() => null);
+  }
+}
+
+/** Pull cross-process trade-credit pause written by other engine instances. */
+export async function syncTradeCreditPauseFromDb() {
+  try {
+    const { readSharedTradeCreditUntil } = await import("./trade-guards");
+    const until = await readSharedTradeCreditUntil();
+    if (until > metaApiTradeCreditUntil) metaApiTradeCreditUntil = until;
+  } catch {
+    /* ignore */
+  }
 }
 
 function accountInfoTtlMs() {
@@ -1431,12 +1471,13 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
  */
 export async function fetchSnapshot(
   metaApiAccountId: string,
-  opts?: { allowStaleMs?: number },
+  opts?: { allowStaleMs?: number; allowStaleOnRateLimit?: boolean },
 ): Promise<MetaSnap | MetaErr> {
   const id = String(metaApiAccountId);
   const floor = snapMinIntervalMs();
   const want = Math.max(0, opts?.allowStaleMs ?? 0);
   const staleMs = Math.max(floor, want || floor);
+  const allowStaleOnRateLimit = opts?.allowStaleOnRateLimit !== false;
 
   const tryStream = async (waitMs: number): Promise<MetaSnap | null> => {
     try {
@@ -1475,11 +1516,11 @@ export async function fetchSnapshot(
   if (hit?.inflight) return hit.inflight;
 
   if (metaApiRateLimited()) {
-    if (hit?.value?.ok) return hit.value;
+    if (allowStaleOnRateLimit && hit?.value?.ok) return hit.value;
     // REST paused — recover via streaming so trading continues.
     const streamSnap = await tryStream(8_000);
     if (streamSnap) return streamSnap;
-    if (hit?.value?.ok) return hit.value;
+    if (allowStaleOnRateLimit && hit?.value?.ok) return hit.value;
     return {
       ok: false,
       code: "RATE_LIMIT",
@@ -1499,7 +1540,7 @@ export async function fetchSnapshot(
       if (value.code === "RATE_LIMIT") {
         const streamSnap = await tryStream(8_000);
         if (streamSnap) return streamSnap;
-        if (prevOk) {
+        if (allowStaleOnRateLimit && prevOk) {
           snapCache.set(id, { at: prevAt, value: prevOk });
           return prevOk;
         }
@@ -1800,6 +1841,11 @@ export async function placeMarketOrder(input: {
   takeProfit?: number | null;
 }) {
   const t0 = Date.now();
+  await syncTradeCreditPauseFromDb();
+  const creditAccountId = await resolveCreditAccountId(input.metaApiAccountId);
+  const noteCredit = (data?: unknown) =>
+    noteTradeCreditExhausted(data, { accountId: creditAccountId });
+
   const brokerSym = await resolveBrokerSymbol(input.metaApiAccountId, input.symbol);
 
   // Prefer streaming trade (avoids exhausted REST /trade CPU quota).
@@ -1821,7 +1867,7 @@ export async function placeMarketOrder(input: {
     if (streamed && !streamed.ok) {
       const failRaw = streamed.message || JSON.stringify(streamed.data || "");
       if (isTradeCreditExhausted(failRaw) || isTradeCreditExhausted(streamed.data)) {
-        noteTradeCreditExhausted(streamed.data);
+        noteCredit(streamed.data);
         invalidateSnapshotCache(input.metaApiAccountId);
         return {
           ok: false as const,
@@ -1886,7 +1932,7 @@ export async function placeMarketOrder(input: {
   );
   if (res.status === 429 || isRateLimitError(res.data)) {
     if (isTradeCreditExhausted(res.data)) {
-      noteTradeCreditExhausted();
+      noteCredit();
     } else {
       for (
         let attempt = 0;
@@ -1894,7 +1940,7 @@ export async function placeMarketOrder(input: {
         attempt++
       ) {
         if (isTradeCreditExhausted(res.data)) {
-          noteTradeCreditExhausted();
+          noteCredit();
           break;
         }
         noteMetaApiRateLimit(20_000);
@@ -1906,7 +1952,7 @@ export async function placeMarketOrder(input: {
           body,
         );
       }
-      if (isTradeCreditExhausted(res.data)) noteTradeCreditExhausted();
+      if (isTradeCreditExhausted(res.data)) noteCredit();
     }
   }
 
@@ -1973,6 +2019,11 @@ export async function getSymbolTradeSpec(metaApiAccountId: string, symbol: strin
 }
 
 export async function closePosition(metaApiAccountId: string, positionId: string) {
+  await syncTradeCreditPauseFromDb();
+  const creditAccountId = await resolveCreditAccountId(metaApiAccountId);
+  const noteCredit = (data?: unknown) =>
+    noteTradeCreditExhausted(data, { accountId: creditAccountId });
+
   try {
     const { streamClosePosition } = await import("./metaapi-stream");
     const streamed = await streamClosePosition(metaApiAccountId, positionId);
@@ -2004,7 +2055,7 @@ export async function closePosition(metaApiAccountId: string, positionId: string
   });
   invalidateSnapshotCache(metaApiAccountId);
   if (res.status >= 400) {
-    if (isTradeCreditExhausted(res.data)) noteTradeCreditExhausted();
+    if (isTradeCreditExhausted(res.data)) noteCredit(res.data);
     return { ok: false as const, message: toKoreanError(res.data, "청산에 실패했습니다.") };
   }
   return { ok: true as const, via: "rest" as const };
@@ -2026,6 +2077,11 @@ export async function modifyPositionProtection(input: {
   ) {
     return { ok: false as const, message: "stopLoss/takeProfit 값이 없습니다." };
   }
+
+  await syncTradeCreditPauseFromDb();
+  const creditAccountId = await resolveCreditAccountId(input.metaApiAccountId);
+  const noteCredit = (data?: unknown) =>
+    noteTradeCreditExhausted(data, { accountId: creditAccountId });
 
   try {
     const { streamModifyPosition } = await import("./metaapi-stream");
@@ -2068,7 +2124,7 @@ export async function modifyPositionProtection(input: {
   const res = await api(base, "POST", `/users/current/accounts/${input.metaApiAccountId}/trade`, body);
   if (res.status === 429 || isRateLimitError(res.data)) {
     if (isTradeCreditExhausted(res.data)) {
-      noteTradeCreditExhausted();
+      noteCredit(res.data);
       return {
         ok: false as const,
         message: toKoreanError(res.data, "포지션 TP/SL 수정에 실패했습니다."),
@@ -2084,7 +2140,7 @@ export async function modifyPositionProtection(input: {
       body,
     );
     if (retry.status < 400) return { ok: true as const, data: retry.data, via: "rest" as const };
-    if (isTradeCreditExhausted(retry.data)) noteTradeCreditExhausted();
+    if (isTradeCreditExhausted(retry.data)) noteCredit(retry.data);
     return {
       ok: false as const,
       message: toKoreanError(retry.data, "포지션 TP/SL 수정에 실패했습니다."),

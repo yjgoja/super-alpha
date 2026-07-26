@@ -38,12 +38,20 @@ import {
   primeMetaRegionCache,
   refreshAccountRegion,
   clearMetaRegionCache,
+  metaApiTradeCreditBlocked,
+  syncTradeCreditPauseFromDb,
 } from "./metaapi";
 import { ensureTradingSchema, prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
 import { isInOpenBurstQuietPeriod, isMarketSessionBlockedError } from "./market-hours";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
 import { setAccountLiveState } from "./state-cache";
+import {
+  assertLevelNotAlreadyOpen,
+  getSharedSoftCloseCooldown,
+  persistSoftCloseCooldown,
+  positionsAreNaked,
+} from "./trade-guards";
 
 /** Soft TP market-close backoff — stops trade-API storms when market is closed. */
 const softCloseCooldown = new Map<
@@ -72,6 +80,44 @@ function noteSoftCloseBackoff(key: string, reason: string, ms: number) {
     reason,
     loggedAt: prev?.loggedAt ?? 0,
   });
+}
+
+async function noteSoftCloseBackoffShared(opts: {
+  accountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  reason: string;
+  ms: number;
+}) {
+  const key = softCloseKey(opts.accountId, opts.symbol, opts.direction);
+  noteSoftCloseBackoff(key, opts.reason, opts.ms);
+  await persistSoftCloseCooldown({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    reason: opts.reason,
+    untilMs: opts.ms,
+  });
+}
+
+async function getSoftCloseCooldownShared(opts: {
+  accountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+}) {
+  const key = softCloseKey(opts.accountId, opts.symbol, opts.direction);
+  const mem = getSoftCloseCooldown(key);
+  if (mem) return mem;
+  const shared = await getSharedSoftCloseCooldown(opts);
+  if (shared) {
+    softCloseCooldown.set(key, {
+      until: shared.until,
+      reason: shared.reason,
+      loggedAt: 0,
+    });
+    return shared;
+  }
+  return null;
 }
 
 function markSoftCloseLogged(key: string) {
@@ -658,13 +704,39 @@ async function runSoftTpCloseAttempt(opts: {
   tpPnl: { apiProfit: number; quotePnl: number; spreadCost: number; pnl: number };
 }) {
   const key = softCloseKey(opts.accountId, opts.symbol, opts.direction);
-  const cool = getSoftCloseCooldown(key);
+  const cool = await getSoftCloseCooldownShared({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+  });
   if (cool) {
     return {
       ok: true as const,
       action: "tp_await_session" as const,
       symbol: opts.symbol,
       note: cool.reason,
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      floatingPnl: opts.pnlForGuard,
+      floatingRoi: opts.floatingRoi,
+      spreadPct: opts.spr,
+    };
+  }
+
+  // Broker TP already armed — do not storm market closes (esp. when session closed).
+  if (!opts.brokerTpMissing) {
+    await noteSoftCloseBackoffShared({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      reason: "broker_tp_armed",
+      ms: 10 * 60_000,
+    });
+    return {
+      ok: true as const,
+      action: "tp_await_broker" as const,
+      symbol: opts.symbol,
+      note: "broker_tp_armed",
       tpRoi: opts.tpRoi,
       tpMoney: opts.tpMoney,
       floatingPnl: opts.pnlForGuard,
@@ -725,7 +797,13 @@ async function runSoftTpCloseAttempt(opts: {
       : opts.brokerTpMissing
         ? 45_000
         : 10 * 60_000;
-    noteSoftCloseBackoff(key, reason, backoffMs);
+    await noteSoftCloseBackoffShared({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      reason,
+      ms: backoffMs,
+    });
     await logTpMissGuard({
       accountId: opts.accountId,
       symbol: opts.symbol,
@@ -917,14 +995,10 @@ async function healGhostBaskets(
         ? Number(last.profit || 0) + Number(last.swap || 0) + Number(last.commission || 0)
         : 0;
     const reason = String(last?.reason || "").toLowerCase();
-    const kind =
-      reason.includes("sl") || reason.includes("stop")
-        ? "SL"
-        : reason.includes("tp") || reason.includes("take")
-          ? "TP"
-          : pnl >= 0
-            ? "TP"
-            : "SL";
+    const explicitSl = reason.includes("sl") || reason.includes("stop");
+    const explicitTp = reason.includes("tp") || reason.includes("take");
+    // Never infer TP from PnL sign — false reentry after lag/manual exits.
+    const kind = explicitSl ? "SL" : explicitTp ? "TP" : "GUARD";
 
     await prisma.basket.update({
       where: { id: g.id },
@@ -944,7 +1018,7 @@ async function healGhostBaskets(
         price: Number(last?.price || g.firstEntryPrice || 0),
         pnl,
         kind,
-        note: `ghost_deal|${kind}|reason=${reason || "pnl_sign"}`,
+        note: `ghost_deal|${kind}|reason=${reason || "unclassified"}`,
       },
     });
     if (kind === "TP") {
@@ -984,7 +1058,7 @@ async function healGhostBaskets(
           );
         }
       }
-    } else {
+    } else if (kind === "SL") {
       await prisma.brokerAccount.update({
         where: { id: accountId },
         data: { slCount: { increment: 1 } },
@@ -1011,6 +1085,39 @@ async function healGhostBaskets(
 /**
  * Same-tick L0 reentry after TP (broker soft/ghost or engine TP).
  */
+
+async function gateNewRiskOrder(opts: {
+  accountId: string;
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  level: number;
+  livePositions?: Array<{ takeProfit?: number; stopLoss?: number }>;
+}): Promise<{ ok: true } | { ok: false; note: string }> {
+  await syncTradeCreditPauseFromDb();
+  if (metaApiTradeCreditBlocked()) {
+    return { ok: false, note: "trade_credit_blocked" };
+  }
+  const idem = await assertLevelNotAlreadyOpen({
+    accountId: opts.accountId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    level: opts.level,
+  });
+  if (!idem.ok) return { ok: false, note: idem.reason };
+  if (opts.level > 0 && opts.livePositions && positionsAreNaked(opts.livePositions)) {
+    return { ok: false, note: "dca_blocked_naked" };
+  }
+  const fresh = await fetchSnapshot(opts.metaId, {
+    allowStaleMs: 2_500,
+    allowStaleOnRateLimit: false,
+  });
+  if (!fresh.ok) {
+    return { ok: false, note: `snap_${fresh.code}` };
+  }
+  return { ok: true };
+}
+
 async function placeTpReentry(opts: {
   accountId: string;
   metaId: string;
@@ -1042,6 +1149,19 @@ async function placeTpReentry(opts: {
 
   if (!(await canOpenNewRisk(accountId, symbol, direction))) {
     return { ok: false, error: "reentry_blocked_toggle" };
+  }
+  await syncTradeCreditPauseFromDb();
+  if (metaApiTradeCreditBlocked()) {
+    return { ok: false, error: "reentry_blocked_trade_credit" };
+  }
+  const idem = await assertLevelNotAlreadyOpen({
+    accountId,
+    symbol,
+    direction,
+    level: 0,
+  });
+  if (!idem.ok) {
+    return { ok: false, error: `reentry_idempotent:${idem.reason}` };
   }
 
   let bid = opts.bid ?? 0;
@@ -1094,7 +1214,11 @@ async function placeTpReentry(opts: {
     takeProfit: reentryPx.takeProfit,
     stopLoss: reentryPx.stopLoss,
   });
-  if (!order.ok && (reentryPx.takeProfit != null || reentryPx.stopLoss != null)) {
+  if (
+    !order.ok &&
+    (reentryPx.takeProfit != null || reentryPx.stopLoss != null) &&
+    !metaApiTradeCreditBlocked()
+  ) {
     order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
@@ -1368,12 +1492,15 @@ async function runSymbolTableDca(
 
   if (!basket && ourPositions.length > 0) {
     const first = ourPositions[0];
+    // Adopt as manageOnly L0-equivalent — do not assume N legs = filledLevel N-1
+    // (manual extras would oversize next DCA).
     basket = await prisma.basket.create({
       data: {
         accountId,
         symbol,
         direction: first.direction,
-        filledLevel: Math.max(0, ourPositions.length - 1),
+        filledLevel: 0,
+        tradingPaused: true,
         firstEntryPrice: first.price,
         status: "open",
         unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0),
@@ -1387,6 +1514,7 @@ async function runSymbolTableDca(
       },
       include: { legs: true },
     });
+    cfg = { ...cfg, manageOnly: true };
   }
 
   if (basket?.tradingPaused) {
@@ -1402,6 +1530,18 @@ async function runSymbolTableDca(
     }
     if (!(await canOpenNewRisk(accountId, symbol, direction))) {
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
+    }
+    {
+      const gate = await gateNewRiskOrder({
+        accountId,
+        metaId,
+        symbol,
+        direction,
+        level: 0,
+      });
+      if (!gate.ok) {
+        return { ok: true as const, note: gate.note, symbol };
+      }
     }
     const lots = levelLots(0);
     const entryTpPct = isBulkLogic(logic)
@@ -1445,8 +1585,12 @@ async function runSymbolTableDca(
       takeProfit: entryPx.takeProfit,
       stopLoss: entryPx.stopLoss,
     });
-    // 동봉 TP/SL 거절 시 나체 진입 후 즉시 modify (fail-closed)
-    if (!order.ok && (entryPx.takeProfit != null || entryPx.stopLoss != null)) {
+    // 동봉 TP/SL 거절 시 나체 진입 — trade credit 소진이면 나체 재시도 금지
+    if (
+      !order.ok &&
+      (entryPx.takeProfit != null || entryPx.stopLoss != null) &&
+      !metaApiTradeCreditBlocked()
+    ) {
       order = await placeMarketOrder({
         metaApiAccountId: metaId,
         symbol,
@@ -1795,6 +1939,27 @@ async function runSymbolTableDca(
       stopLossEnabled: cfg.stopLossEnabled,
     });
 
+    {
+      const gate = await gateNewRiskOrder({
+        accountId,
+        metaId,
+        symbol,
+        direction,
+        level: next,
+        livePositions: ourPositions,
+      });
+      if (!gate.ok) {
+        return {
+          ok: true as const,
+          action: "hold",
+          symbol,
+          note: gate.note,
+          filled,
+          actions,
+          spreadPct: spr,
+        };
+      }
+    }
     let order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
@@ -1804,7 +1969,11 @@ async function runSymbolTableDca(
       takeProfit: projPx.takeProfit,
       stopLoss: projPx.stopLoss,
     });
-    if (!order.ok && (projPx.takeProfit != null || projPx.stopLoss != null)) {
+    if (
+      !order.ok &&
+      (projPx.takeProfit != null || projPx.stopLoss != null) &&
+      !metaApiTradeCreditBlocked()
+    ) {
       order = await placeMarketOrder({
         metaApiAccountId: metaId,
         symbol,
@@ -2016,16 +2185,69 @@ async function runSymbolDca(
     if (!(await canOpenNewRisk(accountId, symbol, direction))) {
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
     }
+    {
+      const gate = await gateNewRiskOrder({
+        accountId,
+        metaId,
+        symbol,
+        direction,
+        level: 0,
+      });
+      if (!gate.ok) {
+        return { ok: true as const, note: gate.note, symbol };
+      }
+    }
     const lots = lotsAtLevel(cfg.startLots, cfg.entryMultiplier, 0, logic);
-    const order = await placeMarketOrder({
+    const entryTpPct = resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
+    const entrySlPct = resolveLiveStopLossPct(logic, cfg.stopLossPct);
+    const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
+    const entryLive = liveBasketTpSlUsd({
+      symbol,
+      lots,
+      avgPrice: fillPrice,
+      takeProfitPct: entryTpPct,
+      stopLossPct: entrySlPct,
+      brokerLeverage: cfg.brokerLeverage,
+    });
+    let stopsLevelPoints = 0;
+    try {
+      stopsLevelPoints = (await getSymbolTradeSpec(metaId, symbol)).stopsLevel;
+    } catch {
+      /* ignore */
+    }
+    const entryPx = previewProtectPrices({
+      symbol,
+      direction,
+      avgPrice: fillPrice,
+      lots,
+      takeProfitUsd: entryLive.takeProfitUsd,
+      stopLossUsd: cfg.stopLossEnabled ? entryLive.stopLossUsd : 0,
+      openPrices: [fillPrice],
+      stopsLevelPoints,
+    });
+    let order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
       direction,
       lots,
       comment: `SA-${logic}-L0`,
+      takeProfit: entryPx.takeProfit,
+      stopLoss: entryPx.stopLoss,
     });
+    if (
+      !order.ok &&
+      (entryPx.takeProfit != null || entryPx.stopLoss != null) &&
+      !metaApiTradeCreditBlocked()
+    ) {
+      order = await placeMarketOrder({
+        metaApiAccountId: metaId,
+        symbol,
+        direction,
+        lots,
+        comment: `SA-${logic}-L0`,
+      });
+    }
     if (!order.ok) return { ok: false as const, error: order.message, symbol };
-    const fillPrice = direction === "BUY" ? price.ask : price.bid;
     await prisma.basket.create({
       data: {
         accountId,
@@ -2053,8 +2275,8 @@ async function runSymbolDca(
       metaId,
       symbol,
       direction,
-      takeProfitPct: resolveLiveTakeProfitPct(logic, cfg.takeProfitPct),
-      stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+      takeProfitPct: entryTpPct,
+      stopLossPct: entrySlPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: cfg.brokerLeverage,
     });
@@ -2273,15 +2495,97 @@ async function runSymbolDca(
           stopLossUsd: liveUsd.stopLossUsd,
         };
       }
-      const order = await placeMarketOrder({
+      {
+        const gate = await gateNewRiskOrder({
+          accountId,
+          metaId,
+          symbol,
+          direction,
+          level: nextLevel,
+          livePositions: ourPositions,
+        });
+        if (!gate.ok) {
+          return {
+            ok: true as const,
+            action: "hold",
+            symbol,
+            note: gate.note,
+            profit,
+            floatingRoi,
+            tpMoney: liveUsd.takeProfitUsd,
+            stopLossUsd: liveUsd.stopLossUsd,
+          };
+        }
+      }
+      const estFill = mt5EntryQuote(direction, price.bid, price.ask);
+      const projLots = posVol + lots;
+      const projAvg =
+        projLots > 0
+          ? (ourPositions.reduce((s, p) => s + p.lots * p.price, 0) + lots * estFill) /
+            projLots
+          : estFill;
+      const dcaTpPct = resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
+      const dcaSlPct = resolveLiveStopLossPct(logic, cfg.stopLossPct);
+      const projLive = liveBasketTpSlUsd({
+        symbol,
+        lots: projLots,
+        avgPrice: projAvg,
+        takeProfitPct: dcaTpPct,
+        stopLossPct: dcaSlPct,
+        brokerLeverage: brokerLev,
+        brokerMarginSum: null,
+      });
+      let stopsLevelPoints = 0;
+      try {
+        stopsLevelPoints = (await getSymbolTradeSpec(metaId, symbol)).stopsLevel;
+      } catch {
+        /* ignore */
+      }
+      const projPx = previewProtectPrices({
+        symbol,
+        direction,
+        avgPrice: projAvg,
+        lots: projLots,
+        takeProfitUsd: projLive.takeProfitUsd,
+        stopLossUsd: cfg.stopLossEnabled ? projLive.stopLossUsd : 0,
+        openPrices: [...ourPositions.map((p) => p.price), estFill],
+        stopsLevelPoints,
+      });
+      await syncBrokerBasketProtection({
+        metaId,
+        symbol,
+        direction,
+        positions: ourPositions,
+        avgPrice: projAvg,
+        lots: projLots,
+        takeProfitUsd: projLive.takeProfitUsd,
+        stopLossUsd: projLive.stopLossUsd,
+        stopLossEnabled: cfg.stopLossEnabled,
+      });
+      let order = await placeMarketOrder({
         metaApiAccountId: metaId,
         symbol,
         direction,
         lots,
         comment: `SA-${logic}-L${nextLevel}`,
+        takeProfit: projPx.takeProfit,
+        stopLoss: projPx.stopLoss,
       });
+      if (
+        !order.ok &&
+        (projPx.takeProfit != null || projPx.stopLoss != null) &&
+        !metaApiTradeCreditBlocked()
+      ) {
+        order = await placeMarketOrder({
+          metaApiAccountId: metaId,
+          symbol,
+          direction,
+          lots,
+          comment: `SA-${logic}-L${nextLevel}`,
+        });
+      }
       if (!order.ok) return { ok: false as const, error: order.message, symbol };
-      const fillPrice = direction === "BUY" ? price.ask : price.bid;
+      const fillPrice = estFill;
       await prisma.basketLeg.create({
         data: { basketId: basket.id, level: nextLevel, lots, price: fillPrice },
       });
@@ -2305,8 +2609,8 @@ async function runSymbolDca(
         metaId,
         symbol,
         direction,
-        takeProfitPct: resolveLiveTakeProfitPct(logic, cfg.takeProfitPct),
-        stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
+        takeProfitPct: dcaTpPct,
+        stopLossPct: dcaSlPct,
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: brokerLev,
       });

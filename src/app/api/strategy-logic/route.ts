@@ -165,6 +165,34 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "알 수 없는 로직입니다." }, { status: 400 });
   }
 
+  const botsUsingLogic = await prisma.symbolBot.findMany({
+    where: { accountId: account.id, logic: logicId },
+    select: { symbol: true, direction: true, dualDirection: true },
+  });
+  if (botsUsingLogic.length > 0) {
+    const openOnLogic = await prisma.basket.count({
+      where: {
+        accountId: account.id,
+        status: "open",
+        OR: botsUsingLogic.flatMap((b) =>
+          b.dualDirection
+            ? [{ symbol: b.symbol }]
+            : [{ symbol: b.symbol, direction: b.direction }],
+        ),
+      },
+    });
+    if (openOnLogic > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "열린 바스켓이 있는 로직은 TP/SL·로트·회차를 변경할 수 없습니다. 청산 후 다시 시도하세요.",
+          code: "OPEN_BASKET_FROZEN",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   if (body.reset) {
     await prisma.strategyLogic.deleteMany({
       where: { accountId: account.id, logicId },

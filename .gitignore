@@ -51,3 +51,7 @@ prisma/dev.db-journal
 # local engine runtime
 /scripts/out/engine.pid
 /scripts/out/engine-heartbeat.json
+
+# local PC-transfer zips (contain .env secrets — never commit)
+/tmp/
+*.zip
