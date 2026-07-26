@@ -62,28 +62,36 @@ export default function BotPage() {
   }, [availableSymbols, addSymbol]);
 
   const load = useCallback(async () => {
-    const [botsRes, statsRes, meRes] = await Promise.all([
-      fetch("/api/symbol-bots"),
-      fetch("/api/stats?summary=1", { cache: "no-store" }),
-      fetch("/api/me"),
-    ]);
-    if (botsRes.status === 401 || statsRes.status === 401 || meRes.status === 401) {
-      window.location.href = "/login";
-      return;
+    try {
+      const [botsRes, statsRes, meRes] = await Promise.all([
+        fetch("/api/symbol-bots"),
+        fetch("/api/stats?summary=1", { cache: "no-store" }),
+        fetch("/api/me"),
+      ]);
+      if (botsRes.status === 401 || statsRes.status === 401 || meRes.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const botsData = await botsRes.json().catch(() => ({}));
+      const statsData = await statsRes.json().catch(() => ({}));
+      const me = await meRes.json().catch(() => ({}));
+      if (me.approvalStatus === "rejected") {
+        window.location.href = "/pending";
+        return;
+      }
+      setBots(Array.isArray(botsData.bots) ? botsData.bots : []);
+      setBotEnabled(!!statsData.account?.botEnabled);
+      setSkipOpenBurst(!!statsData.account?.skipOpenBurstEntries);
+      setLinked(isMt5Linked(statsData.account));
+      setApproved(me.role === "admin" || me.approvalStatus === "approved");
+      if (!botsRes.ok && !statsRes.ok) {
+        setMsg("데이터를 불러오지 못했습니다. 잠시 후 다시 시도하세요.");
+      }
+    } catch {
+      setMsg("네트워크 오류로 불러오지 못했습니다.");
+    } finally {
+      setReady(true);
     }
-    const botsData = await botsRes.json();
-    const statsData = await statsRes.json();
-    const me = await meRes.json().catch(() => ({}));
-    if (me.approvalStatus === "rejected") {
-      window.location.href = "/pending";
-      return;
-    }
-    setBots(botsData.bots || []);
-    setBotEnabled(!!statsData.account?.botEnabled);
-    setSkipOpenBurst(!!statsData.account?.skipOpenBurstEntries);
-    setLinked(isMt5Linked(statsData.account));
-    setApproved(me.role === "admin" || me.approvalStatus === "approved");
-    setReady(true);
   }, []);
 
   useEffect(() => {

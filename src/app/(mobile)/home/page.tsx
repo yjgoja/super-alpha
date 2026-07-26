@@ -42,12 +42,15 @@ export default function HomePage() {
       totalTrades?: number;
     }) {
       const rawDays: DayPnl[] = Array.isArray(pnl.days) ? pnl.days : [];
+      // Linked / known accounts always get a padded chart (zeros OK) so home never looks blank.
       const padded =
-        rawDays.length === 0 && !pnl.account ? [] : padDailyPnl(rawDays);
+        rawDays.length === 0 && !pnl.account && !linkedNow
+          ? []
+          : padDailyPnl(rawDays);
       setDays(padded);
       setTotalPnl(pnl.totalPnl || 0);
       setTotalTrades(pnl.totalTrades || 0);
-      if (pnl.account || rawDays.length > 0) setHasAccount(true);
+      if (pnl.account || rawDays.length > 0 || linkedNow) setHasAccount(true);
     }
 
     function applyStats(stats: {
@@ -71,30 +74,33 @@ export default function HomePage() {
 
     /** 1) Hero first — DB only (me + summary stats) */
     async function loadHero() {
-      const [statsRes, meRes] = await Promise.all([
-        fetch("/api/stats?summary=1", { cache: "no-store" }),
-        fetch("/api/me", { cache: "no-store" }),
-      ]);
-      if (statsRes.status === 401 || meRes.status === 401) {
-        window.location.href = "/login";
-        return;
+      try {
+        const [statsRes, meRes] = await Promise.all([
+          fetch("/api/stats?summary=1", { cache: "no-store" }),
+          fetch("/api/me", { cache: "no-store" }),
+        ]);
+        if (statsRes.status === 401 || meRes.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (meRes.status === 403) {
+          window.location.href = "/pending";
+          return;
+        }
+        const stats = await statsRes.json().catch(() => ({}));
+        const me = await meRes.json().catch(() => ({}));
+        if (stopped) return;
+        applyStats(stats);
+        setDisplayName(me.name || me.email || "");
+        linkedNow = Boolean(me.linked ?? stats.account?.metaApiAccountId);
+        setLinked(linkedNow);
+        setApprovalStatus(me.approvalStatus || "pending");
+        if (me.account?.status && !stats.account?.status) {
+          setAccountStatus(me.account.status);
+        }
+      } finally {
+        if (!stopped) setLoading(false);
       }
-      if (meRes.status === 403) {
-        window.location.href = "/pending";
-        return;
-      }
-      const stats = await statsRes.json().catch(() => ({}));
-      const me = await meRes.json().catch(() => ({}));
-      if (stopped) return;
-      applyStats(stats);
-      setDisplayName(me.name || me.email || "");
-      linkedNow = Boolean(me.linked ?? stats.account?.metaApiAccountId);
-      setLinked(linkedNow);
-      setApprovalStatus(me.approvalStatus || "pending");
-      if (me.account?.status && !stats.account?.status) {
-        setAccountStatus(me.account.status);
-      }
-      setLoading(false);
     }
 
     /** 2) Chart from DB (fast) */
@@ -133,7 +139,12 @@ export default function HomePage() {
       // Hero + chart in parallel for faster first paint
       await Promise.all([loadHero(), loadPnlFast()]);
       if (stopped) return;
-      if (linkedNow) void refreshPnlOnce();
+      // If PnL API lagged/failed but account is linked, still show zero chart frame
+      if (linkedNow) {
+        setDays((prev) => (prev.length === 0 ? padDailyPnl([]) : prev));
+        setHasAccount(true);
+        void refreshPnlOnce();
+      }
     })();
 
     // Live equity/PnL from BotHeartbeat (SSE + single MetaAPI poller)
@@ -177,7 +188,8 @@ export default function HomePage() {
     return n.toFixed(1);
   }
 
-  const showEmpty = !loading && (!hasAccount || days.length === 0);
+  // Empty only when truly unlinked — linked accounts keep the chart (incl. zero bars).
+  const showEmpty = !loading && !hasAccount && days.length === 0;
 
   return (
     <>
