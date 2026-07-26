@@ -15,37 +15,45 @@ export default function ManagePage() {
 
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/stats?summary=1", { cache: "no-store" });
-      if (res.status === 401) {
-        window.location.href = "/login";
-        return;
-      }
-      if (res.status === 403) {
-        window.location.href = "/pending";
-        return;
-      }
-      const data = await res.json();
-      if (data.role === "admin" && !data.account) {
-        window.location.href = "/admin";
-        return;
-      }
-      if (data.account) {
-        setLogin(data.account.login);
-        setServer(data.account.server);
-        setStatus(data.account.statusMessage || data.account.status);
-        setLinked(isMt5Linked(data.account));
-        setLocked(
-          !!data.account.metaApiAccountId &&
-            ["connected", "undeployed", "provisioning", "pending_registration"].includes(
-              data.account.status,
-            ),
-        );
-      } else {
-        setStatus("실계좌 연동 전");
+      try {
+        const res = await fetch("/api/stats?summary=1", { cache: "no-store" });
+        if (res.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (res.status === 403) {
+          window.location.href = "/pending";
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        // Only bounce admin when stats succeeded and there is truly no MT5 account
+        if (res.ok && data.role === "admin" && !data.account) {
+          window.location.href = "/admin";
+          return;
+        }
+        if (data.account) {
+          setLogin(data.account.login || "");
+          setServer(data.account.server || "");
+          setStatus(data.account.statusMessage || data.account.status || "");
+          setLinked(isMt5Linked(data.account));
+          setLocked(
+            !!data.account.metaApiAccountId &&
+              ["connected", "undeployed", "provisioning", "pending_registration"].includes(
+                data.account.status,
+              ),
+          );
+        } else {
+          setStatus(res.ok ? "실계좌 연동 전" : "계좌 정보를 불러오지 못했습니다");
+          setLinked(false);
+          setLocked(false);
+        }
+      } catch {
+        setStatus("계좌 정보를 불러오지 못했습니다");
         setLinked(false);
         setLocked(false);
+      } finally {
+        setLoaded(true);
       }
-      setLoaded(true);
     })();
   }, []);
 

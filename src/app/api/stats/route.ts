@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser, requireUser } from "@/lib/access";
 import { dayKeySeoul } from "@/lib/day-key";
-import { prisma } from "@/lib/db";
+import { ensureTradingSchema, prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
 import { runDcaTick } from "@/lib/meta-engine";
@@ -168,6 +168,7 @@ async function pullLiveSnapshot(opts: {
  * Bot OFF여도 연결된 계좌의 열린 포지션을 표시한다.
  */
 export async function GET(req: NextRequest) {
+  await ensureTradingSchema();
   const gate = await requireUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });

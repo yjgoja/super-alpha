@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
-import { prisma } from "@/lib/db";
+import { ensureTradingSchema, prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { isInOpenBurstQuietPeriod } from "@/lib/market-hours";
 import { ensureAccountCloudLive, ensureCloudLive } from "@/lib/metaapi";
@@ -33,6 +33,7 @@ async function findUserAccount(userId: string) {
 }
 
 export async function POST(req: Request) {
+  await ensureTradingSchema();
   const gate = await requireApprovedUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });

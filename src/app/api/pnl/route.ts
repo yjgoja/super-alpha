@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/access";
 import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "@/lib/day-key";
-import { prisma } from "@/lib/db";
+import { ensureTradingSchema, prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached } from "@/lib/metaapi";
 import { mt5DailyPnlFromDeals, mt5LifetimeClosedPnl } from "@/lib/mt5-pnl-sync";
@@ -61,10 +61,8 @@ async function pnlFromDb(account: {
     pnl: s.pnl,
     trades: (s.tpCount || 0) + (s.slCount || 0),
   }));
-  const days =
-    rawDays.length === 0 && account.equity === 0 && account.balance === 0
-      ? []
-      : padDailyPnl(rawDays, today);
+  // Always pad to a fixed window so linked accounts show the chart (zeros OK).
+  const days = padDailyPnl(rawDays, today);
   const cumulative = withCumulative(days);
 
   let totalPnl = 0;
@@ -323,6 +321,7 @@ async function pnlFromMetaApi(account: {
  * Pass ?summary=1 for totals only (mypage).
  */
 export async function GET(req: NextRequest) {
+  await ensureTradingSchema();
   const gate = await requireUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
@@ -331,9 +330,20 @@ export async function GET(req: NextRequest) {
   const wantRefresh = req.nextUrl.searchParams.get("refresh") === "1";
   const wantSummary = req.nextUrl.searchParams.get("summary") === "1";
 
+  // Explicit select — avoid 500 if a pending Prisma column is missing from DB
   const account = await prisma.brokerAccount.findFirst({
     where: { userId: gate.user.id },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      login: true,
+      balance: true,
+      equity: true,
+      startingBalance: true,
+      tpCount: true,
+      slCount: true,
+      metaApiAccountId: true,
+    },
   });
 
   if (!account) {

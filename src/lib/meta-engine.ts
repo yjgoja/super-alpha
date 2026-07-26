@@ -39,7 +39,7 @@ import {
   refreshAccountRegion,
   clearMetaRegionCache,
 } from "./metaapi";
-import { prisma } from "./db";
+import { ensureTradingSchema, prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
 import { isInOpenBurstQuietPeriod, isMarketSessionBlockedError } from "./market-hours";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
@@ -2858,6 +2858,9 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
   const { undeployIdleAccounts } = await import("./cost-optimize");
   const budgetMs = resolveTickBudgetMs(opts.budgetMs);
   const started = Date.now();
+
+  // Self-heal schema before any Prisma select that touches new columns
+  await ensureTradingSchema();
 
   if (!opts.skipIdleUndeploy) {
     try {

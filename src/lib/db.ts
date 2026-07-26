@@ -1,6 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const globalForPrisma = globalThis as unknown as {
+  prisma?: PrismaClient;
+  saSchemaReady?: Promise<void>;
+};
 
 export const prisma =
   globalForPrisma.prisma ??
@@ -9,3 +12,25 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+/**
+ * Self-heal critical columns when migrate deploy lagged behind a release.
+ * Safe / idempotent (IF NOT EXISTS).
+ */
+export function ensureTradingSchema() {
+  if (!globalForPrisma.saSchemaReady) {
+    globalForPrisma.saSchemaReady = (async () => {
+      try {
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "BrokerAccount" ADD COLUMN IF NOT EXISTS "skipOpenBurstEntries" BOOLEAN NOT NULL DEFAULT false`,
+        );
+      } catch (e) {
+        console.warn(
+          "[db] ensureTradingSchema skipOpenBurstEntries",
+          e instanceof Error ? e.message : e,
+        );
+      }
+    })();
+  }
+  return globalForPrisma.saSchemaReady;
+}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser, requireUser, requireAdmin } from "@/lib/access";
-import { prisma } from "@/lib/db";
+import { ensureTradingSchema, prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { DCA1000_DEFAULT_SL_ROI, resolveTpSlUsd } from "@/lib/dca1000";
 import {
@@ -16,25 +16,39 @@ import {
   defaultEntryMultiplier,
   getTableLevels,
   isMartinLogic,
-  resolveLiveStopLossPct,
-  resolveLiveTakeProfitPct,
   tableLogicMeta,
 } from "@/lib/table-logics";
-import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
 import { withAccountToggleLock } from "@/lib/toggle-lock";
 import type { Prisma } from "@prisma/client";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
 
 /** 313차 전체 회차(L0 포함 = 314) — 표에서 파생 (하드코딩 999 금지) */
 const DUBAI313_LEVEL_COUNT = tableLogicMeta("dubai_bruno_313").count;
 
 async function getAccount(userId: string) {
+  // Explicit select so a pending Prisma column migration cannot 500 this route
   return prisma.brokerAccount.findFirst({
     where: { userId },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      userId: true,
+      login: true,
+      status: true,
+      metaApiAccountId: true,
+      botEnabled: true,
+    },
   });
 }
 
+/**
+ * Fast read path — never run multi-pass per-bot migrations here.
+ * Those loops timed out on Vercel and left Bot page stuck on "불러오는 중…".
+ */
 export async function GET() {
+  await ensureTradingSchema();
   const gate = await requireUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
@@ -55,140 +69,6 @@ export async function GET() {
     where: { accountId: account.id },
     orderBy: [{ symbol: "asc" }, { direction: "asc" }],
   });
-
-  // Migrate removed/unknown logics → dubai_bruno_313
-  // + 레거시 alias(martin_9 등) → 정식 id, 공개 프리셋 SL/TP 동기화
-  const outdated = bots.filter((b) => {
-    const normalized = normalizeLogicId(b.logic);
-    if (b.logic !== normalized && isLogicId(normalized)) return true;
-    if (!isLogicId(b.logic)) return true;
-    const wantSl = resolveLiveStopLossPct(b.logic, b.stopLossPct);
-    const wantTp = resolveLiveTakeProfitPct(b.logic, b.takeProfitPct);
-    // custom은 저장값 유지 — 공개 프리셋만 강제 동기화
-    if (normalizeLogicId(b.logic) === "custom") return false;
-    return (
-      Math.abs(b.stopLossPct - wantSl) > 0.01 ||
-      (normalizeLogicId(b.logic).startsWith("martin_9_") &&
-        Math.abs(b.takeProfitPct - wantTp) > 0.01)
-    );
-  });
-  if (outdated.length > 0) {
-    for (const b of outdated) {
-      const nextLogic = normalizeLogicId(b.logic);
-      const logic = isLogicId(nextLogic) ? nextLogic : "dubai_bruno_313";
-      const defaults = defaultEditorPayload(logic);
-      await prisma.symbolBot.update({
-        where: { id: b.id },
-        data: {
-          logic,
-          ...(logic === "dubai_bruno_313"
-            ? {
-                entryCount: DUBAI313_LEVEL_COUNT,
-                entryMultiplier: 1,
-                stopLossPct: DCA1000_DEFAULT_SL_ROI,
-                takeProfitPct: defaults.takeProfitPct ?? 20,
-                stopLossEnabled: true,
-              }
-            : logic === "custom"
-              ? {}
-              : {
-                  stopLossPct: resolveLiveStopLossPct(logic, b.stopLossPct),
-                  takeProfitPct: resolveLiveTakeProfitPct(logic, b.takeProfitPct),
-                  stopLossEnabled: true,
-                }),
-        },
-      });
-    }
-    const legacyOverride = await prisma.strategyLogic.findUnique({
-      where: { accountId_logicId: { accountId: account.id, logicId: "dca_1000" } },
-    });
-    if (legacyOverride) {
-      const dubaiExists = await prisma.strategyLogic.findUnique({
-        where: {
-          accountId_logicId: { accountId: account.id, logicId: "dubai_bruno_313" },
-        },
-      });
-      if (dubaiExists) {
-        await prisma.strategyLogic.delete({ where: { id: legacyOverride.id } });
-      } else {
-        await prisma.strategyLogic.update({
-          where: { id: legacyOverride.id },
-          data: { logicId: "dubai_bruno_313" },
-        });
-      }
-    }
-    bots = await prisma.symbolBot.findMany({
-      where: { accountId: account.id },
-      orderBy: [{ symbol: "asc" }, { direction: "asc" }],
-    });
-  }
-
-  // 예전 가격% 저장값 → ROI% (1%가격 = 20 ROI). 손절 <10 도 구 차트%/오류값으로 간주
-  const needRoiMigrate = bots.filter(
-    (b) =>
-      (b.takeProfitPct > 0 && b.takeProfitPct <= 5) ||
-      (b.stopLossPct > 0 && b.stopLossPct < 10),
-  );
-  if (needRoiMigrate.length > 0) {
-    for (const b of needRoiMigrate) {
-      const tp =
-        b.takeProfitPct > 0 && b.takeProfitPct <= 5
-          ? Math.round(b.takeProfitPct * 20 * 100) / 100
-          : b.takeProfitPct;
-      const sl =
-        b.stopLossPct > 0 && b.stopLossPct < 10
-          ? Math.max(DCA1000_DEFAULT_SL_ROI, Math.round(b.stopLossPct * 20 * 100) / 100)
-          : b.stopLossPct > 0
-            ? b.stopLossPct
-            : DCA1000_DEFAULT_SL_ROI;
-      await prisma.symbolBot.update({
-        where: { id: b.id },
-        data: { takeProfitPct: tp, stopLossPct: sl, stopLossEnabled: sl > 0 },
-      });
-    }
-    bots = await prisma.symbolBot.findMany({
-      where: { accountId: account.id },
-      orderBy: [{ symbol: "asc" }, { direction: "asc" }],
-    });
-  }
-
-  // 라이브 스케일: L0 미리보기$ = pct 파생 (익절·손절 모두 마진×ROI%, 바이낸스식).
-  // 미기입·구 차트방어$(마진ROI보다 훨씬 큼)이면 재계산.
-  const needUsdMigrate = bots.filter((b) => {
-    const m = resolveTpSlUsd({
-      symbol: b.symbol,
-      startLots: b.startLots,
-      takeProfitPct: b.takeProfitPct > 0 ? b.takeProfitPct : 20,
-      stopLossPct: b.stopLossPct >= 10 ? b.stopLossPct : DCA1000_DEFAULT_SL_ROI,
-    });
-    if (!(b.takeProfitUsd > 0) || !(b.stopLossUsd > 0)) return true;
-    // 구 차트방어$: 마진×SL% 대비 2배 이상이면 재계산
-    return b.stopLossUsd > m.stopLossUsd * 2;
-  });
-  if (needUsdMigrate.length > 0) {
-    for (const b of needUsdMigrate) {
-      const slPct = b.stopLossPct >= 10 ? b.stopLossPct : DCA1000_DEFAULT_SL_ROI;
-      const usd = resolveTpSlUsd({
-        symbol: b.symbol,
-        startLots: b.startLots,
-        takeProfitPct: b.takeProfitPct > 0 ? b.takeProfitPct : 20,
-        stopLossPct: slPct,
-      });
-      await prisma.symbolBot.update({
-        where: { id: b.id },
-        data: {
-          takeProfitUsd: usd.takeProfitUsd,
-          stopLossUsd: usd.stopLossUsd,
-          stopLossPct: slPct,
-          stopLossEnabled: true,
-        },
-      });
-    }
-    bots = await prisma.symbolBot.findMany({
-      where: { accountId: account.id },
-      orderBy: [{ symbol: "asc" }, { direction: "asc" }],
-    });
-  }
 
   if (bots.length === 0) {
     const eur = resolveTpSlUsd({
@@ -236,6 +116,7 @@ export async function GET() {
   const admin = await requireAdmin();
   const isAdmin = !!admin.user;
 
+  // Fast list payload only — never resolve full DCA tables here (timed out for admin).
   return NextResponse.json({
     bots: isAdmin ? bots : bots.map((b) => redactSymbolBot(b as unknown as Record<string, unknown>)),
     options: {
@@ -243,24 +124,6 @@ export async function GET() {
       groups: SYMBOL_GROUPS,
       logics: publicLogicOptions(),
     },
-    // Full DCA tables only for admin — never ship to end users / client bundle consumers
-    ...(isAdmin
-      ? {
-          logicLevels: Object.fromEntries(
-            await Promise.all(
-              [...new Set(bots.map((b) => b.logic))].map(async (logic) => {
-                const resolved = await resolveStrategyForAccount(account.id, logic, {
-                  startLots: bots.find((x) => x.logic === logic)?.startLots ?? 0.01,
-                  entryMultiplier:
-                    bots.find((x) => x.logic === logic)?.entryMultiplier ??
-                    defaultEntryMultiplier(logic),
-                });
-                return [logic, resolved.levels] as const;
-              }),
-            ),
-          ),
-        }
-      : {}),
   });
 }
 
