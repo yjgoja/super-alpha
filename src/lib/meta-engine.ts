@@ -44,10 +44,11 @@ import {
 import { ensureTradingSchema, prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
 import {
+  isFxMarketClosed,
+  isFxMarketOpen,
   isInOpenBurstQuietPeriod,
   isMarketSessionBlockedError,
   isSessionTradeBackoffReason,
-  isWeeklyMarketClosed,
 } from "./market-hours";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
 import { setAccountLiveState } from "./state-cache";
@@ -660,15 +661,16 @@ async function runSoftSlCloseAttempt(opts: {
   if (cool && isSessionTradeBackoffReason(cool.reason)) {
     return { ok: true, awaitSession: true, note: cool.reason };
   }
-  if (isWeeklyMarketClosed()) {
+  // 폐장: 시장가 손절 금지 → 브로커 SL. 장중만 아래 시장가 청산.
+  if (isFxMarketClosed()) {
     await noteSessionTradeBackoff({
       accountId: opts.accountId,
       symbol: opts.symbol,
       direction: opts.direction,
-      reason: "weekly_closed_await_broker_sl",
+      reason: "fx_closed_await_broker_sl",
       ms: 30 * 60_000,
     });
-    return { ok: true, awaitSession: true, note: "weekly_closed" };
+    return { ok: true, awaitSession: true, note: "fx_market_closed" };
   }
 
   let slClose = await closePositionsBySymbolDirection(
@@ -814,20 +816,20 @@ async function runSoftTpCloseAttempt(opts: {
     };
   }
 
-  // Weekly FX close — cannot market-close; rely on broker-side TP until reopen.
-  if (isWeeklyMarketClosed()) {
+  // ── 폐장: 시장가 익절 금지, 브로커 TP만. ──
+  if (isFxMarketClosed()) {
     await noteSoftCloseBackoffShared({
       accountId: opts.accountId,
       symbol: opts.symbol,
       direction: opts.direction,
-      reason: "weekly_closed_await_broker_tp",
+      reason: "fx_closed_await_broker_tp",
       ms: 30 * 60_000,
     });
     return {
       ok: true as const,
       action: "tp_await_session" as const,
       symbol: opts.symbol,
-      note: "weekly_closed",
+      note: "fx_market_closed",
       tpRoi: opts.tpRoi,
       tpMoney: opts.tpMoney,
       floatingPnl: opts.pnlForGuard,
@@ -836,8 +838,22 @@ async function runSoftTpCloseAttempt(opts: {
     };
   }
 
-  // Open session: margin-ROI TP must market-close even when broker TP is armed.
-  // Broker TP can be clamped past the lowest DCA leg (farther than ~0.04% / 20% ROI).
+  // ── 장중: 마진 ROI TP면 시장가 익절 (브로커 TP 유무와 무관). ──
+  // 브로커 TP는 물타기 클램프 때문에 ROI(~0.04%)보다 멀 수 있음.
+  if (!isFxMarketOpen()) {
+    // defensive — getFxMarketSession closed/open are complements
+    return {
+      ok: true as const,
+      action: "tp_await_session" as const,
+      symbol: opts.symbol,
+      note: "fx_market_closed",
+      tpRoi: opts.tpRoi,
+      tpMoney: opts.tpMoney,
+      floatingPnl: opts.pnlForGuard,
+      floatingRoi: opts.floatingRoi,
+      spreadPct: opts.spr,
+    };
+  }
 
   if (opts.brokerTpMissing) {
     await logTpMissGuard({
@@ -961,8 +977,8 @@ async function canOpenNewRisk(
   symbol: string,
   direction: "BUY" | "SELL",
 ) {
-  // Weekend / weekly FX close — 0 MetaAPI cost. TP/SL manage paths do not call this.
-  if (isWeeklyMarketClosed()) return false;
+  // 폐장: 신규·물타기·재진입 금지 (0 MetaAPI). TP/SL 관리 경로는 이 함수를 안 탐.
+  if (isFxMarketClosed()) return false;
   const [account, bots] = await Promise.all([
     prisma.brokerAccount.findUnique({
       where: { id: accountId },
@@ -1207,8 +1223,9 @@ async function gateNewRiskOrder(opts: {
   level: number;
   livePositions?: Array<{ takeProfit?: number; stopLoss?: number }>;
 }): Promise<{ ok: true } | { ok: false; note: string }> {
-  if (isWeeklyMarketClosed()) {
-    return { ok: false, note: "weekly_market_closed" };
+  // 폐장: ENTRY/DCA 게이트 차단 (장중만 통과)
+  if (isFxMarketClosed()) {
+    return { ok: false, note: "fx_market_closed" };
   }
   const sessionCool = await getSoftCloseCooldownShared({
     accountId: opts.accountId,
@@ -2907,9 +2924,9 @@ async function runDcaTickInner(accountId: string) {
   if (!masterOn && !hasOpenBaskets) {
     return { skipped: true as const, reason: "bot_off" };
   }
-  // Weekly FX close + flat — no ENTRY possible; skip MetaAPI entirely.
-  if (isWeeklyMarketClosed() && !hasOpenBaskets) {
-    return { skipped: true as const, reason: "weekly_market_closed" };
+  // 폐장 + 평탄: MetaAPI 스냅 자체 생략
+  if (isFxMarketClosed() && !hasOpenBaskets) {
+    return { skipped: true as const, reason: "fx_market_closed" };
   }
   // Bot ON + cloud cold: recover here too (not only in runAllBots).
   // Previously status==="undeployed" skipped the whole tick → trading looked "stopped".
@@ -2918,8 +2935,8 @@ async function runDcaTickInner(accountId: string) {
   }
 
   const metaId = account.metaApiAccountId;
-  // Open baskets on weekend: monitor slowly (broker TP/SL still armed). Flat already skipped above.
-  const snapStaleMs = isWeeklyMarketClosed()
+  // 폐장+열린바스켓: 감시만 느리게 (브로커 TP/SL 유지). 장중은 정상 주기.
+  const snapStaleMs = isFxMarketClosed()
     ? Math.max(60_000, Number(process.env.ENGINE_SNAP_STALE_CLOSED_MS || 120_000))
     : Math.max(8_000, Number(process.env.ENGINE_SNAP_STALE_MS || 15_000));
   let snap = await fetchSnapshot(metaId, { allowStaleMs: snapStaleMs });

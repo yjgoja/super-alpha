@@ -54,18 +54,91 @@ export function isInOpenBurstQuietPeriod(d: Date = new Date()): {
   return { active: false, label: null, endsInMin: null };
 }
 
+/** Friday UTC hour when FX/CFD weekly session ends (default 21). */
+export function fxFridayCloseUtcHour() {
+  const n = Number(process.env.FX_SESSION_CLOSE_UTC_HOUR ?? 21);
+  return Number.isFinite(n) ? Math.min(23, Math.max(0, Math.floor(n))) : 21;
+}
+
+/** Sunday UTC hour when FX/CFD weekly session reopens (default 22). */
+export function fxSundayOpenUtcHour() {
+  const n = Number(process.env.FX_SESSION_OPEN_UTC_HOUR ?? 22);
+  return Number.isFinite(n) ? Math.min(23, Math.max(0, Math.floor(n))) : 22;
+}
+
+export type FxSessionPhase =
+  | "open"
+  | "friday_closed"
+  | "saturday_closed"
+  | "sunday_preopen";
+
+export type FxMarketSession = {
+  /** 장중 = 시장가 주문·ROI soft TP/SL 허용 */
+  open: boolean;
+  /** 폐장 = 신규·물타기·시장가 청산 금지, 브로커 TP/SL만 */
+  closed: boolean;
+  phase: FxSessionPhase;
+  reason: string;
+};
+
 /**
- * Rough FX/CFD weekly closure (UTC) — Fri ≥21:00 → Sun <22:00, all Saturday.
- * Broker holiday edges still confirmed via isMarketSessionBlockedError after a trade fail.
- * Pure Date check — 0 MetaAPI credits.
+ * ZeroMarkets / 일반 FX·XAU 주간 세션 (UTC).
+ * - 장중: Sun openHour ~ Fri closeHour
+ * - 폐장: Fri closeHour → Sat 종일 → Sun openHour 직전
+ *
+ * 브로커 공휴일/일시 차단은 isMarketSessionBlockedError 로 사후 확인.
  */
-export function isWeeklyMarketClosed(d: Date = new Date()): boolean {
+export function getFxMarketSession(d: Date = new Date()): FxMarketSession {
   const day = d.getUTCDay(); // 0 Sun .. 6 Sat
   const h = d.getUTCHours();
-  if (day === 6) return true; // Saturday
-  if (day === 0 && h < 22) return true; // Sunday before ~22:00 UTC reopen
-  if (day === 5 && h >= 21) return true; // Friday after ~21:00 UTC close
-  return false;
+  const closeH = fxFridayCloseUtcHour();
+  const openH = fxSundayOpenUtcHour();
+
+  if (day === 6) {
+    return {
+      open: false,
+      closed: true,
+      phase: "saturday_closed",
+      reason: "폐장(토요일)",
+    };
+  }
+  if (day === 5 && h >= closeH) {
+    return {
+      open: false,
+      closed: true,
+      phase: "friday_closed",
+      reason: `폐장(금요일 UTC ${closeH}:00~)`,
+    };
+  }
+  if (day === 0 && h < openH) {
+    return {
+      open: false,
+      closed: true,
+      phase: "sunday_preopen",
+      reason: `폐장(일요일 UTC ${openH}:00 개장 전)`,
+    };
+  }
+  return {
+    open: true,
+    closed: false,
+    phase: "open",
+    reason: "장중",
+  };
+}
+
+/** 장중 — 시장가 ENTRY/DCA/ROI soft TP·SL 가능 */
+export function isFxMarketOpen(d: Date = new Date()): boolean {
+  return getFxMarketSession(d).open;
+}
+
+/** 폐장 — 신규 리스크·시장가 청산 금지 */
+export function isFxMarketClosed(d: Date = new Date()): boolean {
+  return getFxMarketSession(d).closed;
+}
+
+/** @deprecated use isFxMarketClosed */
+export function isWeeklyMarketClosed(d: Date = new Date()): boolean {
+  return isFxMarketClosed(d);
 }
 
 /** MetaAPI / broker errors that mean market session cannot trade (close/entry). */
@@ -90,5 +163,7 @@ export function isMarketSessionBlockedError(msg: unknown): boolean {
 
 /** Soft-close / entry backoff reasons that mean "do not spend trade credits". */
 export function isSessionTradeBackoffReason(reason: string): boolean {
-  return /market_closed|weekly_closed|session_closed/.test(reason || "");
+  return /market_closed|weekly_closed|session_closed|fx_closed|폐장/.test(
+    reason || "",
+  );
 }
