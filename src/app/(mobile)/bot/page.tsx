@@ -457,16 +457,6 @@ export default function BotPage() {
             </div>
           ) : null}
           <TradingViewSymbolChart symbol={chartSymbol} height={300} interval="5" />
-          <p
-            style={{
-              margin: "0.55rem 0 0",
-              fontSize: "0.7rem",
-              color: "var(--muted)",
-              lineHeight: 1.4,
-            }}
-          >
-            참고용 시세입니다. Zero Markets 체결가와 다를 수 있습니다.
-          </p>
         </section>
       ) : null}
 
