@@ -14,12 +14,27 @@ export const maxDuration = 60;
 const PNL_REFRESH_MIN_MS = 10 * 60_000;
 const lastPnlRefreshAt = new Map<string, number>();
 
+export type PnlCloseRow = {
+  id: string;
+  symbol: string;
+  side: string;
+  lots: number;
+  pnl: number;
+  kind: string;
+  createdAt: string;
+};
+
 type PnlJson = {
   days: ReturnType<typeof padDailyPnl>;
   cumulative: ReturnType<typeof withCumulative>;
   totalPnl: number;
   totalTrades: number;
   source: string;
+  /** Today's closed TP/SL for win-rate ring */
+  todayTp: number;
+  todaySl: number;
+  closes: PnlCloseRow[];
+  lastSyncAt?: string | null;
   account?: {
     login: string;
     equity: number;
@@ -35,7 +50,70 @@ function emptyPnl(): PnlJson {
     totalPnl: 0,
     totalTrades: 0,
     source: "none",
+    todayTp: 0,
+    todaySl: 0,
+    closes: [],
+    lastSyncAt: null,
   };
+}
+
+async function loadHomeCloseExtras(accountId: string, lastSyncAt?: Date | null) {
+  const todayStart = seoulDayStartUtc(dayKeySeoul());
+  const [closes, todayCloses] = await Promise.all([
+    prisma.fill.findMany({
+      where: { accountId, kind: { in: ["TP", "SL"] } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: {
+        id: true,
+        symbol: true,
+        side: true,
+        lots: true,
+        pnl: true,
+        kind: true,
+        createdAt: true,
+      },
+    }),
+    prisma.fill.findMany({
+      where: {
+        accountId,
+        kind: { in: ["TP", "SL"] },
+        createdAt: { gte: todayStart },
+      },
+      select: { kind: true },
+    }),
+  ]);
+
+  let todayTp = 0;
+  let todaySl = 0;
+  for (const f of todayCloses) {
+    if (f.kind === "TP") todayTp += 1;
+    else if (f.kind === "SL") todaySl += 1;
+  }
+
+  return {
+    todayTp,
+    todaySl,
+    closes: closes.map((f) => ({
+      id: f.id,
+      symbol: f.symbol,
+      side: f.side,
+      lots: f.lots,
+      pnl: f.pnl,
+      kind: f.kind,
+      createdAt: f.createdAt.toISOString(),
+    })),
+    lastSyncAt: lastSyncAt ? lastSyncAt.toISOString() : null,
+  };
+}
+
+async function withCloseExtras(
+  base: Omit<PnlJson, "todayTp" | "todaySl" | "closes" | "lastSyncAt">,
+  accountId: string,
+  lastSyncAt?: Date | null,
+): Promise<PnlJson> {
+  const extras = await loadHomeCloseExtras(accountId, lastSyncAt);
+  return { ...base, ...extras };
 }
 
 /** DB-only — home first paint (no MetaAPI) */
@@ -47,14 +125,18 @@ async function pnlFromDb(account: {
   startingBalance: number;
   tpCount: number;
   slCount: number;
+  lastSyncAt?: Date | null;
 }): Promise<PnlJson> {
   const today = dayKeySeoul();
   const sinceKey = addSeoulDays(today, -14);
-  const stats = await prisma.dailyStat.findMany({
-    where: { accountId: account.id, date: { gte: sinceKey } },
-    orderBy: { date: "asc" },
-    select: { date: true, pnl: true, tpCount: true, slCount: true },
-  });
+  const [stats, extras] = await Promise.all([
+    prisma.dailyStat.findMany({
+      where: { accountId: account.id, date: { gte: sinceKey } },
+      orderBy: { date: "asc" },
+      select: { date: true, pnl: true, tpCount: true, slCount: true },
+    }),
+    loadHomeCloseExtras(account.id, account.lastSyncAt),
+  ]);
 
   const rawDays = stats.map((s) => ({
     date: s.date,
@@ -85,6 +167,7 @@ async function pnlFromDb(account: {
     totalPnl,
     totalTrades,
     source,
+    ...extras,
     account: {
       login: account.login,
       equity: account.equity,
@@ -104,6 +187,7 @@ async function pnlFromMetaApi(account: {
   metaApiAccountId: string | null;
   tpCount: number;
   slCount: number;
+  lastSyncAt?: Date | null;
 }): Promise<PnlJson> {
   let balance = account.balance;
   let equity = account.equity;
@@ -168,19 +252,23 @@ async function pnlFromMetaApi(account: {
           data: { balance, equity, lastSyncAt: new Date() },
         });
       }
-      return {
-        days,
-        cumulative,
-        totalPnl,
-        totalTrades: totalTrades || account.tpCount + account.slCount,
-        source,
-        account: {
-          login: account.login,
-          equity,
-          balance,
-          startingBalance,
+      return withCloseExtras(
+        {
+          days,
+          cumulative,
+          totalPnl,
+          totalTrades: totalTrades || account.tpCount + account.slCount,
+          source,
+          account: {
+            login: account.login,
+            equity,
+            balance,
+            startingBalance,
+          },
         },
-      };
+        account.id,
+        new Date(),
+      );
     }
 
     // Uncalibrated: lighter lifetime window (90d) + 14d daily
@@ -248,19 +336,23 @@ async function pnlFromMetaApi(account: {
     }
 
     if (life.ok) {
-      return {
-        days,
-        cumulative,
-        totalPnl,
-        totalTrades,
-        source,
-        account: {
-          login: account.login,
-          equity,
-          balance,
-          startingBalance,
+      return withCloseExtras(
+        {
+          days,
+          cumulative,
+          totalPnl,
+          totalTrades,
+          source,
+          account: {
+            login: account.login,
+            equity,
+            balance,
+            startingBalance,
+          },
         },
-      };
+        account.id,
+        new Date(),
+      );
     }
   }
 
@@ -300,19 +392,23 @@ async function pnlFromMetaApi(account: {
   cumulative = withCumulative(days);
   if (!totalTrades) totalTrades = fills.length;
 
-  return {
-    days,
-    cumulative,
-    totalPnl,
-    totalTrades,
-    source,
-    account: {
-      login: account.login,
-      equity,
-      balance,
-      startingBalance,
+  return withCloseExtras(
+    {
+      days,
+      cumulative,
+      totalPnl,
+      totalTrades,
+      source,
+      account: {
+        login: account.login,
+        equity,
+        balance,
+        startingBalance,
+      },
     },
-  };
+    account.id,
+    new Date(),
+  );
 }
 
 /**
@@ -357,8 +453,11 @@ export async function GET(req: NextRequest) {
       totalTrades: db.totalTrades,
       source: db.source,
       account: db.account,
+      todayTp: db.todayTp,
+      todaySl: db.todaySl,
       days: [],
       cumulative: [],
+      closes: [],
     });
   }
 

@@ -4,7 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { AccountLinkBadge } from "@/components/ConnectPrompt";
 import { SharePnlSheet } from "@/components/SharePnlSheet";
 import { subscribeLive } from "@/lib/live-bus";
-import { padDailyPnl, withCumulative, type DayPnl } from "@/lib/pnl-period";
+import { padDailyPnl, type DayPnl } from "@/lib/pnl-period";
+
+type CloseRow = {
+  id: string;
+  symbol: string;
+  side: string;
+  lots: number;
+  pnl: number;
+  kind: string;
+  createdAt: string;
+};
 
 function fmt(n: number) {
   return n.toLocaleString("en-US", {
@@ -13,23 +23,68 @@ function fmt(n: number) {
   });
 }
 
-/** SuperMeta-style Home: Trading PNL chart + period table */
+function fmtPct(n: number) {
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}%`;
+}
+
+function fmtUsdSigned(n: number) {
+  const sign = n > 0 ? "+" : n < 0 ? "" : "";
+  return `${sign}$${fmt(n)}`;
+}
+
+function relTimeKo(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간 전`;
+  const d = Math.floor(h / 24);
+  return `${d}일 전`;
+}
+
+function syncLabel(syncAgeSec: number | null) {
+  if (syncAgeSec == null) return "실체결 기준";
+  if (syncAgeSec < 5) return "실체결 기준 · 방금";
+  if (syncAgeSec < 60) return `실체결 기준 · 지연 ${syncAgeSec}초`;
+  const m = Math.floor(syncAgeSec / 60);
+  return `실체결 기준 · 지연 ${m}분`;
+}
+
+function todayKeyLocal() {
+  // Display date for cert card — Seoul-ish via toLocale (UI only)
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/** Home — Concept B: 수익 인증 장부 (green/red PnL, SA logo) */
 export default function HomePage() {
-  const [mode, setMode] = useState<"daily" | "cum">("daily");
   const [days, setDays] = useState<DayPnl[]>([]);
-  const [totalPnl, setTotalPnl] = useState(0);
-  const [totalTrades, setTotalTrades] = useState(0);
+  const [closes, setCloses] = useState<CloseRow[]>([]);
+  const [todayTp, setTodayTp] = useState(0);
+  const [todaySl, setTodaySl] = useState(0);
   const [equity, setEquity] = useState(0);
   const [dailyPnl, setDailyPnl] = useState(0);
   const [dailyReturnPct, setDailyReturnPct] = useState(0);
   const [shareOpen, setShareOpen] = useState(false);
-  const [tip, setTip] = useState<{ date: string; pnl: number } | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasAccount, setHasAccount] = useState(true);
   const [displayName, setDisplayName] = useState("");
   const [linked, setLinked] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string>("approved");
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
+  const [syncAgeSec, setSyncAgeSec] = useState<number | null>(null);
 
   useEffect(() => {
     let stopped = false;
@@ -38,8 +93,10 @@ export default function HomePage() {
     function applyPnl(pnl: {
       days?: DayPnl[];
       account?: unknown;
-      totalPnl?: number;
-      totalTrades?: number;
+      closes?: CloseRow[];
+      todayTp?: number;
+      todaySl?: number;
+      lastSyncAt?: string | null;
     }) {
       const rawDays: DayPnl[] = Array.isArray(pnl.days) ? pnl.days : [];
       // Linked / known accounts always get a padded chart (zeros OK) so home never looks blank.
@@ -48,8 +105,19 @@ export default function HomePage() {
           ? []
           : padDailyPnl(rawDays);
       setDays(padded);
-      setTotalPnl(pnl.totalPnl || 0);
-      setTotalTrades(pnl.totalTrades || 0);
+      if (padded.length) {
+        setSelectedDay((prev) => prev || padded[padded.length - 1]?.date || null);
+      }
+      setCloses(Array.isArray(pnl.closes) ? pnl.closes : []);
+      setTodayTp(Number(pnl.todayTp) || 0);
+      setTodaySl(Number(pnl.todaySl) || 0);
+      if (pnl.lastSyncAt) {
+        const age = Math.max(
+          0,
+          Math.floor((Date.now() - Date.parse(pnl.lastSyncAt)) / 1000),
+        );
+        setSyncAgeSec(age);
+      }
       if (pnl.account || rawDays.length > 0 || linkedNow) setHasAccount(true);
     }
 
@@ -58,9 +126,9 @@ export default function HomePage() {
         equity?: number;
         dailyPnl?: number;
         dailyReturnPct?: number;
-        totalReturnPct?: number;
         status?: string;
         metaApiAccountId?: string | null;
+        syncAgeSec?: number | null;
       } | null;
     }) {
       if (!stats.account) return;
@@ -68,11 +136,13 @@ export default function HomePage() {
       setDailyPnl(stats.account.dailyPnl || 0);
       setDailyReturnPct(Number(stats.account.dailyReturnPct) || 0);
       setAccountStatus(stats.account.status || null);
+      if (typeof stats.account.syncAgeSec === "number") {
+        setSyncAgeSec(stats.account.syncAgeSec);
+      }
       setHasAccount(true);
       if (stats.account.metaApiAccountId) linkedNow = true;
     }
 
-    /** 1) Hero first — DB only (me + summary stats) */
     async function loadHero() {
       try {
         const [statsRes, meRes] = await Promise.all([
@@ -103,7 +173,6 @@ export default function HomePage() {
       }
     }
 
-    /** 2) Chart from DB (fast) */
     async function loadPnlFast() {
       try {
         const res = await fetch("/api/pnl", { cache: "no-store" });
@@ -118,7 +187,6 @@ export default function HomePage() {
       }
     }
 
-    /** One-shot chart/history sync from MetaAPI (background, ≤1 / 15min / tab) */
     async function refreshPnlOnce() {
       if (stopped || !linkedNow) return;
       try {
@@ -136,7 +204,6 @@ export default function HomePage() {
     }
 
     (async () => {
-      // Hero + chart in parallel for faster first paint
       await Promise.all([loadHero(), loadPnlFast()]);
       if (stopped) return;
       // If PnL API lagged/failed but account is linked, still show zero chart frame
@@ -147,7 +214,6 @@ export default function HomePage() {
       }
     })();
 
-    // Live equity/PnL from BotHeartbeat (SSE + single MetaAPI poller)
     const unsub = subscribeLive((detail) => {
       if (stopped || !detail.account) return;
       applyStats({ account: detail.account });
@@ -161,40 +227,24 @@ export default function HomePage() {
     };
   }, []);
 
-  const cumulative = useMemo(() => withCumulative(days), [days]);
+  const todayCloses = todayTp + todaySl;
+  const winRate = todayCloses > 0 ? (todayTp / todayCloses) * 100 : null;
+  const pnlPos = dailyPnl >= 0;
+  const certDate = todayKeyLocal().replace(/-/g, ".");
 
-  const chart = useMemo(() => {
-    if (mode === "daily") {
-      return days.map((d) => ({ date: d.date, value: d.pnl, trades: d.trades }));
-    }
-    return cumulative.map((d) => ({ date: d.date, value: d.pnl, trades: d.trades }));
-  }, [mode, days, cumulative]);
+  const ring = useMemo(() => {
+    const r = 36;
+    const c = 2 * Math.PI * r;
+    const pct = winRate == null ? 0 : Math.min(100, Math.max(0, winRate));
+    return { r, c, offset: c * (1 - pct / 100), pct };
+  }, [winRate]);
 
-  const maxAbs = Math.max(1, ...chart.map((c) => Math.abs(c.value)));
-  const yMax = Math.ceil(maxAbs * 10) / 10;
-  const yTicks = [yMax, yMax * (2 / 3), yMax / 3, 0].map((v) =>
-    Math.round(v * 10) / 10,
-  );
-  const tableRows =
-    mode === "daily"
-      ? days
-      : cumulative.map((c) => ({
-          date: c.date,
-          pnl: c.pnl,
-          trades: c.trades,
-        }));
-
-  function fmtAxis(n: number) {
-    return n.toFixed(1);
-  }
-
-  // Empty only when truly unlinked — linked accounts keep the chart (incl. zero bars).
-  const showEmpty = !loading && !hasAccount && days.length === 0;
+  const selected = days.find((d) => d.date === selectedDay) || days[days.length - 1];
 
   return (
     <>
-      <header className="m-topbar sm-home-top">
-        <div className="sm-brand">
+      <header className="m-topbar sa-home-top">
+        <div className="sa-home-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/brand/sa-logo.png"
@@ -214,49 +264,90 @@ export default function HomePage() {
                   />
                 </>
               ) : (
-                "트레이딩 PNL"
+                "수익 인증"
               )}
             </div>
           </div>
         </div>
+        <div
+          className={`sa-home-stamp${linked ? " is-on" : ""}`}
+          title={linked ? "실계좌 연동됨" : "실계좌 미연동"}
+        >
+          {linked ? "실계좌 연동" : "미연동"}
+        </div>
       </header>
 
-      <section className="m-card sm-hero sa-rise" style={{ marginBottom: "0.85rem" }}>
-        <div className="sm-hero-top">
-          <div>
-            <div className="sm-hero-label">평가금액</div>
-            <div className="sm-hero-equity">${fmt(equity)}</div>
+      <section className="sa-home-today sa-rise">
+        <div className="sa-home-today-left">
+          <div className="sa-home-k">오늘</div>
+          <div className={pnlPos ? "m-pnl-pos sa-home-pct" : "m-pnl-neg sa-home-pct"}>
+            {fmtPct(dailyReturnPct)}
           </div>
-          <button
-            type="button"
-            className="sm-share-btn"
-            disabled={loading || !hasAccount}
-            onClick={() => setShareOpen(true)}
-          >
-            공유
-          </button>
+          <div className={pnlPos ? "m-pnl-pos sa-home-usd" : "m-pnl-neg sa-home-usd"}>
+            {fmtUsdSigned(dailyPnl)}
+          </div>
         </div>
-        <div className="sm-hero-row">
-          <div>
-            <div className="sm-hero-k">오늘 손익</div>
-            <div className={dailyPnl >= 0 ? "m-pnl-pos" : "m-pnl-neg"}>
-              {dailyPnl >= 0 ? "+" : ""}
-              {fmt(dailyPnl)}
+        <div className="sa-home-ring-wrap" aria-label="오늘 승률">
+          <svg className="sa-home-ring" viewBox="0 0 88 88" width="88" height="88">
+            <circle
+              cx="44"
+              cy="44"
+              r={ring.r}
+              fill="none"
+              stroke="rgba(255,255,255,0.08)"
+              strokeWidth="7"
+            />
+            <circle
+              cx="44"
+              cy="44"
+              r={ring.r}
+              fill="none"
+              stroke="var(--gold)"
+              strokeWidth="7"
+              strokeLinecap="round"
+              strokeDasharray={ring.c}
+              strokeDashoffset={ring.offset}
+              transform="rotate(-90 44 44)"
+            />
+          </svg>
+          <div className="sa-home-ring-label">
+            <div className="sa-home-ring-title">승률</div>
+            <div className="sa-home-ring-val">
+              {winRate == null ? "—" : `${Math.round(winRate)}%`}
+            </div>
+            <div className="sa-home-ring-sub">
+              {todayCloses > 0 ? `${todayTp} / ${todayCloses}` : "청산 없음"}
             </div>
           </div>
-          <div>
-            <div className="sm-hero-k">누적 손익</div>
-            <div className={totalPnl >= 0 ? "m-pnl-pos" : "m-pnl-neg"}>
-              {totalPnl >= 0 ? "+" : ""}
-              {fmt(totalPnl)}
-            </div>
-          </div>
-          <div>
-            <div className="sm-hero-k">거래 건수</div>
-            <div style={{ fontWeight: 700 }}>{totalTrades} 건</div>
-          </div>
+          <div className="sa-home-equity">평가 ${fmt(equity)}</div>
         </div>
       </section>
+
+      <button
+        type="button"
+        className="sa-home-cert"
+        disabled={loading || !hasAccount}
+        onClick={() => setShareOpen(true)}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/sa-logo.png"
+          alt=""
+          className="sa-home-cert-mark"
+          aria-hidden
+        />
+        <div className="sa-home-cert-body">
+          <div className="sa-home-cert-eyebrow">수익 인증 카드</div>
+          <div className="sa-home-cert-date">{certDate}</div>
+          <div className={pnlPos ? "m-pnl-pos sa-home-cert-pct" : "m-pnl-neg sa-home-cert-pct"}>
+            {fmtPct(dailyReturnPct)}
+          </div>
+          <div className={pnlPos ? "m-pnl-pos sa-home-cert-usd" : "m-pnl-neg sa-home-cert-usd"}>
+            {fmtUsdSigned(dailyPnl)}
+          </div>
+        </div>
+        <span className="sa-home-cert-share">공유하기</span>
+      </button>
 
       <SharePnlSheet
         open={shareOpen}
@@ -264,137 +355,85 @@ export default function HomePage() {
         today={{ returnPct: dailyReturnPct, pnlUsd: dailyPnl }}
       />
 
-      <div className="m-seg" style={{ marginBottom: "0.85rem" }}>
-        <button
-          type="button"
-          className={mode === "daily" ? "is-on" : ""}
-          onClick={() => {
-            setMode("daily");
-            setTip(null);
-          }}
-        >
-          일별 손익
-        </button>
-        <button
-          type="button"
-          className={mode === "cum" ? "is-on" : ""}
-          onClick={() => {
-            setMode("cum");
-            setTip(null);
-          }}
-        >
-          누적 손익
-        </button>
-      </div>
-
-      <section className="m-card" style={{ marginBottom: "0.85rem", minHeight: 210 }}>
+      <section className="sa-home-days">
+        <h2 className="sa-home-sec-title">일자별 흐름</h2>
         {loading ? (
-          <p style={{ color: "var(--muted)", textAlign: "center", padding: "3rem 0" }}>
-            불러오는 중…
-          </p>
-        ) : showEmpty ? (
-          <p
-            style={{
-              color: "var(--muted)",
-              textAlign: "center",
-              padding: "3rem 0",
-              fontSize: "0.9rem",
-            }}
-          >
-            최근 거래 데이터가 없습니다.
-          </p>
+          <p className="sa-home-empty">불러오는 중…</p>
+        ) : days.length === 0 ? (
+          <p className="sa-home-empty">최근 거래 데이터가 없습니다.</p>
         ) : (
-          <>
-            {tip && (
-              <div className="sm-chart-tip">
-                <div style={{ color: "var(--muted)" }}>날짜 {tip.date}</div>
-                <div
-                  className={tip.pnl >= 0 ? "m-pnl-pos" : "m-pnl-neg"}
-                  style={{ marginTop: "0.15rem" }}
+          <div className="sa-home-day-scroll">
+            {days.map((d) => {
+              const empty = d.trades === 0 && d.pnl === 0;
+              const on = d.date === (selected?.date || selectedDay);
+              const pos = d.pnl > 0;
+              const neg = d.pnl < 0;
+              return (
+                <button
+                  key={d.date}
+                  type="button"
+                  className={`sa-home-day-tile${on ? " is-on" : ""}`}
+                  onClick={() => setSelectedDay(d.date)}
                 >
-                  손익 {tip.pnl >= 0 ? "+" : ""}
-                  {fmt(tip.pnl)} USD
-                </div>
-              </div>
-            )}
-            <div className="m-chart-frame">
-              <div className="m-chart-yaxis" aria-hidden>
-                {yTicks.map((t, i) => (
-                  <span key={`${t}-${i}`}>{fmtAxis(t)}</span>
-                ))}
-              </div>
-              <div className="m-chart-plot">
-                <div className="m-chart-grid" aria-hidden>
-                  {yTicks.map((t, i) => (
-                    <div key={`g-${t}-${i}`} className="m-chart-grid-line" />
-                  ))}
-                </div>
-                <div className="m-chart">
-                  {chart.map((c) => {
-                    const isZero = c.value === 0;
-                    const h = isZero ? 6 : Math.max(8, (Math.abs(c.value) / yMax) * 132);
-                    return (
-                      <button
-                        key={c.date}
-                        type="button"
-                        className="m-chart-bar-wrap"
-                        style={{
-                          background: "transparent",
-                          border: 0,
-                          cursor: "pointer",
-                          color: "inherit",
-                          padding: 0,
-                        }}
-                        onClick={() => setTip({ date: c.date, pnl: c.value })}
-                      >
-                        <div
-                          className={`m-chart-bar${c.value < 0 ? " is-neg" : ""}${isZero ? " is-zero" : ""}`}
-                          style={{ height: h }}
-                          title={`${c.date}: ${c.value}`}
-                        />
-                        <span className="m-chart-label">{c.date.slice(5)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </>
+                  <span className="sa-home-day-mmdd">{d.date.slice(5)}</span>
+                  <span
+                    className={
+                      empty
+                        ? "sa-home-day-dash"
+                        : pos
+                          ? "m-pnl-pos"
+                          : neg
+                            ? "m-pnl-neg"
+                            : "sa-home-day-dash"
+                    }
+                  >
+                    {empty
+                      ? "—"
+                      : `${d.pnl > 0 ? "+" : ""}$${fmt(d.pnl)}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {selected && selected.trades > 0 && (
+          <p className="sa-home-day-hint">
+            {selected.date} · 청산 {selected.trades}건 ·{" "}
+            <span className={selected.pnl >= 0 ? "m-pnl-pos" : "m-pnl-neg"}>
+              {fmtUsdSigned(selected.pnl)}
+            </span>
+          </p>
         )}
       </section>
 
-      <section>
-        <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.55rem" }}>기간별 손익</h2>
-        <div className="m-card" style={{ padding: "0.35rem 0.65rem 0.15rem" }}>
-          <table className="m-table">
-            <thead>
-              <tr>
-                <th>날짜</th>
-                <th>{mode === "daily" ? "손익" : "누적"}</th>
-                <th>거래 건수</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...tableRows].reverse().map((row) => (
-                <tr key={row.date}>
-                  <td style={{ color: "#aeb8c6" }}>{row.date}</td>
-                  <td className={row.pnl >= 0 ? "m-pnl-pos" : "m-pnl-neg"}>
-                    {row.pnl >= 0 ? "+" : ""}
-                    {fmt(row.pnl)}
-                  </td>
-                  <td>{row.trades}</td>
-                </tr>
-              ))}
-              {!loading && tableRows.length === 0 && (
-                <tr>
-                  <td colSpan={3} style={{ color: "var(--muted)", padding: "1.5rem" }}>
-                    데이터 없음
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      <section className="sa-home-closes">
+        <h2 className="sa-home-sec-title">청산 기록</h2>
+        <div className="sa-home-close-list">
+          {closes.length === 0 && !loading && (
+            <p className="sa-home-empty">청산 기록이 없습니다.</p>
+          )}
+          {closes.map((f) => {
+            const isTp = f.kind === "TP";
+            const pos = f.pnl >= 0;
+            return (
+              <div key={f.id} className="sa-home-close-row">
+                <span className={`sa-home-close-badge${isTp ? " is-tp" : " is-sl"}`}>
+                  {isTp ? "TP" : "SL"}
+                </span>
+                <div className="sa-home-close-main">
+                  <div className="sa-home-close-sym">{f.symbol}</div>
+                  <div className="sa-home-close-meta">
+                    {f.side} {f.lots.toFixed(2)} · {relTimeKo(f.createdAt)}
+                  </div>
+                </div>
+                <div className={pos ? "m-pnl-pos" : "m-pnl-neg"}>
+                  {fmtUsdSigned(f.pnl)}
+                </div>
+              </div>
+            );
+          })}
         </div>
+        <p className="sa-home-footnote">MetaAPI {syncLabel(syncAgeSec)}</p>
       </section>
     </>
   );

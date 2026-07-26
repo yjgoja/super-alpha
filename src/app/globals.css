@@ -823,7 +823,339 @@ a {
   line-height: 1.45;
 }
 
-/* —— SuperMeta-style Home —— */
+/* —— Home Concept B (수익 인증 장부) —— */
+.sa-home-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.5rem;
+}
+
+.sa-home-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.sa-home-stamp {
+  flex-shrink: 0;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.sa-home-stamp.is-on {
+  border-color: rgba(232, 195, 106, 0.55);
+  color: var(--gold);
+  background: rgba(232, 195, 106, 0.08);
+}
+
+.sa-home-today {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding: 1rem 0.15rem 0.35rem;
+}
+
+.sa-home-today-left {
+  min-width: 0;
+  flex: 1;
+}
+
+.sa-home-k {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.sa-home-pct {
+  font-size: 2.35rem;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.sa-home-usd {
+  margin-top: 0.25rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.sa-home-ring-wrap {
+  position: relative;
+  width: 88px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.sa-home-ring {
+  display: block;
+}
+
+.sa-home-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding-bottom: 0.1rem;
+}
+
+.sa-home-ring-title {
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.sa-home-ring-val {
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.sa-home-ring-sub {
+  font-size: 0.58rem;
+  color: var(--muted);
+  margin-top: 0.05rem;
+}
+
+.sa-home-equity {
+  margin-top: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.sa-home-cert {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: 1rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(232, 195, 106, 0.42);
+  background:
+    radial-gradient(90% 120% at 0% 0%, rgba(232, 195, 106, 0.12), transparent 55%),
+    linear-gradient(165deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(232, 195, 106, 0.08);
+}
+
+.sa-home-cert:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sa-home-cert:not(:disabled):active {
+  transform: scale(0.985);
+}
+
+.sa-home-cert-mark {
+  position: absolute;
+  right: 12%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 72px;
+  height: auto;
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+.sa-home-cert-body {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.sa-home-cert-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--gold);
+  letter-spacing: 0.04em;
+}
+
+.sa-home-cert-date {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.sa-home-cert-pct {
+  margin-top: 0.35rem;
+  font-size: 1.45rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.sa-home-cert-usd {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.sa-home-cert-share {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--gold);
+  padding: 0.45rem 0.2rem;
+}
+
+.sa-home-sec-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.sa-home-days {
+  margin-bottom: 1.1rem;
+}
+
+.sa-home-day-scroll {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.15rem 0.1rem 0.35rem;
+  scrollbar-width: thin;
+}
+
+.sa-home-day-tile {
+  flex: 0 0 auto;
+  width: 4.35rem;
+  padding: 0.55rem 0.35rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sa-home-day-tile.is-on {
+  border-color: rgba(232, 195, 106, 0.65);
+  background: rgba(232, 195, 106, 0.08);
+  box-shadow: 0 0 0 1px rgba(232, 195, 106, 0.15);
+}
+
+.sa-home-day-mmdd {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.sa-home-day-dash {
+  font-size: 0.85rem;
+  color: #6b7380;
+  font-weight: 600;
+}
+
+.sa-home-day-tile .m-pnl-pos,
+.sa-home-day-tile .m-pnl-neg {
+  font-size: 0.78rem;
+}
+
+.sa-home-day-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.sa-home-closes {
+  margin-bottom: 1.5rem;
+}
+
+.sa-home-close-list {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.sa-home-close-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sa-home-close-row:last-child {
+  border-bottom: 0;
+}
+
+.sa-home-close-badge {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.sa-home-close-badge.is-tp {
+  background: rgba(93, 222, 165, 0.16);
+  color: var(--ok);
+}
+
+.sa-home-close-badge.is-sl {
+  background: rgba(255, 107, 122, 0.16);
+  color: var(--danger);
+}
+
+.sa-home-close-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sa-home-close-sym {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.sa-home-close-meta {
+  margin-top: 0.12rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.sa-home-empty {
+  margin: 0;
+  padding: 1.25rem 0.25rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.sa-home-footnote {
+  margin: 0.55rem 0 0;
+  font-size: 0.68rem;
+  color: #7a8494;
+  text-align: center;
+}
+
+/* —— Legacy SuperMeta-style Home bits (shared logo / landing) —— */
 .sm-home-top {
   padding-bottom: 0.5rem;
 }

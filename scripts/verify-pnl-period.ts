@@ -1,40 +1,48 @@
 /**
- * Local check: padDailyPnl always returns 5 consecutive KST days with zeros.
+ * Local check: padDailyPnl always returns 7 consecutive KST days with zeros.
  * Run: npx tsx scripts/verify-pnl-period.ts
  */
 import { dayKeySeoul } from "../src/lib/day-key";
-import { lastKstDayKeys, padDailyPnl, withCumulative } from "../src/lib/pnl-period";
+import {
+  lastKstDayKeys,
+  padDailyPnl,
+  withCumulative,
+  PNL_DAY_COUNT,
+} from "../src/lib/pnl-period";
 
 const today = dayKeySeoul();
-const expected = lastKstDayKeys(today, 5);
+const expected = lastKstDayKeys(today, PNL_DAY_COUNT);
 
-// Simulate prod bug: only Jul 15–16 have fills
+// Simulate sparse fills on last two days
 const sparse = [
-  { date: expected[3], pnl: 12.5, trades: 2 },
-  { date: expected[4], pnl: -3.1, trades: 1 },
+  { date: expected[PNL_DAY_COUNT - 2], pnl: 12.5, trades: 2 },
+  { date: expected[PNL_DAY_COUNT - 1], pnl: -3.1, trades: 1 },
 ];
 
 const days = padDailyPnl(sparse, today);
 const cum = withCumulative(days);
 
-if (days.length !== 5) {
-  console.error("FAIL: expected 5 days, got", days.length);
+if (days.length !== PNL_DAY_COUNT) {
+  console.error("FAIL: expected", PNL_DAY_COUNT, "days, got", days.length);
   process.exit(1);
 }
 if (days.map((d) => d.date).join(",") !== expected.join(",")) {
   console.error("FAIL: dates", days.map((d) => d.date), "expected", expected);
   process.exit(1);
 }
-for (let i = 0; i < 3; i++) {
+for (let i = 0; i < PNL_DAY_COUNT - 2; i++) {
   if (days[i].pnl !== 0 || days[i].trades !== 0) {
     console.error("FAIL: early days must be zero", days[i]);
     process.exit(1);
   }
 }
-if (cum.length !== 5) {
+if (cum.length !== PNL_DAY_COUNT) {
   console.error("FAIL: cumulative length", cum.length);
   process.exit(1);
 }
 
-console.log("OK last 5 KST days:", days.map((d) => `${d.date}=${d.pnl}`).join(" | "));
+console.log(
+  `OK last ${PNL_DAY_COUNT} KST days:`,
+  days.map((d) => `${d.date}=${d.pnl}`).join(" | "),
+);
 console.log("today:", today);

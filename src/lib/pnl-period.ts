@@ -1,7 +1,7 @@
 import { addSeoulDays, dayKeySeoul } from "@/lib/day-key";
 
-/** Home chart / period table always shows this many consecutive KST days. */
-export const PNL_DAY_COUNT = 5;
+/** Home day tiles always show this many consecutive KST days. */
+export const PNL_DAY_COUNT = 7;
 
 export type DayPnl = { date: string; pnl: number; trades: number };
 
