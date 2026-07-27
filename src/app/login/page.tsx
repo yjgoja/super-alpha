@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { resolvePostLoginPath } from "@/lib/post-login";
+
+const REMEMBER_KEY = "sa_remember_me";
 
 function LoginForm() {
   const router = useRouter();
@@ -12,6 +14,7 @@ function LoginForm() {
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
   const [info, setInfo] = useState(
     params.get("verified") === "1"
@@ -21,16 +24,32 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [unverified, setUnverified] = useState(false);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(REMEMBER_KEY);
+      if (saved === "0") setRememberMe(false);
+      if (saved === "1") setRememberMe(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
     setInfo("");
     setUnverified(false);
+    try {
+      localStorage.setItem(REMEMBER_KEY, rememberMe ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
     const res = await fetch("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, mode }),
+      credentials: "same-origin",
+      body: JSON.stringify({ email, password, mode, rememberMe }),
     });
     const data = await res.json();
     setLoading(false);
@@ -63,6 +82,7 @@ function LoginForm() {
     const res = await fetch("/api/auth/resend-verification", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
@@ -115,11 +135,29 @@ function LoginForm() {
               type="password"
               required
               minLength={8}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="8자 이상"
             />
           </div>
+          {mode === "login" ? (
+            <label
+              className="flex cursor-pointer items-center gap-2.5 select-none"
+              style={{ color: "var(--ink)" }}
+            >
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                style={{ width: 18, height: 18, accentColor: "var(--gold)" }}
+              />
+              <span style={{ fontSize: "0.92rem", fontWeight: 600 }}>자동 로그인</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                (90일간 로그인 유지)
+              </span>
+            </label>
+          ) : null}
         </div>
 
         {info && <p className="mt-4 text-sm text-[var(--ok,#5ddea5)]">{info}</p>}

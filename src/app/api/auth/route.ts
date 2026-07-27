@@ -34,6 +34,8 @@ const schema = z.object({
     .max(72),
   name: z.string().trim().max(60).optional(),
   mode: z.enum(["login", "register"]),
+  /** 자동 로그인(로그인 유지). 기본 true */
+  rememberMe: z.boolean().optional(),
 });
 
 async function issueVerification(userId: string, email: string) {
@@ -58,6 +60,7 @@ export async function POST(req: Request) {
     }
     const body = parsed.data;
     const email = body.email.toLowerCase();
+    const rememberMe = body.rememberMe !== false;
 
     if (body.mode === "register") {
       const emailOk = z.string().email().safeParse(email).success;
@@ -139,7 +142,7 @@ export async function POST(req: Request) {
       }
 
       // Admin: session immediately
-      const token = await createSessionToken(user.id);
+      const token = await createSessionToken(user.id, { rememberMe: true });
       return withSessionCookie(
         NextResponse.json({
           ok: true,
@@ -149,6 +152,7 @@ export async function POST(req: Request) {
           hasBrokerAccount: false,
         }),
         token,
+        { rememberMe: true },
       );
     }
 
@@ -186,7 +190,7 @@ export async function POST(req: Request) {
         { status: 403 },
       );
     }
-    const token = await createSessionToken(user.id);
+    const token = await createSessionToken(user.id, { rememberMe });
     return withSessionCookie(
       NextResponse.json({
         ok: true,
@@ -196,6 +200,7 @@ export async function POST(req: Request) {
         hasBrokerAccount: user._count.accounts > 0,
       }),
       token,
+      { rememberMe },
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "요청 오류";

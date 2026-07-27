@@ -5,6 +5,11 @@ import { NextResponse } from "next/server";
 
 export const SESSION_COOKIE = "sa_session";
 
+/** Short session (browser close may clear). */
+export const SESSION_MAX_AGE_SEC = 60 * 60 * 12; // 12h
+/** Remember-me / 자동로그인 */
+export const REMEMBER_MAX_AGE_SEC = 60 * 60 * 24 * 90; // 90d
+
 function secret() {
   const s = process.env.AUTH_SECRET;
   if (!s || s.length < 16) {
@@ -16,14 +21,19 @@ function secret() {
   return new TextEncoder().encode(s || "super-alpha-demo-secret-change-me");
 }
 
-export const cookieOptions = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-  maxAge: 60 * 60 * 24 * 30,
-};
-
+export function cookieOptions(opts?: { rememberMe?: boolean }) {
+  const remember = opts?.rememberMe !== false;
+  const maxAge = remember ? REMEMBER_MAX_AGE_SEC : SESSION_MAX_AGE_SEC;
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge,
+    // Some mobile browsers honor expires more reliably than maxAge alone.
+    expires: new Date(Date.now() + maxAge * 1000),
+  };
+}
 export async function hashPassword(password: string) {
   return bcrypt.hash(password, 12);
 }
@@ -43,22 +53,34 @@ export async function verifyPassword(password: string, hash: string) {
   }
 }
 
-export async function createSessionToken(userId: string) {
-  return new SignJWT({ sub: userId })
+export async function createSessionToken(
+  userId: string,
+  opts?: { rememberMe?: boolean },
+) {
+  const remember = opts?.rememberMe !== false;
+  return new SignJWT({ sub: userId, rm: remember ? 1 : 0 })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("30d")
+    .setExpirationTime(remember ? "90d" : "12h")
     .sign(secret());
 }
 
 /** Attach session cookie to an API response (required on Vercel/Next Route Handlers). */
-export function withSessionCookie(res: NextResponse, token: string) {
-  res.cookies.set(SESSION_COOKIE, token, cookieOptions);
+export function withSessionCookie(
+  res: NextResponse,
+  token: string,
+  opts?: { rememberMe?: boolean },
+) {
+  res.cookies.set(SESSION_COOKIE, token, cookieOptions(opts));
   return res;
 }
 
 export function clearSessionCookie(res: NextResponse) {
-  res.cookies.set(SESSION_COOKIE, "", { ...cookieOptions, maxAge: 0 });
+  res.cookies.set(SESSION_COOKIE, "", {
+    ...cookieOptions({ rememberMe: true }),
+    maxAge: 0,
+    expires: new Date(0),
+  });
   return res;
 }
 
