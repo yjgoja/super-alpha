@@ -1,7 +1,7 @@
 /**
  * MetaAPI cloud — provision, deploy/undeploy, sync, trade.
- * Defaults to cloud-g1 + regular (works without high-reliability top-up).
- * Falls back automatically if a preferred mode fails.
+ * Default provision: cloud-g2 + high (g2 has no regular); optional METAAPI_FORCE_G1.
+ * Prefer streaming for prices/snaps; REST is throttled (dedicated FE ~10x helps fallback).
  */
 import fs from "fs";
 import path from "path";
@@ -1152,23 +1152,81 @@ const accountInfoCache = new Map<
     login: string;
   }
 >();
-/** Global pause after 429 — stop REST burn until retry time. */
+/**
+ * Soft global pause after 429 — dampens REST storms across accounts.
+ * Kept short so one account cannot black out stream-capable peers.
+ */
 let metaApiRateLimitUntil = 0;
+/** Per-account REST pause — isolates 429 blast radius. */
+const metaApiAccountRateLimitUntil = new Map<string, number>();
 /** Separate pause when /trade 6h CPU credits are exhausted (retries only worsen it). */
 let metaApiTradeCreditUntil = 0;
 
-export function metaApiRateLimited(): boolean {
-  return Date.now() < metaApiRateLimitUntil;
+/**
+ * REST gate. With accountId: true if that account OR soft-global is paused.
+ * Without accountId: soft-global only (legacy callers).
+ * Streaming paths must NOT use this to skip local terminalState reads.
+ */
+export function metaApiRateLimited(metaApiAccountId?: string): boolean {
+  const now = Date.now();
+  if (now < metaApiRateLimitUntil) return true;
+  if (metaApiAccountId) {
+    const until = metaApiAccountRateLimitUntil.get(String(metaApiAccountId)) || 0;
+    return now < until;
+  }
+  return false;
 }
 
 export function metaApiTradeCreditBlocked(): boolean {
   return Date.now() < metaApiTradeCreditUntil;
 }
 
-export function noteMetaApiRateLimit(retryAfterMs = 60_000) {
-  // Cap pause so trading/stream recovery is not blocked for many minutes.
-  const until = Date.now() + Math.max(10_000, Math.min(retryAfterMs, 90_000));
-  if (until > metaApiRateLimitUntil) metaApiRateLimitUntil = until;
+/**
+ * Record a MetaAPI REST/RPC 429.
+ * Prefer passing metaApiAccountId so other accounts keep trading via stream.
+ */
+export function noteMetaApiRateLimit(
+  retryAfterMs = 60_000,
+  metaApiAccountId?: string,
+) {
+  const accountPauseMs = Math.max(10_000, Math.min(retryAfterMs, 90_000));
+  const accountUntil = Date.now() + accountPauseMs;
+  if (metaApiAccountId) {
+    const id = String(metaApiAccountId);
+    const prev = metaApiAccountRateLimitUntil.get(id) || 0;
+    if (accountUntil > prev) metaApiAccountRateLimitUntil.set(id, accountUntil);
+    // Soft global dampener only (dedicated FE + stream serve other accounts).
+    const softMs = Math.max(5_000, Math.min(20_000, Math.floor(accountPauseMs / 4)));
+    const softUntil = Date.now() + softMs;
+    if (softUntil > metaApiRateLimitUntil) metaApiRateLimitUntil = softUntil;
+    return;
+  }
+  if (accountUntil > metaApiRateLimitUntil) metaApiRateLimitUntil = accountUntil;
+}
+
+/**
+ * When false, skip REST current-price (stream / cache only).
+ * Render ENGINE_MODE=direct defaults off — stream pool is warmed.
+ * Set METAAPI_PRICE_REST=1 to force REST fallback (emergency).
+ */
+export function priceRestFallbackAllowed(): boolean {
+  const v = (process.env.METAAPI_PRICE_REST ?? "").trim().toLowerCase();
+  if (v === "0" || v === "false" || v === "off") return false;
+  if (v === "1" || v === "true" || v === "on") return true;
+  if ((process.env.ENGINE_MODE || "").trim() === "direct") return false;
+  return true;
+}
+
+function priceStreamWaitMs() {
+  const n = Number(process.env.METAAPI_PRICE_STREAM_WAIT_MS || 10_000);
+  if (!Number.isFinite(n)) return 10_000;
+  return Math.max(2_000, Math.min(20_000, Math.floor(n)));
+}
+
+/** Test/ops helper — clear rate-limit pauses (does not touch trade-credit pause). */
+export function clearMetaApiRateLimitState() {
+  metaApiRateLimitUntil = 0;
+  metaApiAccountRateLimitUntil.clear();
 }
 
 function isTradeCreditExhausted(data: unknown): boolean {
@@ -1288,7 +1346,7 @@ export function invalidateSnapshotCache(metaApiAccountId?: string) {
 
 async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap | MetaErr> {
   const id = String(metaApiAccountId);
-  if (metaApiRateLimited()) {
+  if (metaApiRateLimited(id)) {
     const hit = snapCache.get(id)?.value;
     if (hit?.ok) return hit;
     return {
@@ -1325,7 +1383,7 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
       lastStatus = posRes.status;
       lastBody = posRes.data;
       if (posRes.status === 429) {
-        noteMetaApiRateLimit(120_000);
+        noteMetaApiRateLimit(120_000, id);
         return {
           ok: false,
           code: "RATE_LIMIT",
@@ -1359,7 +1417,7 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
     lastStatus = infoRes.status;
     lastBody = infoRes.data;
     if (infoRes.status === 429 || posRes.status === 429) {
-      noteMetaApiRateLimit(120_000);
+      noteMetaApiRateLimit(120_000, id);
       return {
         ok: false,
         code: "RATE_LIMIT",
@@ -1385,7 +1443,7 @@ async function fetchSnapshotUncached(metaApiAccountId: string): Promise<MetaSnap
 
   if (!info) {
     if (lastStatus === 429) {
-      noteMetaApiRateLimit(120_000);
+      noteMetaApiRateLimit(120_000, id);
       return {
         ok: false,
         code: "RATE_LIMIT",
@@ -1515,7 +1573,7 @@ export async function fetchSnapshot(
   if (hit?.value?.ok && Date.now() - hit.at < staleMs) return hit.value;
   if (hit?.inflight) return hit.inflight;
 
-  if (metaApiRateLimited()) {
+  if (metaApiRateLimited(id)) {
     if (allowStaleOnRateLimit && hit?.value?.ok) return hit.value;
     // REST paused — recover via streaming so trading continues.
     const streamSnap = await tryStream(8_000);
@@ -1589,7 +1647,7 @@ export async function fetchSnapshotCached(metaApiAccountId: string): Promise<Met
   if (hit?.value?.ok && Date.now() - hit.at < ttl) return hit.value;
   if (hit?.inflight) return hit.inflight;
 
-  if (metaApiRateLimited()) {
+  if (metaApiRateLimited(id)) {
     if (hit?.value?.ok) return hit.value;
     return {
       ok: false,
@@ -1676,7 +1734,7 @@ export async function listBrokerSymbols(metaApiAccountId: string): Promise<strin
     /* fall through */
   }
 
-  if (metaApiRateLimited()) return cached?.symbols || [];
+  if (metaApiRateLimited(metaApiAccountId)) return cached?.symbols || [];
 
   const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
   const preferred = clientApiBases(region).slice(0, 1);
@@ -1689,7 +1747,7 @@ export async function listBrokerSymbols(metaApiAccountId: string): Promise<strin
       `/users/current/accounts/${metaApiAccountId}/symbols`,
     );
     if (res.status === 429) {
-      noteMetaApiRateLimit(120_000);
+      noteMetaApiRateLimit(120_000, metaApiAccountId);
       return cached?.symbols || [];
     }
     if (res.status < 400 && Array.isArray(res.data)) {
@@ -1716,7 +1774,11 @@ export async function resolveBrokerSymbol(metaApiAccountId: string, logical: str
   // Stream price proves the broker symbol without REST /symbols (500 credits).
   try {
     const { waitForStreamPrice } = await import("./metaapi-stream");
-    const priced = await waitForStreamPrice(metaApiAccountId, aliases, 6_000);
+    const priced = await waitForStreamPrice(
+      metaApiAccountId,
+      aliases,
+      priceStreamWaitMs(),
+    );
     if (priced) {
       brokerSymbolCache.set(key, priced.symbol);
       return priced.symbol;
@@ -1742,15 +1804,18 @@ export async function resolveBrokerSymbol(metaApiAccountId: string, logical: str
     }
   }
 
-  for (const alias of aliases) {
-    const price = await getSymbolPriceRaw(metaApiAccountId, alias);
-    if (price && price.bid > 0 && price.ask > 0) {
-      brokerSymbolCache.set(key, alias);
-      return alias;
+  // Only probe aliases when REST price is allowed (or stream already tried above).
+  if (priceRestFallbackAllowed() && !metaApiRateLimited(metaApiAccountId)) {
+    for (const alias of aliases) {
+      const price = await getSymbolPriceRaw(metaApiAccountId, alias);
+      if (price && price.bid > 0 && price.ask > 0) {
+        brokerSymbolCache.set(key, alias);
+        return alias;
+      }
     }
   }
 
-  brokerSymbolCache.set(key, logical);
+  // Do NOT cache unproven logical names (XAUUSD when broker needs GOLD poisons ticks).
   return logical;
 }
 
@@ -1761,20 +1826,26 @@ async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
     const { waitForStreamPrice, readStreamPrice } = await import("./metaapi-stream");
     const quick = readStreamPrice(metaApiAccountId, symbol);
     if (quick) return quick;
-    const waited = await waitForStreamPrice(metaApiAccountId, [symbol], 5_000);
+    const waited = await waitForStreamPrice(
+      metaApiAccountId,
+      [symbol],
+      Math.min(8_000, priceStreamWaitMs()),
+    );
     if (waited) return { bid: waited.bid, ask: waited.ask };
   } catch {
     /* ignore */
   }
-  if (metaApiRateLimited()) {
-    const hit = priceCache.get(`${metaApiAccountId}|${symbol}`);
-    if (hit) return { bid: hit.bid, ask: hit.ask };
-    return null;
-  }
+
   const cacheKey = `${metaApiAccountId}|${symbol}`;
   const cached = priceCache.get(cacheKey);
   if (cached && Date.now() - cached.at < priceCacheTtlMs()) {
     return { bid: cached.bid, ask: cached.ask };
+  }
+
+  // Fail-closed: no REST price when stream engine / RATE_LIMIT / PRICE_REST=0.
+  if (metaApiRateLimited(metaApiAccountId) || !priceRestFallbackAllowed()) {
+    if (cached) return { bid: cached.bid, ask: cached.ask };
+    return null;
   }
 
   const region = await resolveAccountRegion(metaApiAccountId).catch(() => null);
@@ -1788,7 +1859,7 @@ async function getSymbolPriceRaw(metaApiAccountId: string, symbol: string) {
       `/users/current/accounts/${metaApiAccountId}/symbols/${encodeURIComponent(symbol)}/current-price?keepSubscription=true`,
     );
     if (res.status === 429) {
-      noteMetaApiRateLimit(120_000);
+      noteMetaApiRateLimit(120_000, metaApiAccountId);
       return cached ? { bid: cached.bid, ask: cached.ask } : null;
     }
     if (res.status < 400 && res.data && typeof res.data === "object") {
@@ -1810,7 +1881,11 @@ export async function getSymbolPrice(metaApiAccountId: string, symbol: string) {
   // Fast path: stream quotes first (ENTRY/DCA blocker when REST is 429).
   try {
     const { waitForStreamPrice } = await import("./metaapi-stream");
-    const priced = await waitForStreamPrice(metaApiAccountId, aliases, 8_000);
+    const priced = await waitForStreamPrice(
+      metaApiAccountId,
+      aliases,
+      priceStreamWaitMs(),
+    );
     if (priced) {
       const key = `${metaApiAccountId}:${want}`;
       brokerSymbolCache.set(key, priced.symbol);
@@ -1943,7 +2018,7 @@ export async function placeMarketOrder(input: {
           noteCredit();
           break;
         }
-        noteMetaApiRateLimit(20_000);
+        noteMetaApiRateLimit(20_000, input.metaApiAccountId);
         await sleep(1500 * (attempt + 1));
         res = await api(
           base,
@@ -2131,7 +2206,7 @@ export async function modifyPositionProtection(input: {
         data: res.data,
       };
     }
-    noteMetaApiRateLimit(20_000);
+    noteMetaApiRateLimit(20_000, input.metaApiAccountId);
     await sleep(2000);
     const retry = await api(
       base,
