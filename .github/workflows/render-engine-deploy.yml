@@ -1,0 +1,75 @@
+name: Render Engine Deploy
+
+# Full-auto trading engine deploy on master.
+# Requires repo secret: RENDER_API_KEY
+# Optional: RENDER_SERVICE_ID, RENDER_DEPLOY_HOOK_URL
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/lib/metaapi.ts"
+      - "src/lib/metaapi-stream.ts"
+      - "src/lib/meta-engine.ts"
+      - "src/lib/engine-*.ts"
+      - "scripts/tick-direct.ts"
+      - "scripts/stream-open-baskets.ts"
+      - "scripts/render-deploy.ts"
+      - "Dockerfile.engine"
+      - "render.yaml"
+      - "package.json"
+      - "package-lock.json"
+      - "prisma/**"
+      - ".github/workflows/render-engine-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit SHA to deploy (empty = this workflow SHA)"
+        required: false
+        default: ""
+      sync_env:
+        description: "Upsert non-secret env from render.yaml defaults"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+concurrency:
+  group: render-engine-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install (tsx only path via npm ci)
+        run: npm ci --ignore-scripts
+
+      - name: Require RENDER_API_KEY
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::RENDER_API_KEY secret missing. Add once: GitHub → Settings → Secrets → Actions → RENDER_API_KEY (from https://dashboard.render.com/u/settings#api-keys). Also add the same secret in Cursor Cloud Agents for agent deploys."
+            exit 1
+          fi
+
+      - name: Deploy super-alpha-engine
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          RENDER_SERVICE_NAME: super-alpha-engine
+          RENDER_COMMIT: ${{ inputs.commit || github.sha }}
+          RENDER_SYNC_ENV: ${{ inputs.sync_env || 'true' }}
+          RENDER_WAIT: "1"
+        run: npx tsx scripts/render-deploy.ts --sync-env --wait
