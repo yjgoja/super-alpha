@@ -10,7 +10,7 @@ export const maxDuration = 60;
  * Do NOT trust x-vercel-cron alone (spoofable). Query ?secret= removed (URL leak risk).
  * GHA bot-tick sends Bearer; set BOT_TICK_URL without query params.
  *
- * Vercel path is a soft backup: low concurrency (see resolveEngineConcurrency).
+ * Vercel path is a soft backup: manage-only (no ENTRY/DCA), low concurrency.
  * Primary trading engine is Render tick-direct + METAAPI_STREAM.
  */
 export async function GET(req: Request) {
@@ -24,11 +24,14 @@ export async function GET(req: Request) {
   const results = await runAllBots({
     budgetMs: 52_000,
     skipIdleUndeploy: true,
+    // Fail-closed backup: never open new risk from cold serverless REST ticks.
+    forceManageOnly: true,
   });
   return NextResponse.json({
     ok: true,
     count: results.length,
     results,
     idleUndeploy: idle,
+    forceManageOnly: true,
   });
 }
