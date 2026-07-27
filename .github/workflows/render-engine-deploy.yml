@@ -73,3 +73,5 @@ jobs:
           RENDER_SYNC_ENV: ${{ inputs.sync_env || 'true' }}
           RENDER_WAIT: "1"
         run: npx tsx scripts/render-deploy.ts --sync-env --wait
+
+# verify secret wired 2026-07-27T11:02Z
