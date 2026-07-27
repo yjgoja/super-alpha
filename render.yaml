@@ -34,6 +34,12 @@ services:
         value: "15000"
       - key: METAAPI_STREAM
         value: "1"
+      - key: METAAPI_PRICE_REST
+        value: "0"
+      - key: METAAPI_PRICE_STREAM_WAIT_MS
+        value: "12000"
+      - key: ENGINE_CONCURRENCY
+        value: "4"
       - key: METAAPI_REGION
         value: "london"
       - key: METAAPI_SNAP_MIN_MS

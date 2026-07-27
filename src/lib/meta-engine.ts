@@ -3365,10 +3365,20 @@ function resolveTickBudgetMs(optsBudget?: number): number {
   return 52_000;
 }
 
-function resolveEngineConcurrency(): number {
-  const n = Number(process.env.ENGINE_CONCURRENCY || 12);
-  if (!Number.isFinite(n) || n < 1) return 12;
-  return Math.min(32, Math.floor(n));
+/**
+ * Tick concurrency for runAllBots.
+ * Explicit ENGINE_CONCURRENCY wins. Else: Vercel backup=2, direct/default=4.
+ */
+export function resolveEngineConcurrency(): number {
+  const fromEnv = Number(process.env.ENGINE_CONCURRENCY);
+  if (Number.isFinite(fromEnv) && fromEnv >= 1) {
+    return Math.min(32, Math.floor(fromEnv));
+  }
+  // Vercel/GHA backup ticks: low concurrency protects dedicated-FE REST budget.
+  // Always-on Render (ENGINE_MODE=direct) can run more with warmed streams.
+  if (process.env.VERCEL === "1") return 2;
+  if ((process.env.ENGINE_MODE || "").trim() === "direct") return 4;
+  return 4;
 }
 
 async function mapPool<T, R>(
