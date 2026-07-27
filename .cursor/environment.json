@@ -1,0 +1,6 @@
+{
+  "snapshot": "DEFAULT",
+  "install": "npm ci",
+  "start": "echo 'super-alpha cloud agent ready'",
+  "terminals": []
+}

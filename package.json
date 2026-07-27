@@ -26,7 +26,10 @@
     "verify:tpsl": "tsx scripts/_verify-all-logic-tpsl.ts",
     "verify:live-ui": "tsx scripts/verify-live-ui-safety.ts",
     "verify:market-hours": "tsx scripts/_verify-market-hours.ts",
-    "verify:rate-harden": "tsx scripts/_verify-metaapi-rate-harden.ts"
+    "verify:rate-harden": "tsx scripts/_verify-metaapi-rate-harden.ts",
+    "verify:render-deploy": "tsx scripts/_verify-render-deploy-script.ts",
+    "render:deploy": "tsx scripts/render-deploy.ts --sync-env --wait",
+    "render:status": "tsx scripts/render-deploy.ts --status"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
