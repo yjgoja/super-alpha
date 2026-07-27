@@ -506,6 +506,34 @@ async function tryGhostBasketSoftExit(opts: {
   if (!tpDecision.hit && !slDecision.hit) return { handled: false as const };
 
   const kind = tpDecision.hit ? "TP" : "SL";
+
+  // Lag guard: margin/float with empty book → do not market-close (positions may still exist).
+  const preClose = await fetchSnapshot(opts.metaId);
+  if (preClose.ok) {
+    const m = Number(preClose.margin ?? 0);
+    const eq = Number(preClose.equity ?? 0);
+    const bal = Number(preClose.balance ?? 0);
+    const stillEmpty =
+      positionsForSymbol(preClose.positions, opts.symbol, opts.direction).length === 0;
+    if (
+      stillEmpty &&
+      (m > 1 || (bal > 0 && eq > 0 && Math.abs(bal - eq) > 1))
+    ) {
+      console.warn(
+        `[engine] ghost soft-${kind} skipped account=${opts.accountId} ${opts.symbol} — margin/float lag guard`,
+      );
+      return {
+        handled: true as const,
+        result: {
+          ok: true as const,
+          action: "ghost_pending",
+          symbol: opts.symbol,
+          note: "await_ghost_heal_lag_guard",
+        },
+      };
+    }
+  }
+
   console.error(
     `[engine] ghost soft-${kind} attempt account=${opts.accountId} ${opts.symbol} ${opts.direction} roiTp=${tpDecision.floatingRoi.toFixed(2)} roiSl=${slDecision.floatingRoi.toFixed(2)}`,
   );
@@ -1048,9 +1076,31 @@ export async function stopBotAfterManualClose(accountId: string, message: string
 }
 
 /**
+ * Ghost DB close is allowed only when deal history is healthy AND an OUT deal exists.
+ * Fail-closed: hist miss / empty deals → leave basket open (blocks stacked ENTRY).
+ */
+export function canHealGhostBasketFromDeals(opts: {
+  histOk: boolean;
+  hasOutDeal: boolean;
+}): boolean {
+  return opts.histOk === true && opts.hasOutDeal === true;
+}
+
+/**
+ * Backup/Vercel ticks should manage open baskets only — no new ENTRY/DCA.
+ * Primary Render engine uses ENGINE_MODE=direct and never sets this.
+ */
+export function resolveForceManageOnly(opts?: { forceManageOnly?: boolean }): boolean {
+  if (opts?.forceManageOnly === true) return true;
+  const env = (process.env.ENGINE_BACKUP_MANAGE_ONLY || "").trim().toLowerCase();
+  if (env === "1" || env === "true" || env === "on") return true;
+  return false;
+}
+
+/**
  * DB엔 열린 바스켓이 있는데 MT5 포지션이 없음 = 동기화 불일치(API 지연·이미 청산됨).
- * 바스켓만 DB에서 닫고 봇은 절대 끄지 않는다. (오탐으로 전체 중지하던 버그 제거)
- * true면 심볼 루프는 계속 진행(신규 진입/익절·손절 유지).
+ * OUT deal 증거가 있을 때만 DB 바스켓을 닫는다. hist 실패·증거 없음 → fail-closed(유지).
+ * 봇은 절대 끄지 않는다. true면 심볼 루프는 계속 진행(신규 진입/익절·손절 유지).
  */
 async function healGhostBaskets(
   accountId: string,
@@ -1107,8 +1157,15 @@ async function healGhostBaskets(
   // Classify exit via recent deals (broker TP/SL vs manual)
   const histStart = new Date(Date.now() - 6 * 60 * 60 * 1000);
   const hist = await fetchHistoryDeals(metaId, histStart, new Date());
-  const deals = hist.ok ? hist.deals : [];
+  if (!hist.ok) {
+    console.warn(
+      `[engine] skip ghost-heal account=${accountId} — history unavailable (fail-closed)`,
+    );
+    return false;
+  }
+  const deals = hist.deals;
 
+  let healed = 0;
   for (const g of stillGhost) {
     const dir = g.direction === "SELL" ? "SELL" : "BUY";
     const symDeals = deals.filter(
@@ -1119,10 +1176,19 @@ async function healGhostBaskets(
     const last = symDeals.sort(
       (a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime(),
     )[0];
+    if (
+      !canHealGhostBasketFromDeals({
+        histOk: true,
+        hasOutDeal: !!last,
+      })
+    ) {
+      console.warn(
+        `[engine] keep ghost basket account=${accountId} ${g.symbol} ${dir} — no OUT deal proof`,
+      );
+      continue;
+    }
     const pnl =
-      last != null
-        ? Number(last.profit || 0) + Number(last.swap || 0) + Number(last.commission || 0)
-        : 0;
+      Number(last.profit || 0) + Number(last.swap || 0) + Number(last.commission || 0);
     const reason = String(last?.reason || "").toLowerCase();
     const explicitSl = reason.includes("sl") || reason.includes("stop");
     const explicitTp = reason.includes("tp") || reason.includes("take");
@@ -1150,6 +1216,7 @@ async function healGhostBaskets(
         note: `ghost_deal|${kind}|reason=${reason || "unclassified"}`,
       },
     });
+    healed += 1;
     if (kind === "TP") {
       await prisma.brokerAccount.update({
         where: { id: accountId },
@@ -1205,10 +1272,12 @@ async function healGhostBaskets(
     }
   }
 
-  console.warn(
-    `[engine] healed ${stillGhost.length} ghost basket(s) account=${accountId} via deals — bot stays ON`,
-  );
-  return true;
+  if (healed > 0) {
+    console.warn(
+      `[engine] healed ${healed}/${stillGhost.length} ghost basket(s) account=${accountId} via deals — bot stays ON`,
+    );
+  }
+  return healed > 0;
 }
 
 /**
@@ -1581,21 +1650,38 @@ async function runSymbolTableDca(
   };
 
   const price = await getSymbolPrice(metaId, symbol);
+  // Resolve basket/positions before price hard-fail so open books stay manageable.
+  let basket = baskets.find(
+    (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
+  );
+  let ourPositions = positionsForSymbol(positions, symbol, direction);
+
   if (!price || price.bid <= 0 || price.ask <= 0) {
+    if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
+      return {
+        ok: true as const,
+        action: "ghost_pending",
+        symbol,
+        note: "await_ghost_heal_no_price",
+      };
+    }
+    if (basket && basket.legs.length > 0) {
+      return {
+        ok: true as const,
+        action: "hold",
+        symbol,
+        note: "await_price",
+      };
+    }
     return {
-      ok: false as const,
-      error: `${symbol} 시세를 가져오지 못했습니다. 브로커 심볼명(GOLD 등)을 확인하세요.`,
+      ok: true as const,
       symbol,
-      note: "no_price",
+      note: "no_price_skip_entry",
     };
   }
 
   const spr = spreadPct(price.bid, price.ask);
   // 양방향 운용: 같은 종목에 BUY/SELL 바스켓이 공존할 수 있으므로 방향으로 구분한다.
-  let basket = baskets.find(
-    (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
-  );
-  let ourPositions = positionsForSymbol(positions, symbol, direction);
 
   // Ghost basket (DB open, MT5 empty): retry snapshot → 호가 긴급 TP/SL → 그래도 없으면 pending
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
@@ -2274,19 +2360,34 @@ async function runSymbolDca(
   const maxLevels = Math.max(1, Math.min(20, cfg.entryCount || 10));
 
   const price = await getSymbolPrice(metaId, symbol);
-  if (!price || price.bid <= 0) {
-    return {
-      ok: false as const,
-      error: `${symbol} 시세를 가져오지 못했습니다.`,
-      symbol,
-      note: "no_price",
-    };
-  }
-
   let basket = baskets.find(
     (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
   );
   let ourPositions = positionsForSymbol(positions, symbol, direction);
+
+  if (!price || price.bid <= 0) {
+    if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
+      return {
+        ok: true as const,
+        action: "ghost_pending",
+        symbol,
+        note: "await_ghost_heal_no_price",
+      };
+    }
+    if (basket && basket.legs.length > 0) {
+      return {
+        ok: true as const,
+        action: "hold",
+        symbol,
+        note: "await_price",
+      };
+    }
+    return {
+      ok: true as const,
+      symbol,
+      note: "no_price_skip_entry",
+    };
+  }
 
   // Same as table-logic path: retry → ghost soft TP/SL → pending
   if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
@@ -2886,19 +2987,24 @@ async function releaseTickLock(accountId: string) {
   }
 }
 
-export async function runDcaTick(accountId: string) {
+export type RunDcaTickOpts = {
+  /** Backup ticks: open baskets only, never ENTRY/DCA. */
+  forceManageOnly?: boolean;
+};
+
+export async function runDcaTick(accountId: string, opts?: RunDcaTickOpts) {
   const got = await tryAcquireTickLock(accountId);
   if (!got) {
     return { skipped: true as const, reason: "busy" };
   }
   try {
-    return await runDcaTickInner(accountId);
+    return await runDcaTickInner(accountId, opts);
   } finally {
     await releaseTickLock(accountId);
   }
 }
 
-async function runDcaTickInner(accountId: string) {
+async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
   const account = await prisma.brokerAccount.findUnique({
     where: { id: accountId },
     include: {
@@ -3142,22 +3248,25 @@ async function runDcaTickInner(accountId: string) {
   );
 
   // 활성 봇 + 열린 바스켓(꺼진 종목 포함) 전부 틱 대상
+  const forceManageOnly = resolveForceManageOnly(opts);
   const needed = new Map<string, { manageOnly: boolean }>();
-  for (const b of account.symbolBots) {
-    if (!b.enabled) continue;
-    const dir = b.direction === "SELL" ? "SELL" : "BUY";
-    if (b.dualDirection) {
-      needed.set(`${b.symbol}|BUY`, { manageOnly: !masterOn });
-      needed.set(`${b.symbol}|SELL`, { manageOnly: !masterOn });
-    } else {
-      needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+  if (!forceManageOnly) {
+    for (const b of account.symbolBots) {
+      if (!b.enabled) continue;
+      const dir = b.direction === "SELL" ? "SELL" : "BUY";
+      if (b.dualDirection) {
+        needed.set(`${b.symbol}|BUY`, { manageOnly: !masterOn });
+        needed.set(`${b.symbol}|SELL`, { manageOnly: !masterOn });
+      } else {
+        needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+      }
     }
   }
   for (const basket of openBaskets) {
     const dir = basket.direction === "SELL" ? "SELL" : "BUY";
     const key = `${basket.symbol}|${dir}`;
     const row = botByKey.get(key);
-    const manageOnly = !masterOn || !row?.enabled;
+    const manageOnly = forceManageOnly || !masterOn || !row?.enabled;
     const prev = needed.get(key);
     if (!prev) {
       needed.set(key, { manageOnly });
@@ -3350,6 +3459,11 @@ export type RunAllBotsOpts = {
   budgetMs?: number;
   /** Cron route already undeploys idle — skip duplicate work. */
   skipIdleUndeploy?: boolean;
+  /**
+   * Backup/Vercel: manage open baskets only (no ENTRY/DCA).
+   * Primary Render engine must leave this unset/false.
+   */
+  forceManageOnly?: boolean;
 };
 
 /**
@@ -3416,6 +3530,7 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
     }
   }
 
+  const forceManageOnly = resolveForceManageOnly(opts);
   const accounts = await prisma.brokerAccount.findMany({
     where: {
       metaApiAccountId: { not: null },
@@ -3423,11 +3538,14 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
       user: {
         OR: [{ role: "admin" }, { approvalStatus: "approved" }],
       },
-      // 전체 OFF여도 열린 바스켓이 있으면 익절·손절 관리 틱 필요
-      OR: [
-        { botEnabled: true },
-        { baskets: { some: { status: "open" } } },
-      ],
+      // Backup manage-only: only accounts with open baskets (no flat ENTRY probing).
+      // Primary: bot ON or open baskets.
+      OR: forceManageOnly
+        ? [{ baskets: { some: { status: "open" } } }]
+        : [
+            { botEnabled: true },
+            { baskets: { some: { status: "open" } } },
+          ],
     },
     // Round-robin fairness: oldest tick lock / oldest update first
     orderBy: [{ tickLockedAt: "asc" }, { updatedAt: "asc" }],
@@ -3443,7 +3561,9 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
 
   // DB 바스켓이 없어도 equity≠balance(부동손익)면 관리 틱에 포함
   const seen = new Set(accounts.map((a) => a.id));
-  const maybeFloating = await prisma.brokerAccount.findMany({
+  const maybeFloating = forceManageOnly
+    ? []
+    : await prisma.brokerAccount.findMany({
     where: {
       botEnabled: false,
       metaApiAccountId: { not: null },
@@ -3536,7 +3656,7 @@ export async function runAllBots(opts: RunAllBotsOpts = {}) {
           },
         });
       }
-      return { id: a.id, ...(await runDcaTick(a.id)) };
+      return { id: a.id, ...(await runDcaTick(a.id, { forceManageOnly: opts.forceManageOnly })) };
     } catch (e) {
       return {
         id: a.id,
