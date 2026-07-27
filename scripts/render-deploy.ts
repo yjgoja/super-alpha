@@ -134,6 +134,14 @@ async function syncEnv(serviceId: string) {
   );
 }
 
+function unwrapDeploy(data: unknown): Json | null {
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Json;
+  if (obj.deploy && typeof obj.deploy === "object") return obj.deploy as Json;
+  if (typeof obj.id === "string" && obj.id.startsWith("dep-")) return obj;
+  return obj.id ? obj : null;
+}
+
 async function triggerDeploy(serviceId: string, commitId?: string) {
   const body: Json = { clearCache: "do_not_clear" };
   if (commitId) body.commitId = commitId;
@@ -143,6 +151,19 @@ async function triggerDeploy(serviceId: string, commitId?: string) {
     body,
   );
   if (status >= 400) {
+    // Deploy already running for same commit — treat as ok and wait on latest.
+    const msg = JSON.stringify(data);
+    if (
+      status === 409 ||
+      status === 429 ||
+      /already|in progress|conflict/i.test(msg)
+    ) {
+      console.warn(
+        `[render-deploy] trigger HTTP ${status} — will wait on latest deploy`,
+        msg.slice(0, 240),
+      );
+      return null;
+    }
     const hook = (process.env.RENDER_DEPLOY_HOOK_URL || "").trim();
     if (hook) {
       console.warn(
@@ -156,32 +177,74 @@ async function triggerDeploy(serviceId: string, commitId?: string) {
       console.log(`[render-deploy] deploy hook triggered`);
       return null;
     }
-    die(`trigger deploy HTTP ${status}: ${JSON.stringify(data)}`);
+    die(`trigger deploy HTTP ${status}: ${msg}`);
   }
-  const deploy =
-    (data as { deploy?: Json })?.deploy ||
-    (data as Json);
+  const deploy = unwrapDeploy(data);
   const id = String(deploy?.id || "");
   console.log(
-    `[render-deploy] deploy started id=${id} status=${deploy?.status} commit=${deploy?.commit?.id || commitId || "latest"}`,
+    `[render-deploy] deploy started id=${id || "(none)"} status=${deploy?.status} commit=${(deploy?.commit as Json | undefined)?.id || commitId || "latest"} http=${status}`,
   );
   return id || null;
 }
 
-async function waitDeploy(serviceId: string, deployId: string, timeoutMs = 15 * 60_000) {
+async function waitDeploy(
+  serviceId: string,
+  deployId: string | null,
+  commitId?: string,
+  timeoutMs = 15 * 60_000,
+) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    const { status, data } = await api(
-      "GET",
-      `/services/${serviceId}/deploys/${deployId}`,
+    let st = "";
+    let seenCommit = "";
+    let id = deployId || "";
+
+    if (deployId) {
+      const { status, data } = await api(
+        "GET",
+        `/services/${serviceId}/deploys/${deployId}`,
+      );
+      if (status >= 400) {
+        console.warn(
+          `[render-deploy] poll by id HTTP ${status} — fallback latest`,
+        );
+        deployId = null;
+      } else {
+        const deploy = unwrapDeploy(data) || {};
+        st = String(deploy.status || "");
+        seenCommit = String((deploy.commit as Json | undefined)?.id || "");
+        id = String(deploy.id || deployId);
+      }
+    }
+
+    if (!deployId) {
+      const latest = await latestDeploy(serviceId);
+      if (!latest) {
+        await new Promise((r) => setTimeout(r, 10_000));
+        continue;
+      }
+      st = String(latest.status || "");
+      seenCommit = String((latest.commit as Json | undefined)?.id || "");
+      id = String(latest.id || "");
+      // If a target commit is set, keep waiting until that commit is live (or fails).
+      if (commitId && seenCommit && !seenCommit.startsWith(commitId.slice(0, 7)) && st === "live") {
+        console.log(
+          `[render-deploy] latest live is other commit=${seenCommit} — keep waiting for ${commitId}`,
+        );
+        await new Promise((r) => setTimeout(r, 10_000));
+        continue;
+      }
+    }
+
+    console.log(
+      `[render-deploy] poll id=${id || "?"} status=${st} commit=${seenCommit || "?"}`,
     );
-    if (status >= 400) die(`poll deploy HTTP ${status}: ${JSON.stringify(data)}`);
-    const deploy =
-      (data as { deploy?: Json })?.deploy ||
-      (data as Json);
-    const st = String(deploy?.status || "");
-    console.log(`[render-deploy] poll status=${st}`);
     if (st === "live") {
+      if (commitId && seenCommit && !seenCommit.startsWith(commitId.slice(0, 7))) {
+        // still not our commit
+        await new Promise((r) => setTimeout(r, 10_000));
+        continue;
+      }
       console.log(`[render-deploy] LIVE ok`);
       return;
     }
@@ -229,7 +292,7 @@ async function main() {
   if (sync) await syncEnv(serviceId);
 
   const deployId = await triggerDeploy(serviceId, commit);
-  if (wait && deployId) await waitDeploy(serviceId, deployId);
+  if (wait) await waitDeploy(serviceId, deployId, commit);
 
   const latest = await latestDeploy(serviceId);
   console.log(
