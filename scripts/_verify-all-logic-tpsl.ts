@@ -244,8 +244,16 @@ function testResolvers() {
     resolveLiveStopLossPct("custom", 999) === 999,
   );
   assert(
-    "스피드 TP locked 20",
-    resolveLiveTakeProfitPct("martin_9_068", 50) === 20,
+    "스피드 TP locked 10",
+    resolveLiveTakeProfitPct("martin_9_068", 50) === 10,
+  );
+  assert(
+    "스피드2배 TP 10",
+    resolveLiveTakeProfitPct("martin_9_091", 50) === 10,
+  );
+  assert(
+    "스피드3배 TP 10",
+    resolveLiveTakeProfitPct("martin_9_113", 50) === 10,
   );
   assert(
     "스피드2배 SL 225",

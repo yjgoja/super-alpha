@@ -8,7 +8,7 @@ import { normalizeLogicId } from "./strategies";
 
 type LevelsFile = { leverageBase?: number; levels: Dca1000Level[] };
 
-/** MT5 1:500 XAU 기준 차트 방어폭 프리셋 (익절 ROI 20% 고정) */
+/** MT5 1:500 XAU 기준 차트 방어폭 프리셋 */
 export type Martin9DefensePreset = {
   chartPct: number;
   /** 기본 표 drop × scale */
@@ -34,23 +34,23 @@ export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
     chartPct: 0.68,
     dropScale: 1,
     stopLossPct: 225,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
-  /** 스피드 물타기 ×2 — SL −225% 유지 */
+  /** 스피드 물타기 ×2 — SL −225% · 익절 10% */
   martin_9_091: {
     chartPct: 0.91,
     dropScale: 2,
     stopLossPct: 225,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
-  /** 스피드 물타기 ×3 — SL −225% 유지 */
+  /** 스피드 물타기 ×3 — SL −225% · 익절 10% */
   martin_9_113: {
     chartPct: 1.13,
     dropScale: 3,
     stopLossPct: 225,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
-  /** H8 타임 — 스피드와 동일 방어폭 */
+  /** H8 타임 — 스피드 사다리, 익절 20% 유지 */
   martin_9_068_time: {
     chartPct: 0.68,
     dropScale: 1,
