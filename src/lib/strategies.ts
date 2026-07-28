@@ -20,22 +20,22 @@ export const SYMBOL_OPTIONS = SYMBOL_GROUPS.flatMap((g) => [...g.symbols]);
 export const LOGIC_OPTIONS = [
   {
     id: "martin_9_068",
-    name: "알파 스피드 로직",
+    name: "알파 스피드 로직 - 0.68%",
     desc: "회전이 빠른 스피드 프리셋",
   },
   {
     id: "martin_9_35",
-    name: "알파 안정 로직",
+    name: "알파 안정 로직 - 3.5%",
     desc: "안정 우선 프리셋",
   },
   {
     id: "martin_9_65",
-    name: "알파 코어 로직",
+    name: "알파 코어 로직 - 6.5%",
     desc: "균형형 코어 프리셋",
   },
   {
     id: "dubai_bruno_313",
-    name: "알파 지속 로직",
+    name: "알파 지속 로직 - 2.35%",
     desc: "회차가 깊은 지속형 프리셋",
   },
   {
@@ -50,12 +50,12 @@ export const LOGIC_OPTIONS = [
   },
   {
     id: "martin_9_068_time",
-    name: "알파 스피드 타임 로직",
+    name: "알파 스피드 타임 로직 - 0.68%",
     desc: "H8 세션 방향 + 스피드 마틴",
   },
   {
     id: "martin_9_35_time",
-    name: "알파 안정 타임 로직",
+    name: "알파 안정 타임 로직 - 3.5%",
     desc: "H8 세션 방향 + 안정 마틴",
   },
   {
@@ -65,14 +65,12 @@ export const LOGIC_OPTIONS = [
   },
 ] as const;
 
-/** 메인으로 노출하는 알파 전략 */
+/** 메인으로 노출하는 알파 전략 (룰렛·존캘리 = 테스트 전용, 비공개) */
 export const PRIMARY_LOGIC_IDS = [
   "martin_9_068",
   "martin_9_35",
   "martin_9_65",
   "dubai_bruno_313",
-  "roulette_9",
-  "john_kelly_1006",
   "martin_9_068_time",
   "martin_9_35_time",
 ] as const;

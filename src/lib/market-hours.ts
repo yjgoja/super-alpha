@@ -34,6 +34,12 @@ export const OPEN_BURST_WINDOWS_KST: ReadonlyArray<{ startMin: number; label: st
 
 export const OPEN_BURST_BLOCK_MINUTES = 15;
 
+export type OpenBurstOnTrigger = "hold" | "flatten";
+
+export function normalizeOpenBurstOnTrigger(v: unknown): OpenBurstOnTrigger {
+  return v === "flatten" ? "flatten" : "hold";
+}
+
 /** True when now is inside an open-burst quiet window (KST). */
 export function isInOpenBurstQuietPeriod(d: Date = new Date()): {
   active: boolean;

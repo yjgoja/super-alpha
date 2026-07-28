@@ -144,12 +144,27 @@ export function isTableLogic(logic: string): logic is TableLogicId {
   return (TABLE_LOGIC_IDS as readonly string[]).includes(id);
 }
 
-/** Per-level TP table logics (313 / roulette / kelly) */
+/** Per-level TP table logics (지속 333 / roulette / kelly) */
 export function isBulkLogic(logic: string) {
   const id = normalizeLogicId(logic);
   return (
     id === "dubai_bruno_313" || id === "roulette_9" || id === "john_kelly_1006"
   );
+}
+
+/** 알파 지속 — 표 전체 물타기 허용 후 손절 (조기 −225% 금지) */
+export function isSustainedBulkLogic(logic: string) {
+  return normalizeLogicId(logic) === "dubai_bruno_313";
+}
+
+/**
+ * 지속 로직 손절 ROI%: 마지막 물타기 drop 바로 위.
+ * drop=350 밴드까지 채운 뒤 −351%에서 손절 (225% 조기손절 없음).
+ */
+export function sustainedBulkStopLossPct(logic = "dubai_bruno_313") {
+  const levels = getTableLevels(logic);
+  const lastDrop = Math.max(0, ...levels.map((lv) => lv.drop || 0));
+  return lastDrop + 1;
 }
 
 export function isMartinLogic(logic: string) {
@@ -344,7 +359,9 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
       leverageBase: getTableLeverage(logic),
       startLots: 0.01,
       takeProfitPct: meta.firstTpRoi || 20,
-      stopLossPct: DCA1000_DEFAULT_SL_ROI,
+      stopLossPct: isSustainedBulkLogic(logic)
+        ? sustainedBulkStopLossPct(logic)
+        : DCA1000_DEFAULT_SL_ROI,
       takeProfitUsd: 0,
       stopLossUsd: 0,
     };
@@ -363,12 +380,14 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
 
 /**
  * 라이브 손절 ROI% — 공개 프리셋은 표 방어폭 고정값 우선 (DB에 남은 구버전 1250 등 무시).
+ * 알파 지속: −225% 미적용 → 표 마지막 drop+1 (전체 회차 소진 후 손절).
  * custom 만 저장값 허용.
  */
 export function resolveLiveStopLossPct(logic: string, storedPct?: number | null) {
   const id = normalizeLogicId(logic);
   const defense = getMartin9Defense(id);
   if (defense) return defense.stopLossPct;
+  if (isSustainedBulkLogic(id)) return sustainedBulkStopLossPct(id);
   if (isBulkLogic(id)) return DCA1000_DEFAULT_SL_ROI;
   if (storedPct != null && storedPct > 0) return storedPct;
   return DCA1000_DEFAULT_SL_ROI;

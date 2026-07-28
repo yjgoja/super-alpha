@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PUBLIC_LOGIC_OPTIONS, publicLogicLabel, isPublicTimeLogic } from "@/lib/strategy-public";
+import { publicLogicOptions, publicLogicLabel, isPublicTimeLogic } from "@/lib/strategy-public";
 import { SYMBOL_GROUPS, normalizeLogicId } from "@/lib/strategies";
 import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
 import { TradingViewSymbolChart } from "@/components/TradingViewSymbolChart";
@@ -28,6 +28,7 @@ export default function BotPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [botEnabled, setBotEnabled] = useState(false);
   const [skipOpenBurst, setSkipOpenBurst] = useState(false);
+  const [openBurstOnTrigger, setOpenBurstOnTrigger] = useState<"hold" | "flatten">("hold");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [edit, setEdit] = useState<string | null>(null);
@@ -100,6 +101,9 @@ export default function BotPage() {
       setBots(Array.isArray(botsData.bots) ? botsData.bots : []);
       setBotEnabled(!!statsData.account?.botEnabled);
       setSkipOpenBurst(!!statsData.account?.skipOpenBurstEntries);
+      setOpenBurstOnTrigger(
+        statsData.account?.openBurstOnTrigger === "flatten" ? "flatten" : "hold",
+      );
       setLinked(isMt5Linked(statsData.account));
       setApproved(me.role === "admin" || me.approvalStatus === "approved");
       if (!botsRes.ok && !statsRes.ok) {
@@ -181,8 +185,39 @@ export default function BotPage() {
       setSkipOpenBurst(!!data.skipOpenBurstEntries);
       setMsg(
         data.skipOpenBurstEntries
-          ? "개장 직후 제한 ON: 09:00·17:00·22:30(한국시간)부터 15분간 신규 진입·물타기를 하지 않습니다. 익절·손절은 계속됩니다."
+          ? openBurstOnTrigger === "flatten"
+            ? "개장 직후 제한 ON · 발동 시 기존 포지션 모두 청산 후 15분간 신규 진입 안 함."
+            : "개장 직후 제한 ON · 발동 시 포지션 유지(익절·손절만), 15분간 신규 진입·물타기 안 함."
           : "개장 직후 제한 OFF: 개장 직후에도 바로 진입합니다.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setOpenBurstAction(next: "hold" | "flatten") {
+    if (!requireLinked() || busy) return;
+    if (next === openBurstOnTrigger) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ openBurstOnTrigger: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.error || "실패");
+        return;
+      }
+      const action =
+        data.openBurstOnTrigger === "flatten" ? "flatten" : "hold";
+      setOpenBurstOnTrigger(action);
+      setMsg(
+        action === "flatten"
+          ? "개장 직후 발동 시: 기존 포지션 모두 청산"
+          : "개장 직후 발동 시: 포지션 유지 (익절·손절만)",
       );
     } finally {
       setBusy(false);
@@ -515,7 +550,6 @@ export default function BotPage() {
             <div style={{ fontWeight: 700 }}>개장 직후 15분 진입 제한</div>
             <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem", lineHeight: 1.45 }}>
               켜면 한국시간 09:00 · 17:00 · 22:30 개장 직후 15분 동안 신규 진입·물타기를 하지 않습니다.
-              이미 열린 포지션의 익절·손절은 그대로 관리합니다.
             </div>
             <div
               className={`m-status-text${skipOpenBurst ? " is-on" : " is-off"}`}
@@ -532,6 +566,65 @@ export default function BotPage() {
             onClick={toggleSkipOpenBurst}
           />
         </div>
+
+        {skipOpenBurst && (
+          <div style={{ marginTop: "0.85rem", paddingTop: "0.85rem", borderTop: "1px solid var(--line, rgba(255,255,255,0.08))" }}>
+            <div style={{ fontSize: "0.82rem", fontWeight: 650, marginBottom: "0.45rem" }}>
+              제한 발동 시 기존 포지션
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+              <button
+                type="button"
+                className="sa-btn"
+                disabled={busy || !ready}
+                onClick={() => setOpenBurstAction("hold")}
+                style={{
+                  borderRadius: 12,
+                  padding: "0.65rem 0.5rem",
+                  fontSize: "0.8rem",
+                  border:
+                    openBurstOnTrigger === "hold"
+                      ? "1px solid var(--gold)"
+                      : "1px solid transparent",
+                  background:
+                    openBurstOnTrigger === "hold"
+                      ? "rgba(212, 175, 55, 0.12)"
+                      : "var(--card-2, transparent)",
+                }}
+              >
+                포지션 유지
+                <div style={{ fontSize: "0.68rem", color: "var(--muted)", marginTop: "0.25rem", fontWeight: 400 }}>
+                  익절·손절만 계속
+                </div>
+              </button>
+              <button
+                type="button"
+                className="sa-btn"
+                disabled={busy || !ready}
+                onClick={() => setOpenBurstAction("flatten")}
+                style={{
+                  borderRadius: 12,
+                  padding: "0.65rem 0.5rem",
+                  fontSize: "0.8rem",
+                  border:
+                    openBurstOnTrigger === "flatten"
+                      ? "1px solid var(--danger)"
+                      : "1px solid transparent",
+                  background:
+                    openBurstOnTrigger === "flatten"
+                      ? "rgba(220, 80, 80, 0.12)"
+                      : "var(--card-2, transparent)",
+                  color: openBurstOnTrigger === "flatten" ? "var(--danger)" : undefined,
+                }}
+              >
+                모두 청산
+                <div style={{ fontSize: "0.68rem", color: "var(--muted)", marginTop: "0.25rem", fontWeight: 400 }}>
+                  개장 직후 전량 종료
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {!ready ? (
@@ -657,14 +750,14 @@ export default function BotPage() {
                             }))
                           }
                         >
-                          {PUBLIC_LOGIC_OPTIONS.filter((l) => l.id !== "custom").map((l) => (
+                          {publicLogicOptions().map((l) => (
                             <option key={l.id} value={l.id}>
                               {l.name}
                             </option>
                           ))}
                         </select>
                         <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
-                          {PUBLIC_LOGIC_OPTIONS.find(
+                          {publicLogicOptions().find(
                             (l) =>
                               l.id ===
                               normalizeLogicId(

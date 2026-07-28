@@ -42,6 +42,10 @@ model BrokerAccount {
   botEnabled       Boolean   @default(false)
   /// When ON: block new entries for 15m after KST open bursts (09:00 / 17:00 / 22:30). TP/SL still managed.
   skipOpenBurstEntries Boolean @default(false)
+  /// hold = keep open baskets (TP/SL only) | flatten = market-close all when burst window starts
+  openBurstOnTrigger   String   @default("hold")
+  /// Last KST burst label we already flattened (e.g. "09:00") — prevents re-close every tick
+  openBurstLastFlattenLabel String?
   /// When bot was last turned OFF (null while bot running). Used for 24h idle undeploy.
   botStoppedAt     DateTime?
   /// Cross-process tick mutex (local engine + GHA + Vercel). Stale after ~90s.

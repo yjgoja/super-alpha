@@ -17,14 +17,17 @@ import {
 import {
   isBulkLogic,
   isMartin9TimeLogic,
+  isSustainedBulkLogic,
   isTableLogic,
   lotsForLogicLevel,
   resolveLiveStopLossPct,
   resolveLiveTakeProfitPct,
+  tableLogicMeta,
 } from "./table-logics";
 import { normalizeLogicId } from "./strategies";
 import { resolveStrategyForAccount } from "./strategy-resolve";
 import {
+  closeAllPositions,
   closePositionsBySymbolDirection,
   ensureAccountCloudLive,
   ensureCloudLive,
@@ -44,6 +47,10 @@ import {
 } from "./metaapi";
 import { ensureTradingSchema, prisma } from "./db";
 import { isCloudColdError } from "./engine-guard";
+import {
+  loadOpenBurstSettings,
+  saveOpenBurstSettings,
+} from "./open-burst-settings";
 import {
   isFxMarketClosed,
   isFxMarketOpen,
@@ -1963,10 +1970,17 @@ async function runSymbolTableDca(
   });
   const levels = resolved.levels;
   const startLots = resolved.startLots || cfg.startLots;
-  // 회차 상한: entryCount 설정을 존중 (표 전체보다 작으면 캡). 소형 계좌 폭주 방지.
+  // 회차 상한: entryCount 존중. 알파 지속(333)은 표 전체 강제(구 entryCount 314 캡 무시).
   const maxLevels = Math.max(
     1,
-    Math.min(levels.length, cfg.entryCount > 0 ? cfg.entryCount : levels.length),
+    Math.min(
+      levels.length,
+      isSustainedBulkLogic(logic)
+        ? levels.length
+        : cfg.entryCount > 0
+          ? cfg.entryCount
+          : levels.length,
+    ),
   );
   const tag = logic.replace(/[^a-z0-9_]/gi, "").slice(0, 12) || "table";
 
@@ -3549,6 +3563,77 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
     return { ok: false as const, error: snap.message };
   }
 
+  // Open-burst flatten: once per KST window when user chose "flatten"
+  {
+    const burst = await loadOpenBurstSettings(account.id);
+    const quiet = isInOpenBurstQuietPeriod();
+    if (!quiet.active && burst.openBurstLastFlattenLabel) {
+      await saveOpenBurstSettings(account.id, { openBurstLastFlattenLabel: null });
+    } else if (
+      masterOn &&
+      burst.skipOpenBurstEntries &&
+      burst.openBurstOnTrigger === "flatten" &&
+      quiet.active &&
+      quiet.label &&
+      burst.openBurstLastFlattenLabel !== quiet.label
+    ) {
+      if (snap.positions.length > 0) {
+        console.warn(
+          `[engine] open-burst flatten account=${account.id} window=${quiet.label} pos=${snap.positions.length}`,
+        );
+        const closed = await closeAllPositions(metaId);
+        if (!closed.ok) {
+          console.error(
+            `[engine] open-burst flatten incomplete account=${account.id}: ${closed.message}`,
+          );
+          // Do not stamp label — retry next tick
+        } else {
+          await prisma.basket.updateMany({
+            where: { accountId: account.id, status: "open" },
+            data: {
+              status: "closed",
+              lastExitAt: new Date(),
+              unrealizedPnl: 0,
+            },
+          });
+          await prisma.fills.create({
+            data: {
+              accountId: account.id,
+              symbol: "ALL",
+              side: "SELL",
+              lots: 0,
+              price: 0,
+              pnl: 0,
+              kind: "GUARD",
+              note: `open_burst_flatten|${quiet.label}|closed=${closed.closed ?? 0}`,
+            },
+          });
+          await saveOpenBurstSettings(account.id, {
+            openBurstLastFlattenLabel: quiet.label,
+          });
+          const again = await fetchSnapshot(metaId, { allowStaleMs: 0 });
+          if (again.ok) snap = again;
+          account.baskets.splice(0, account.baskets.length);
+        }
+      } else {
+        await saveOpenBurstSettings(account.id, {
+          openBurstLastFlattenLabel: quiet.label,
+        });
+        if (account.baskets.length > 0) {
+          await prisma.basket.updateMany({
+            where: { accountId: account.id, status: "open" },
+            data: {
+              status: "closed",
+              lastExitAt: new Date(),
+              unrealizedPnl: 0,
+            },
+          });
+          account.baskets.splice(0, account.baskets.length);
+        }
+      }
+    }
+  }
+
   // Publish shared state for web UI (?live=1) — Redis/Postgres, not MetaAPI.
   // Fail-open: always persist balance/equity even if liveState columns lag migrate.
   await setAccountLiveState({
@@ -3761,7 +3846,7 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
       symbol,
       logic: orphanLogic,
       direction,
-      entryCount: c?.entryCount ?? 314,
+      entryCount: c?.entryCount ?? tableLogicMeta("dubai_bruno_313").count,
       entryMultiplier: c?.entryMultiplier ?? 1,
       entryIntervalPct: c?.entryIntervalPct ?? 5,
       takeProfitPct: resolveLiveTakeProfitPct(orphanLogic, c?.takeProfitPct ?? 20),

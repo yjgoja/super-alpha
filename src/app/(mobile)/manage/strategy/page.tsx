@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { PUBLIC_LOGIC_OPTIONS, publicLogicLabel } from "@/lib/strategy-public";
+import { publicLogicOptions, publicLogicLabel } from "@/lib/strategy-public";
 
 /**
  * End-user strategy screen — presets are locked (no levels / ROI / drop tables).
@@ -65,7 +65,7 @@ export default function StrategyLogicPage() {
           disabled={busy}
           onChange={(e) => setLogicId(e.target.value)}
         >
-          {PUBLIC_LOGIC_OPTIONS.filter((l) => l.id !== "custom").map((l) => (
+          {publicLogicOptions().map((l) => (
             <option key={l.id} value={l.id}>
               {l.name}
             </option>
@@ -77,7 +77,7 @@ export default function StrategyLogicPage() {
             {publicLogicLabel(logicId)}
           </h2>
           <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.88rem" }}>
-            {PUBLIC_LOGIC_OPTIONS.find((l) => l.id === logicId)?.desc}
+            {publicLogicOptions().find((l) => l.id === logicId)?.desc}
           </p>
         </div>
 

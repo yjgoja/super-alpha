@@ -16,6 +16,7 @@ import {
   defaultEntryMultiplier,
   getTableLevels,
   isMartinLogic,
+  resolveLiveStopLossPct,
   tableLogicMeta,
 } from "@/lib/table-logics";
 import { withAccountToggleLock } from "@/lib/toggle-lock";
@@ -24,7 +25,7 @@ import type { Prisma } from "@prisma/client";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-/** 313차 전체 회차(L0 포함 = 314) — 표에서 파생 (하드코딩 999 금지) */
+/** 알파 지속 전체 회차(L0 포함) — 표에서 파생 (하드코딩 금지) */
 const DUBAI313_LEVEL_COUNT = tableLogicMeta("dubai_bruno_313").count;
 
 async function getAccount(userId: string) {
@@ -71,17 +72,18 @@ export async function GET() {
   });
 
   if (bots.length === 0) {
+    const sustainedSl = resolveLiveStopLossPct("dubai_bruno_313");
     const eur = resolveTpSlUsd({
       symbol: "EURUSD",
       startLots: 0.01,
       takeProfitPct: 20,
-      stopLossPct: DCA1000_DEFAULT_SL_ROI,
+      stopLossPct: sustainedSl,
     });
     const xau = resolveTpSlUsd({
       symbol: "XAUUSD",
       startLots: 0.01,
       takeProfitPct: 20,
-      stopLossPct: DCA1000_DEFAULT_SL_ROI,
+      stopLossPct: sustainedSl,
     });
     const base = (symbol: string, usd: typeof eur, enabled: boolean, direction: "BUY" | "SELL") => ({
       accountId: account.id,
@@ -93,7 +95,7 @@ export async function GET() {
       entryMultiplier: 1,
       takeProfitPct: 20,
       takeProfitUsd: usd.takeProfitUsd,
-      stopLossPct: DCA1000_DEFAULT_SL_ROI,
+      stopLossPct: sustainedSl,
       stopLossUsd: usd.stopLossUsd,
       stopLossEnabled: true,
       stopOnSl: true,

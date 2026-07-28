@@ -1,50 +1,40 @@
 /**
  * Client-safe strategy labels & API redaction.
- * Never put drop/profit/ROI tables or defense % in these exports.
+ * Names show chart defense % only — no drop/lot ladders.
  */
 
 import { LOGIC_OPTIONS, normalizeLogicId, type LogicId } from "./strategies";
 
-/** User-facing names — no ROI%, defense chart%, drop, lot ladders */
+/** User-facing names — 로직명 + 차트 방어폭% */
 export const PUBLIC_LOGIC_OPTIONS = [
   {
     id: "martin_9_068" as const,
-    name: "알파 스피드 로직",
+    name: "알파 스피드 로직 - 0.68%",
     desc: "회전이 빠른 스피드 프리셋",
   },
   {
     id: "martin_9_35" as const,
-    name: "알파 안정 로직",
+    name: "알파 안정 로직 - 3.5%",
     desc: "안정 우선 프리셋",
   },
   {
     id: "martin_9_65" as const,
-    name: "알파 코어 로직",
+    name: "알파 코어 로직 - 6.5%",
     desc: "균형형 코어 프리셋",
   },
   {
     id: "dubai_bruno_313" as const,
-    name: "알파 지속 로직",
+    name: "알파 지속 로직 - 2.35%",
     desc: "회차가 깊은 지속형 프리셋",
   },
   {
-    id: "roulette_9" as const,
-    name: "알파 룰렛 로직",
-    desc: "9회차 룰렛 스케일",
-  },
-  {
-    id: "john_kelly_1006" as const,
-    name: "알파 존캘리 로직",
-    desc: "1006회차 존캘리",
-  },
-  {
     id: "martin_9_068_time" as const,
-    name: "알파 스피드 타임 로직",
+    name: "알파 스피드 타임 로직 - 0.68%",
     desc: "8시간봉 방향 + 스피드",
   },
   {
     id: "martin_9_35_time" as const,
-    name: "알파 안정 타임 로직",
+    name: "알파 안정 타임 로직 - 3.5%",
     desc: "8시간봉 방향 + 안정",
   },
   {
@@ -65,8 +55,8 @@ export function isPublicTimeLogic(id: string) {
   return n === "martin_9_068_time" || n === "martin_9_35_time";
 }
 
+/** Test-only roulette/kelly stay in engine; not listed in PUBLIC_LOGIC_OPTIONS */
 export function publicLogicOptions() {
-  // Hide custom from normal picker unless already selected server-side
   return PUBLIC_LOGIC_OPTIONS.filter((l) => l.id !== "custom");
 }
 

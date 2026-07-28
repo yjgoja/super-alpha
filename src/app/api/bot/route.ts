@@ -3,7 +3,11 @@ import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { ensureTradingSchema, prisma } from "@/lib/db";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { isInOpenBurstQuietPeriod } from "@/lib/market-hours";
+import { isInOpenBurstQuietPeriod, normalizeOpenBurstOnTrigger } from "@/lib/market-hours";
+import {
+  loadOpenBurstSettings,
+  saveOpenBurstSettings,
+} from "@/lib/open-burst-settings";
 import { ensureAccountCloudLive, ensureCloudLive } from "@/lib/metaapi";
 import { withAccountToggleLock } from "@/lib/toggle-lock";
 
@@ -43,10 +47,14 @@ export async function POST(req: Request) {
     .object({
       enabled: z.boolean().optional(),
       skipOpenBurstEntries: z.boolean().optional(),
+      openBurstOnTrigger: z.enum(["hold", "flatten"]).optional(),
     })
     .refine(
-      (v) => v.enabled !== undefined || v.skipOpenBurstEntries !== undefined,
-      { message: "enabled 또는 skipOpenBurstEntries 필요" },
+      (v) =>
+        v.enabled !== undefined ||
+        v.skipOpenBurstEntries !== undefined ||
+        v.openBurstOnTrigger !== undefined,
+      { message: "enabled / skipOpenBurstEntries / openBurstOnTrigger 필요" },
     )
     .parse(await req.json());
 
@@ -56,17 +64,25 @@ export async function POST(req: Request) {
   }
 
   // Settings-only toggle (no cloud wake)
-  if (body.skipOpenBurstEntries !== undefined && body.enabled === undefined) {
-    const updated = await prisma.brokerAccount.update({
-      where: { id: account.id },
-      data: { skipOpenBurstEntries: body.skipOpenBurstEntries },
-      select: { botEnabled: true, skipOpenBurstEntries: true },
-    });
+  if (body.enabled === undefined) {
+    const patch: {
+      skipOpenBurstEntries?: boolean;
+      openBurstOnTrigger?: "hold" | "flatten";
+    } = {};
+    if (body.skipOpenBurstEntries !== undefined) {
+      patch.skipOpenBurstEntries = body.skipOpenBurstEntries;
+    }
+    if (body.openBurstOnTrigger !== undefined) {
+      patch.openBurstOnTrigger = normalizeOpenBurstOnTrigger(body.openBurstOnTrigger);
+    }
+    await saveOpenBurstSettings(account.id, patch);
+    const settings = await loadOpenBurstSettings(account.id);
     const quiet = isInOpenBurstQuietPeriod();
     return NextResponse.json({
       ok: true,
-      botEnabled: updated.botEnabled,
-      skipOpenBurstEntries: updated.skipOpenBurstEntries,
+      botEnabled: account.botEnabled,
+      skipOpenBurstEntries: settings.skipOpenBurstEntries,
+      openBurstOnTrigger: settings.openBurstOnTrigger,
       openBurstQuiet: quiet,
     });
   }
@@ -145,10 +161,17 @@ export async function POST(req: Request) {
             : {}),
         },
       });
+      if (body.openBurstOnTrigger !== undefined) {
+        await saveOpenBurstSettings(account.id, {
+          openBurstOnTrigger: normalizeOpenBurstOnTrigger(body.openBurstOnTrigger),
+        });
+      }
+      const burst = await loadOpenBurstSettings(account.id);
       return NextResponse.json({
         ok: true,
         botEnabled: updated.botEnabled,
         skipOpenBurstEntries: updated.skipOpenBurstEntries,
+        openBurstOnTrigger: burst.openBurstOnTrigger,
       });
     }
 
@@ -167,10 +190,17 @@ export async function POST(req: Request) {
           : {}),
       },
     });
+    if (body.openBurstOnTrigger !== undefined) {
+      await saveOpenBurstSettings(account.id, {
+        openBurstOnTrigger: normalizeOpenBurstOnTrigger(body.openBurstOnTrigger),
+      });
+    }
+    const burst = await loadOpenBurstSettings(account.id);
     return NextResponse.json({
       ok: true,
       botEnabled: updated.botEnabled,
       skipOpenBurstEntries: updated.skipOpenBurstEntries,
+      openBurstOnTrigger: burst.openBurstOnTrigger,
       openBaskets: openCount,
     });
   });

@@ -21,6 +21,7 @@ import {
   lotsForLogicLevel,
   resolveLiveStopLossPct,
   resolveLiveTakeProfitPct,
+  sustainedBulkStopLossPct,
 } from "../src/lib/table-logics";
 import { PRIMARY_LOGIC_IDS, logicLabel, normalizeLogicId } from "../src/lib/strategies";
 
@@ -225,8 +226,18 @@ function testResolvers() {
     Math.abs(resolveLiveStopLossPct("martin_9_65", 225) - 2191.7) < EPS,
   );
   assert(
-    "지속 ignores 1250 → 225",
-    resolveLiveStopLossPct("dubai_bruno_313", 1250) === DCA1000_DEFAULT_SL_ROI,
+    "지속 ignores 1250 → lastDrop+1 (225 미적용)",
+    resolveLiveStopLossPct("dubai_bruno_313", 1250) ===
+      sustainedBulkStopLossPct("dubai_bruno_313"),
+  );
+  assert(
+    "지속 SL > last drop (전체 물타기 가능)",
+    sustainedBulkStopLossPct("dubai_bruno_313") >
+      Math.max(...getTableLevels("dubai_bruno_313").map((l) => l.drop)),
+  );
+  assert(
+    "지속 333 JSON → L0 포함 334회차",
+    getTableLevels("dubai_bruno_313").length === 334,
   );
   assert(
     "custom keeps stored",
