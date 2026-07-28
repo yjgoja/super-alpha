@@ -3596,7 +3596,7 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
               unrealizedPnl: 0,
             },
           });
-          await prisma.fills.create({
+          await prisma.fill.create({
             data: {
               accountId: account.id,
               symbol: "ALL",
