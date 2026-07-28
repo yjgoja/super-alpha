@@ -22,13 +22,13 @@ export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
     chartPct: 6.5,
     dropScale: 9.741,
     stopLossPct: 2191.7,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
   martin_9_35: {
     chartPct: 3.5,
     dropScale: 5.201,
     stopLossPct: 1170.3,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
   martin_9_068: {
     chartPct: 0.68,
@@ -57,12 +57,12 @@ export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
     stopLossPct: 225,
     takeProfitPct: 10,
   },
-  /** H8 타임 — 안정과 동일 방어폭 */
+  /** H8 타임 — 안정 사다리 · 익절 10% */
   martin_9_35_time: {
     chartPct: 3.5,
     dropScale: 5.201,
     stopLossPct: 1170.3,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
 };
 

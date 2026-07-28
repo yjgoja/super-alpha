@@ -510,72 +510,72 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 0.51,
+        "tpRoi": 10,
+        "tpUsd": 0.25,
         "slUsd": 29.73
       },
       {
         "level": 1,
         "lotsCum": 0.03,
         "drop": 52,
-        "tpRoi": 20,
-        "tpUsd": 1.52,
+        "tpRoi": 10,
+        "tpUsd": 0.76,
         "slUsd": 89.12
       },
       {
         "level": 2,
         "lotsCum": 0.07,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 3.55,
+        "tpRoi": 10,
+        "tpUsd": 1.77,
         "slUsd": 207.69
       },
       {
         "level": 3,
         "lotsCum": 0.15,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 7.6,
+        "tpRoi": 10,
+        "tpUsd": 3.8,
         "slUsd": 444.55
       },
       {
         "level": 4,
         "lotsCum": 0.31,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 15.68,
+        "tpRoi": 10,
+        "tpUsd": 7.84,
         "slUsd": 917.26
       },
       {
         "level": 5,
         "lotsCum": 0.63,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 31.81,
+        "tpRoi": 10,
+        "tpUsd": 15.9,
         "slUsd": 1861.16
       },
       {
         "level": 6,
         "lotsCum": 1.27,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 64.02,
+        "tpRoi": 10,
+        "tpUsd": 32.01,
         "slUsd": 3745.96
       },
       {
         "level": 7,
         "lotsCum": 2.55,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 128.27,
+        "tpRoi": 10,
+        "tpUsd": 64.13,
         "slUsd": 7505.7
       },
       {
         "level": 8,
         "lotsCum": 5.11,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 256.51,
+        "tpRoi": 10,
+        "tpUsd": 128.25,
         "slUsd": 15009.5
       }
     ]
@@ -593,72 +593,72 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 1.63,
+        "tpRoi": 10,
+        "tpUsd": 0.82,
         "slUsd": 95.5
       },
       {
         "level": 1,
         "lotsCum": 0.03,
         "drop": 52,
-        "tpRoi": 20,
-        "tpUsd": 4.89,
+        "tpRoi": 10,
+        "tpUsd": 2.45,
         "slUsd": 286.29
       },
       {
         "level": 2,
         "lotsCum": 0.07,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 11.4,
+        "tpRoi": 10,
+        "tpUsd": 5.7,
         "slUsd": 667.22
       },
       {
         "level": 3,
         "lotsCum": 0.15,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 24.41,
+        "tpRoi": 10,
+        "tpUsd": 12.2,
         "slUsd": 1428.17
       },
       {
         "level": 4,
         "lotsCum": 0.31,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 50.36,
+        "tpRoi": 10,
+        "tpUsd": 25.18,
         "slUsd": 2946.79
       },
       {
         "level": 5,
         "lotsCum": 0.63,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 102.18,
+        "tpRoi": 10,
+        "tpUsd": 51.09,
         "slUsd": 5979.15
       },
       {
         "level": 6,
         "lotsCum": 1.27,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 205.66,
+        "tpRoi": 10,
+        "tpUsd": 102.83,
         "slUsd": 12034.26
       },
       {
         "level": 7,
         "lotsCum": 2.55,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 412.08,
+        "tpRoi": 10,
+        "tpUsd": 206.04,
         "slUsd": 24112.81
       },
       {
         "level": 8,
         "lotsCum": 5.11,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 824.05,
+        "tpRoi": 10,
+        "tpUsd": 412.03,
         "slUsd": 48219.48
       }
     ]
@@ -676,72 +676,72 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 0.51,
+        "tpRoi": 10,
+        "tpUsd": 0.25,
         "slUsd": 55.67
       },
       {
         "level": 1,
         "lotsCum": 0.03,
         "drop": 97,
-        "tpRoi": 20,
-        "tpUsd": 1.52,
+        "tpRoi": 10,
+        "tpUsd": 0.76,
         "slUsd": 166.79
       },
       {
         "level": 2,
         "lotsCum": 0.07,
         "drop": 195,
-        "tpRoi": 20,
-        "tpUsd": 3.54,
+        "tpRoi": 10,
+        "tpUsd": 1.77,
         "slUsd": 388.31
       },
       {
         "level": 3,
         "lotsCum": 0.15,
         "drop": 195,
-        "tpRoi": 20,
-        "tpUsd": 7.58,
+        "tpRoi": 10,
+        "tpUsd": 3.79,
         "slUsd": 830.37
       },
       {
         "level": 4,
         "lotsCum": 0.31,
         "drop": 292,
-        "tpRoi": 20,
-        "tpUsd": 15.61,
+        "tpRoi": 10,
+        "tpUsd": 7.81,
         "slUsd": 1710.92
       },
       {
         "level": 5,
         "lotsCum": 0.63,
         "drop": 292,
-        "tpRoi": 20,
-        "tpUsd": 31.63,
+        "tpRoi": 10,
+        "tpUsd": 15.82,
         "slUsd": 3466.72
       },
       {
         "level": 6,
         "lotsCum": 1.27,
         "drop": 292,
-        "tpRoi": 20,
-        "tpUsd": 63.58,
+        "tpRoi": 10,
+        "tpUsd": 31.79,
         "slUsd": 6967.9
       },
       {
         "level": 7,
         "lotsCum": 2.55,
         "drop": 390,
-        "tpRoi": 20,
-        "tpUsd": 127.17,
+        "tpRoi": 10,
+        "tpUsd": 63.58,
         "slUsd": 13935.89
       },
       {
         "level": 8,
         "lotsCum": 5.11,
         "drop": 390,
-        "tpRoi": 20,
-        "tpUsd": 253.84,
+        "tpRoi": 10,
+        "tpUsd": 126.92,
         "slUsd": 27817.31
       }
     ]
@@ -759,72 +759,72 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 1.63,
+        "tpRoi": 10,
+        "tpUsd": 0.82,
         "slUsd": 178.84
       },
       {
         "level": 1,
         "lotsCum": 0.03,
         "drop": 97,
-        "tpRoi": 20,
-        "tpUsd": 4.89,
+        "tpRoi": 10,
+        "tpUsd": 2.44,
         "slUsd": 535.83
       },
       {
         "level": 2,
         "lotsCum": 0.07,
         "drop": 195,
-        "tpRoi": 20,
-        "tpUsd": 11.38,
+        "tpRoi": 10,
+        "tpUsd": 5.69,
         "slUsd": 1247.49
       },
       {
         "level": 3,
         "lotsCum": 0.15,
         "drop": 195,
-        "tpRoi": 20,
-        "tpUsd": 24.34,
+        "tpRoi": 10,
+        "tpUsd": 12.17,
         "slUsd": 2667.64
       },
       {
         "level": 4,
         "lotsCum": 0.31,
         "drop": 292,
-        "tpRoi": 20,
-        "tpUsd": 50.16,
+        "tpRoi": 10,
+        "tpUsd": 25.08,
         "slUsd": 5496.51
       },
       {
         "level": 5,
         "lotsCum": 0.63,
         "drop": 292,
-        "tpRoi": 20,
-        "tpUsd": 101.63,
+        "tpRoi": 10,
+        "tpUsd": 50.82,
         "slUsd": 11137.18
       },
       {
         "level": 6,
         "lotsCum": 1.27,
         "drop": 292,
-        "tpRoi": 20,
-        "tpUsd": 204.27,
+        "tpRoi": 10,
+        "tpUsd": 102.14,
         "slUsd": 22385.07
       },
       {
         "level": 7,
         "lotsCum": 2.55,
         "drop": 390,
-        "tpRoi": 20,
-        "tpUsd": 408.55,
+        "tpRoi": 10,
+        "tpUsd": 204.27,
         "slUsd": 44770.43
       },
       {
         "level": 8,
         "lotsCum": 5.11,
         "drop": 390,
-        "tpRoi": 20,
-        "tpUsd": 815.49,
+        "tpRoi": 10,
+        "tpUsd": 407.75,
         "slUsd": 89365.85
       }
     ]
@@ -842,2672 +842,2672 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 0.51,
+        "tpRoi": 10,
+        "tpUsd": 0.25,
         "slUsd": 8.92
       },
       {
         "level": 1,
         "lotsCum": 0.02,
         "drop": 20,
-        "tpRoi": 20,
-        "tpUsd": 1.02,
+        "tpRoi": 10,
+        "tpUsd": 0.51,
         "slUsd": 17.83
       },
       {
         "level": 2,
         "lotsCum": 0.03,
         "drop": 40,
-        "tpRoi": 20,
-        "tpUsd": 1.52,
+        "tpRoi": 10,
+        "tpUsd": 0.76,
         "slUsd": 26.73
       },
       {
         "level": 3,
         "lotsCum": 0.04,
         "drop": 40,
-        "tpRoi": 20,
-        "tpUsd": 2.03,
+        "tpRoi": 10,
+        "tpUsd": 1.02,
         "slUsd": 35.64
       },
       {
         "level": 4,
         "lotsCum": 0.05,
         "drop": 60,
-        "tpRoi": 20,
-        "tpUsd": 2.54,
+        "tpRoi": 10,
+        "tpUsd": 1.27,
         "slUsd": 44.54
       },
       {
         "level": 5,
         "lotsCum": 0.06,
         "drop": 60,
-        "tpRoi": 20,
-        "tpUsd": 3.04,
+        "tpRoi": 10,
+        "tpUsd": 1.52,
         "slUsd": 53.43
       },
       {
         "level": 6,
         "lotsCum": 0.07,
         "drop": 60,
-        "tpRoi": 20,
-        "tpUsd": 3.55,
+        "tpRoi": 10,
+        "tpUsd": 1.78,
         "slUsd": 62.33
       },
       {
         "level": 7,
         "lotsCum": 0.08,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 4.06,
+        "tpRoi": 10,
+        "tpUsd": 2.03,
         "slUsd": 71.22
       },
       {
         "level": 8,
         "lotsCum": 0.09,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 4.56,
+        "tpRoi": 10,
+        "tpUsd": 2.28,
         "slUsd": 80.11
       },
       {
         "level": 9,
         "lotsCum": 0.1,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 5.07,
+        "tpRoi": 10,
+        "tpUsd": 2.54,
         "slUsd": 88.99
       },
       {
         "level": 10,
         "lotsCum": 0.11,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 5.58,
+        "tpRoi": 10,
+        "tpUsd": 2.79,
         "slUsd": 97.88
       },
       {
         "level": 11,
         "lotsCum": 0.12,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 6.08,
+        "tpRoi": 10,
+        "tpUsd": 3.04,
         "slUsd": 106.76
       },
       {
         "level": 12,
         "lotsCum": 0.13,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 6.59,
+        "tpRoi": 10,
+        "tpUsd": 3.29,
         "slUsd": 115.64
       },
       {
         "level": 13,
         "lotsCum": 0.14,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 7.09,
+        "tpRoi": 10,
+        "tpUsd": 3.55,
         "slUsd": 124.51
       },
       {
         "level": 14,
         "lotsCum": 0.15,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 7.6,
+        "tpRoi": 10,
+        "tpUsd": 3.8,
         "slUsd": 133.39
       },
       {
         "level": 15,
         "lotsCum": 0.16,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 8.11,
+        "tpRoi": 10,
+        "tpUsd": 4.05,
         "slUsd": 142.26
       },
       {
         "level": 16,
         "lotsCum": 0.17,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 8.61,
+        "tpRoi": 10,
+        "tpUsd": 4.31,
         "slUsd": 151.14
       },
       {
         "level": 17,
         "lotsCum": 0.18,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 11.4,
+        "tpRoi": 12.5,
+        "tpUsd": 5.7,
         "slUsd": 160.01
       },
       {
         "level": 18,
         "lotsCum": 0.19,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 12.03,
+        "tpRoi": 12.5,
+        "tpUsd": 6.01,
         "slUsd": 168.87
       },
       {
         "level": 19,
         "lotsCum": 0.2,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 12.66,
+        "tpRoi": 12.5,
+        "tpUsd": 6.33,
         "slUsd": 177.74
       },
       {
         "level": 20,
         "lotsCum": 0.21,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 13.29,
+        "tpRoi": 12.5,
+        "tpUsd": 6.65,
         "slUsd": 186.6
       },
       {
         "level": 21,
         "lotsCum": 0.22,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 13.92,
+        "tpRoi": 12.5,
+        "tpUsd": 6.96,
         "slUsd": 195.46
       },
       {
         "level": 22,
         "lotsCum": 0.23,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 14.55,
+        "tpRoi": 12.5,
+        "tpUsd": 7.28,
         "slUsd": 204.32
       },
       {
         "level": 23,
         "lotsCum": 0.24,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 15.18,
+        "tpRoi": 12.5,
+        "tpUsd": 7.59,
         "slUsd": 213.18
       },
       {
         "level": 24,
         "lotsCum": 0.25,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 15.82,
+        "tpRoi": 12.5,
+        "tpUsd": 7.91,
         "slUsd": 222.04
       },
       {
         "level": 25,
         "lotsCum": 0.26,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 16.45,
+        "tpRoi": 12.5,
+        "tpUsd": 8.22,
         "slUsd": 230.9
       },
       {
         "level": 26,
         "lotsCum": 0.27,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 17.08,
+        "tpRoi": 12.5,
+        "tpUsd": 8.54,
         "slUsd": 239.76
       },
       {
         "level": 27,
         "lotsCum": 0.28,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 17.71,
+        "tpRoi": 12.5,
+        "tpUsd": 8.85,
         "slUsd": 248.61
       },
       {
         "level": 28,
         "lotsCum": 0.29,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 18.34,
+        "tpRoi": 12.5,
+        "tpUsd": 9.17,
         "slUsd": 257.46
       },
       {
         "level": 29,
         "lotsCum": 0.3,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 18.97,
+        "tpRoi": 12.5,
+        "tpUsd": 9.48,
         "slUsd": 266.31
       },
       {
         "level": 30,
         "lotsCum": 0.31,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 19.6,
+        "tpRoi": 12.5,
+        "tpUsd": 9.8,
         "slUsd": 275.16
       },
       {
         "level": 31,
         "lotsCum": 0.32,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 20.23,
+        "tpRoi": 12.5,
+        "tpUsd": 10.11,
         "slUsd": 284
       },
       {
         "level": 32,
         "lotsCum": 0.33,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 20.86,
+        "tpRoi": 12.5,
+        "tpUsd": 10.43,
         "slUsd": 292.85
       },
       {
         "level": 33,
         "lotsCum": 0.34,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 21.49,
+        "tpRoi": 12.5,
+        "tpUsd": 10.74,
         "slUsd": 301.7
       },
       {
         "level": 34,
         "lotsCum": 0.35,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 22.12,
+        "tpRoi": 12.5,
+        "tpUsd": 11.06,
         "slUsd": 310.54
       },
       {
         "level": 35,
         "lotsCum": 0.36,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 22.75,
+        "tpRoi": 12.5,
+        "tpUsd": 11.37,
         "slUsd": 319.38
       },
       {
         "level": 36,
         "lotsCum": 0.37,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 23.38,
+        "tpRoi": 12.5,
+        "tpUsd": 11.69,
         "slUsd": 328.23
       },
       {
         "level": 37,
         "lotsCum": 0.38,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 24.01,
+        "tpRoi": 12.5,
+        "tpUsd": 12,
         "slUsd": 337.07
       },
       {
         "level": 38,
         "lotsCum": 0.39,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 24.64,
+        "tpRoi": 12.5,
+        "tpUsd": 12.32,
         "slUsd": 345.91
       },
       {
         "level": 39,
         "lotsCum": 0.4,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 25.27,
+        "tpRoi": 12.5,
+        "tpUsd": 12.63,
         "slUsd": 354.75
       },
       {
         "level": 40,
         "lotsCum": 0.41,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 25.9,
+        "tpRoi": 12.5,
+        "tpUsd": 12.95,
         "slUsd": 363.59
       },
       {
         "level": 41,
         "lotsCum": 0.42,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 26.53,
+        "tpRoi": 12.5,
+        "tpUsd": 13.26,
         "slUsd": 372.42
       },
       {
         "level": 42,
         "lotsCum": 0.43,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 27.16,
+        "tpRoi": 12.5,
+        "tpUsd": 13.58,
         "slUsd": 381.26
       },
       {
         "level": 43,
         "lotsCum": 0.44,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 27.78,
+        "tpRoi": 12.5,
+        "tpUsd": 13.89,
         "slUsd": 390.09
       },
       {
         "level": 44,
         "lotsCum": 0.45,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 28.41,
+        "tpRoi": 12.5,
+        "tpUsd": 14.21,
         "slUsd": 398.92
       },
       {
         "level": 45,
         "lotsCum": 0.46,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 29.04,
+        "tpRoi": 12.5,
+        "tpUsd": 14.52,
         "slUsd": 407.75
       },
       {
         "level": 46,
         "lotsCum": 0.47,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 29.67,
+        "tpRoi": 12.5,
+        "tpUsd": 14.84,
         "slUsd": 416.58
       },
       {
         "level": 47,
         "lotsCum": 0.48,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 30.3,
+        "tpRoi": 12.5,
+        "tpUsd": 15.15,
         "slUsd": 425.41
       },
       {
         "level": 48,
         "lotsCum": 0.49,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 30.93,
+        "tpRoi": 12.5,
+        "tpUsd": 15.46,
         "slUsd": 434.24
       },
       {
         "level": 49,
         "lotsCum": 0.5,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 31.56,
+        "tpRoi": 12.5,
+        "tpUsd": 15.78,
         "slUsd": 443.07
       },
       {
         "level": 50,
         "lotsCum": 0.51,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 32.19,
+        "tpRoi": 12.5,
+        "tpUsd": 16.09,
         "slUsd": 451.9
       },
       {
         "level": 51,
         "lotsCum": 0.52,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 32.82,
+        "tpRoi": 12.5,
+        "tpUsd": 16.41,
         "slUsd": 460.72
       },
       {
         "level": 52,
         "lotsCum": 0.53,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 33.44,
+        "tpRoi": 12.5,
+        "tpUsd": 16.72,
         "slUsd": 469.55
       },
       {
         "level": 53,
         "lotsCum": 0.54,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 34.07,
+        "tpRoi": 12.5,
+        "tpUsd": 17.04,
         "slUsd": 478.38
       },
       {
         "level": 54,
         "lotsCum": 0.55,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 34.7,
+        "tpRoi": 12.5,
+        "tpUsd": 17.35,
         "slUsd": 487.2
       },
       {
         "level": 55,
         "lotsCum": 0.56,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 35.33,
+        "tpRoi": 12.5,
+        "tpUsd": 17.66,
         "slUsd": 496.03
       },
       {
         "level": 56,
         "lotsCum": 0.57,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 35.96,
+        "tpRoi": 12.5,
+        "tpUsd": 17.98,
         "slUsd": 504.85
       },
       {
         "level": 57,
         "lotsCum": 0.58,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 36.59,
+        "tpRoi": 12.5,
+        "tpUsd": 18.29,
         "slUsd": 513.67
       },
       {
         "level": 58,
         "lotsCum": 0.59,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 37.21,
+        "tpRoi": 12.5,
+        "tpUsd": 18.61,
         "slUsd": 522.5
       },
       {
         "level": 59,
         "lotsCum": 0.6,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 37.84,
+        "tpRoi": 12.5,
+        "tpUsd": 18.92,
         "slUsd": 531.32
       },
       {
         "level": 60,
         "lotsCum": 0.61,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 38.47,
+        "tpRoi": 12.5,
+        "tpUsd": 19.24,
         "slUsd": 540.14
       },
       {
         "level": 61,
         "lotsCum": 0.62,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 46.92,
+        "tpRoi": 15,
+        "tpUsd": 23.46,
         "slUsd": 548.95
       },
       {
         "level": 62,
         "lotsCum": 0.63,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 47.67,
+        "tpRoi": 15,
+        "tpUsd": 23.84,
         "slUsd": 557.77
       },
       {
         "level": 63,
         "lotsCum": 0.64,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 48.43,
+        "tpRoi": 15,
+        "tpUsd": 24.21,
         "slUsd": 566.58
       },
       {
         "level": 64,
         "lotsCum": 0.65,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 49.18,
+        "tpRoi": 15,
+        "tpUsd": 24.59,
         "slUsd": 575.39
       },
       {
         "level": 65,
         "lotsCum": 0.66,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 49.93,
+        "tpRoi": 15,
+        "tpUsd": 24.97,
         "slUsd": 584.2
       },
       {
         "level": 66,
         "lotsCum": 0.67,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 50.69,
+        "tpRoi": 15,
+        "tpUsd": 25.34,
         "slUsd": 593.02
       },
       {
         "level": 67,
         "lotsCum": 0.68,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 51.44,
+        "tpRoi": 15,
+        "tpUsd": 25.72,
         "slUsd": 601.83
       },
       {
         "level": 68,
         "lotsCum": 0.69,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 52.19,
+        "tpRoi": 15,
+        "tpUsd": 26.1,
         "slUsd": 610.64
       },
       {
         "level": 69,
         "lotsCum": 0.7,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 52.94,
+        "tpRoi": 15,
+        "tpUsd": 26.47,
         "slUsd": 619.44
       },
       {
         "level": 70,
         "lotsCum": 0.71,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 53.7,
+        "tpRoi": 15,
+        "tpUsd": 26.85,
         "slUsd": 628.25
       },
       {
         "level": 71,
         "lotsCum": 0.72,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 54.45,
+        "tpRoi": 15,
+        "tpUsd": 27.22,
         "slUsd": 637.06
       },
       {
         "level": 72,
         "lotsCum": 0.73,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 55.2,
+        "tpRoi": 15,
+        "tpUsd": 27.6,
         "slUsd": 645.87
       },
       {
         "level": 73,
         "lotsCum": 0.74,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 55.96,
+        "tpRoi": 15,
+        "tpUsd": 27.98,
         "slUsd": 654.67
       },
       {
         "level": 74,
         "lotsCum": 0.75,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 56.71,
+        "tpRoi": 15,
+        "tpUsd": 28.35,
         "slUsd": 663.48
       },
       {
         "level": 75,
         "lotsCum": 0.76,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 57.46,
+        "tpRoi": 15,
+        "tpUsd": 28.73,
         "slUsd": 672.29
       },
       {
         "level": 76,
         "lotsCum": 0.77,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 58.21,
+        "tpRoi": 15,
+        "tpUsd": 29.11,
         "slUsd": 681.09
       },
       {
         "level": 77,
         "lotsCum": 0.78,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 58.97,
+        "tpRoi": 15,
+        "tpUsd": 29.48,
         "slUsd": 689.9
       },
       {
         "level": 78,
         "lotsCum": 0.79,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 59.72,
+        "tpRoi": 15,
+        "tpUsd": 29.86,
         "slUsd": 698.7
       },
       {
         "level": 79,
         "lotsCum": 0.8,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 60.47,
+        "tpRoi": 15,
+        "tpUsd": 30.24,
         "slUsd": 707.5
       },
       {
         "level": 80,
         "lotsCum": 0.81,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 61.22,
+        "tpRoi": 15,
+        "tpUsd": 30.61,
         "slUsd": 716.31
       },
       {
         "level": 81,
         "lotsCum": 0.82,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 61.98,
+        "tpRoi": 15,
+        "tpUsd": 30.99,
         "slUsd": 725.11
       },
       {
         "level": 82,
         "lotsCum": 0.83,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 62.73,
+        "tpRoi": 15,
+        "tpUsd": 31.36,
         "slUsd": 733.91
       },
       {
         "level": 83,
         "lotsCum": 0.84,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 63.48,
+        "tpRoi": 15,
+        "tpUsd": 31.74,
         "slUsd": 742.71
       },
       {
         "level": 84,
         "lotsCum": 0.85,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 64.23,
+        "tpRoi": 15,
+        "tpUsd": 32.12,
         "slUsd": 751.52
       },
       {
         "level": 85,
         "lotsCum": 0.86,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 64.98,
+        "tpRoi": 15,
+        "tpUsd": 32.49,
         "slUsd": 760.32
       },
       {
         "level": 86,
         "lotsCum": 0.87,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 65.74,
+        "tpRoi": 15,
+        "tpUsd": 32.87,
         "slUsd": 769.12
       },
       {
         "level": 87,
         "lotsCum": 0.88,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 66.49,
+        "tpRoi": 15,
+        "tpUsd": 33.24,
         "slUsd": 777.92
       },
       {
         "level": 88,
         "lotsCum": 0.89,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 67.24,
+        "tpRoi": 15,
+        "tpUsd": 33.62,
         "slUsd": 786.72
       },
       {
         "level": 89,
         "lotsCum": 0.9,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 67.99,
+        "tpRoi": 15,
+        "tpUsd": 34,
         "slUsd": 795.51
       },
       {
         "level": 90,
         "lotsCum": 0.91,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 68.74,
+        "tpRoi": 15,
+        "tpUsd": 34.37,
         "slUsd": 804.31
       },
       {
         "level": 91,
         "lotsCum": 0.92,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 69.5,
+        "tpRoi": 15,
+        "tpUsd": 34.75,
         "slUsd": 813.11
       },
       {
         "level": 92,
         "lotsCum": 0.93,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 105.37,
+        "tpRoi": 22.5,
+        "tpUsd": 52.69,
         "slUsd": 821.9
       },
       {
         "level": 93,
         "lotsCum": 0.94,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 106.5,
+        "tpRoi": 22.5,
+        "tpUsd": 53.25,
         "slUsd": 830.69
       },
       {
         "level": 94,
         "lotsCum": 0.95,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 107.63,
+        "tpRoi": 22.5,
+        "tpUsd": 53.81,
         "slUsd": 839.48
       },
       {
         "level": 95,
         "lotsCum": 0.96,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 108.75,
+        "tpRoi": 22.5,
+        "tpUsd": 54.38,
         "slUsd": 848.27
       },
       {
         "level": 96,
         "lotsCum": 0.97,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 109.88,
+        "tpRoi": 22.5,
+        "tpUsd": 54.94,
         "slUsd": 857.06
       },
       {
         "level": 97,
         "lotsCum": 0.98,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 111.01,
+        "tpRoi": 22.5,
+        "tpUsd": 55.5,
         "slUsd": 865.85
       },
       {
         "level": 98,
         "lotsCum": 0.99,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 112.13,
+        "tpRoi": 22.5,
+        "tpUsd": 56.07,
         "slUsd": 874.63
       },
       {
         "level": 99,
         "lotsCum": 1,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 113.26,
+        "tpRoi": 22.5,
+        "tpUsd": 56.63,
         "slUsd": 883.42
       },
       {
         "level": 100,
         "lotsCum": 1.01,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 114.39,
+        "tpRoi": 22.5,
+        "tpUsd": 57.19,
         "slUsd": 892.21
       },
       {
         "level": 101,
         "lotsCum": 1.02,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 115.51,
+        "tpRoi": 22.5,
+        "tpUsd": 57.76,
         "slUsd": 900.99
       },
       {
         "level": 102,
         "lotsCum": 1.03,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 116.64,
+        "tpRoi": 22.5,
+        "tpUsd": 58.32,
         "slUsd": 909.78
       },
       {
         "level": 103,
         "lotsCum": 1.04,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 117.76,
+        "tpRoi": 22.5,
+        "tpUsd": 58.88,
         "slUsd": 918.56
       },
       {
         "level": 104,
         "lotsCum": 1.05,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 118.89,
+        "tpRoi": 22.5,
+        "tpUsd": 59.45,
         "slUsd": 927.35
       },
       {
         "level": 105,
         "lotsCum": 1.06,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 120.02,
+        "tpRoi": 22.5,
+        "tpUsd": 60.01,
         "slUsd": 936.13
       },
       {
         "level": 106,
         "lotsCum": 1.07,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 121.14,
+        "tpRoi": 22.5,
+        "tpUsd": 60.57,
         "slUsd": 944.92
       },
       {
         "level": 107,
         "lotsCum": 1.08,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 122.27,
+        "tpRoi": 22.5,
+        "tpUsd": 61.13,
         "slUsd": 953.7
       },
       {
         "level": 108,
         "lotsCum": 1.09,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 123.4,
+        "tpRoi": 22.5,
+        "tpUsd": 61.7,
         "slUsd": 962.48
       },
       {
         "level": 109,
         "lotsCum": 1.1,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 124.52,
+        "tpRoi": 22.5,
+        "tpUsd": 62.26,
         "slUsd": 971.26
       },
       {
         "level": 110,
         "lotsCum": 1.11,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 125.65,
+        "tpRoi": 22.5,
+        "tpUsd": 62.82,
         "slUsd": 980.05
       },
       {
         "level": 111,
         "lotsCum": 1.12,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 126.77,
+        "tpRoi": 22.5,
+        "tpUsd": 63.39,
         "slUsd": 988.83
       },
       {
         "level": 112,
         "lotsCum": 1.13,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 127.9,
+        "tpRoi": 22.5,
+        "tpUsd": 63.95,
         "slUsd": 997.61
       },
       {
         "level": 113,
         "lotsCum": 1.14,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 129.02,
+        "tpRoi": 22.5,
+        "tpUsd": 64.51,
         "slUsd": 1006.39
       },
       {
         "level": 114,
         "lotsCum": 1.15,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 130.15,
+        "tpRoi": 22.5,
+        "tpUsd": 65.07,
         "slUsd": 1015.17
       },
       {
         "level": 115,
         "lotsCum": 1.16,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 131.28,
+        "tpRoi": 22.5,
+        "tpUsd": 65.64,
         "slUsd": 1023.95
       },
       {
         "level": 116,
         "lotsCum": 1.17,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 132.4,
+        "tpRoi": 22.5,
+        "tpUsd": 66.2,
         "slUsd": 1032.73
       },
       {
         "level": 117,
         "lotsCum": 1.18,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 133.53,
+        "tpRoi": 22.5,
+        "tpUsd": 66.76,
         "slUsd": 1041.51
       },
       {
         "level": 118,
         "lotsCum": 1.19,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 134.65,
+        "tpRoi": 22.5,
+        "tpUsd": 67.33,
         "slUsd": 1050.29
       },
       {
         "level": 119,
         "lotsCum": 1.2,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 135.78,
+        "tpRoi": 22.5,
+        "tpUsd": 67.89,
         "slUsd": 1059.07
       },
       {
         "level": 120,
         "lotsCum": 1.21,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 136.9,
+        "tpRoi": 22.5,
+        "tpUsd": 68.45,
         "slUsd": 1067.84
       },
       {
         "level": 121,
         "lotsCum": 1.22,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 138.03,
+        "tpRoi": 22.5,
+        "tpUsd": 69.01,
         "slUsd": 1076.62
       },
       {
         "level": 122,
         "lotsCum": 1.23,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 139.15,
+        "tpRoi": 22.5,
+        "tpUsd": 69.58,
         "slUsd": 1085.4
       },
       {
         "level": 123,
         "lotsCum": 1.24,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 140.28,
+        "tpRoi": 22.5,
+        "tpUsd": 70.14,
         "slUsd": 1094.17
       },
       {
         "level": 124,
         "lotsCum": 1.25,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 141.4,
+        "tpRoi": 22.5,
+        "tpUsd": 70.7,
         "slUsd": 1102.95
       },
       {
         "level": 125,
         "lotsCum": 1.26,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 142.53,
+        "tpRoi": 22.5,
+        "tpUsd": 71.26,
         "slUsd": 1111.73
       },
       {
         "level": 126,
         "lotsCum": 1.27,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 143.65,
+        "tpRoi": 22.5,
+        "tpUsd": 71.83,
         "slUsd": 1120.5
       },
       {
         "level": 127,
         "lotsCum": 1.28,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 144.78,
+        "tpRoi": 22.5,
+        "tpUsd": 72.39,
         "slUsd": 1129.28
       },
       {
         "level": 128,
         "lotsCum": 1.29,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 145.9,
+        "tpRoi": 22.5,
+        "tpUsd": 72.95,
         "slUsd": 1138.05
       },
       {
         "level": 129,
         "lotsCum": 1.3,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 147.03,
+        "tpRoi": 22.5,
+        "tpUsd": 73.51,
         "slUsd": 1146.83
       },
       {
         "level": 130,
         "lotsCum": 1.31,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 148.15,
+        "tpRoi": 22.5,
+        "tpUsd": 74.08,
         "slUsd": 1155.6
       },
       {
         "level": 131,
         "lotsCum": 1.32,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 149.28,
+        "tpRoi": 22.5,
+        "tpUsd": 74.64,
         "slUsd": 1164.37
       },
       {
         "level": 132,
         "lotsCum": 1.33,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 150.4,
+        "tpRoi": 22.5,
+        "tpUsd": 75.2,
         "slUsd": 1173.15
       },
       {
         "level": 133,
         "lotsCum": 1.34,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 151.53,
+        "tpRoi": 22.5,
+        "tpUsd": 75.76,
         "slUsd": 1181.92
       },
       {
         "level": 134,
         "lotsCum": 1.35,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 152.65,
+        "tpRoi": 22.5,
+        "tpUsd": 76.33,
         "slUsd": 1190.69
       },
       {
         "level": 135,
         "lotsCum": 1.36,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 153.78,
+        "tpRoi": 22.5,
+        "tpUsd": 76.89,
         "slUsd": 1199.47
       },
       {
         "level": 136,
         "lotsCum": 1.37,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 154.9,
+        "tpRoi": 22.5,
+        "tpUsd": 77.45,
         "slUsd": 1208.24
       },
       {
         "level": 137,
         "lotsCum": 1.38,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 156.03,
+        "tpRoi": 22.5,
+        "tpUsd": 78.01,
         "slUsd": 1217.01
       },
       {
         "level": 138,
         "lotsCum": 1.39,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 157.15,
+        "tpRoi": 22.5,
+        "tpUsd": 78.58,
         "slUsd": 1225.78
       },
       {
         "level": 139,
         "lotsCum": 1.4,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 211.03,
+        "tpRoi": 30,
+        "tpUsd": 105.52,
         "slUsd": 1234.54
       },
       {
         "level": 140,
         "lotsCum": 1.41,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 212.53,
+        "tpRoi": 30,
+        "tpUsd": 106.27,
         "slUsd": 1243.31
       },
       {
         "level": 141,
         "lotsCum": 1.42,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 214.03,
+        "tpRoi": 30,
+        "tpUsd": 107.01,
         "slUsd": 1252.07
       },
       {
         "level": 142,
         "lotsCum": 1.43,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 215.53,
+        "tpRoi": 30,
+        "tpUsd": 107.76,
         "slUsd": 1260.83
       },
       {
         "level": 143,
         "lotsCum": 1.44,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 217.03,
+        "tpRoi": 30,
+        "tpUsd": 108.51,
         "slUsd": 1269.6
       },
       {
         "level": 144,
         "lotsCum": 1.45,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 218.52,
+        "tpRoi": 30,
+        "tpUsd": 109.26,
         "slUsd": 1278.36
       },
       {
         "level": 145,
         "lotsCum": 1.46,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 220.02,
+        "tpRoi": 30,
+        "tpUsd": 110.01,
         "slUsd": 1287.12
       },
       {
         "level": 146,
         "lotsCum": 1.47,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 221.52,
+        "tpRoi": 30,
+        "tpUsd": 110.76,
         "slUsd": 1295.88
       },
       {
         "level": 147,
         "lotsCum": 1.48,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 223.02,
+        "tpRoi": 30,
+        "tpUsd": 111.51,
         "slUsd": 1304.64
       },
       {
         "level": 148,
         "lotsCum": 1.49,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 224.51,
+        "tpRoi": 30,
+        "tpUsd": 112.26,
         "slUsd": 1313.4
       },
       {
         "level": 149,
         "lotsCum": 1.5,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 226.01,
+        "tpRoi": 30,
+        "tpUsd": 113.01,
         "slUsd": 1322.16
       },
       {
         "level": 150,
         "lotsCum": 1.51,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 227.51,
+        "tpRoi": 30,
+        "tpUsd": 113.75,
         "slUsd": 1330.92
       },
       {
         "level": 151,
         "lotsCum": 1.52,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 229.01,
+        "tpRoi": 30,
+        "tpUsd": 114.5,
         "slUsd": 1339.68
       },
       {
         "level": 152,
         "lotsCum": 1.53,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 230.5,
+        "tpRoi": 30,
+        "tpUsd": 115.25,
         "slUsd": 1348.44
       },
       {
         "level": 153,
         "lotsCum": 1.54,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 232,
+        "tpRoi": 30,
+        "tpUsd": 116,
         "slUsd": 1357.2
       },
       {
         "level": 154,
         "lotsCum": 1.55,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 233.5,
+        "tpRoi": 30,
+        "tpUsd": 116.75,
         "slUsd": 1365.96
       },
       {
         "level": 155,
         "lotsCum": 1.56,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 234.99,
+        "tpRoi": 30,
+        "tpUsd": 117.5,
         "slUsd": 1374.72
       },
       {
         "level": 156,
         "lotsCum": 1.57,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 236.49,
+        "tpRoi": 30,
+        "tpUsd": 118.25,
         "slUsd": 1383.47
       },
       {
         "level": 157,
         "lotsCum": 1.58,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 237.99,
+        "tpRoi": 30,
+        "tpUsd": 118.99,
         "slUsd": 1392.23
       },
       {
         "level": 158,
         "lotsCum": 1.59,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 239.49,
+        "tpRoi": 30,
+        "tpUsd": 119.74,
         "slUsd": 1400.99
       },
       {
         "level": 159,
         "lotsCum": 1.6,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 240.98,
+        "tpRoi": 30,
+        "tpUsd": 120.49,
         "slUsd": 1409.74
       },
       {
         "level": 160,
         "lotsCum": 1.61,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 242.48,
+        "tpRoi": 30,
+        "tpUsd": 121.24,
         "slUsd": 1418.5
       },
       {
         "level": 161,
         "lotsCum": 1.62,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 243.98,
+        "tpRoi": 30,
+        "tpUsd": 121.99,
         "slUsd": 1427.26
       },
       {
         "level": 162,
         "lotsCum": 1.63,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 245.47,
+        "tpRoi": 30,
+        "tpUsd": 122.74,
         "slUsd": 1436.01
       },
       {
         "level": 163,
         "lotsCum": 1.64,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 246.97,
+        "tpRoi": 30,
+        "tpUsd": 123.48,
         "slUsd": 1444.77
       },
       {
         "level": 164,
         "lotsCum": 1.65,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 248.47,
+        "tpRoi": 30,
+        "tpUsd": 124.23,
         "slUsd": 1453.52
       },
       {
         "level": 165,
         "lotsCum": 1.66,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 249.96,
+        "tpRoi": 30,
+        "tpUsd": 124.98,
         "slUsd": 1462.28
       },
       {
         "level": 166,
         "lotsCum": 1.67,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 251.46,
+        "tpRoi": 30,
+        "tpUsd": 125.73,
         "slUsd": 1471.03
       },
       {
         "level": 167,
         "lotsCum": 1.68,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 252.95,
+        "tpRoi": 30,
+        "tpUsd": 126.48,
         "slUsd": 1479.79
       },
       {
         "level": 168,
         "lotsCum": 1.69,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 254.45,
+        "tpRoi": 30,
+        "tpUsd": 127.23,
         "slUsd": 1488.54
       },
       {
         "level": 169,
         "lotsCum": 1.7,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 255.95,
+        "tpRoi": 30,
+        "tpUsd": 127.97,
         "slUsd": 1497.29
       },
       {
         "level": 170,
         "lotsCum": 1.71,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 257.44,
+        "tpRoi": 30,
+        "tpUsd": 128.72,
         "slUsd": 1506.05
       },
       {
         "level": 171,
         "lotsCum": 1.72,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 258.94,
+        "tpRoi": 30,
+        "tpUsd": 129.47,
         "slUsd": 1514.8
       },
       {
         "level": 172,
         "lotsCum": 1.73,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 260.44,
+        "tpRoi": 30,
+        "tpUsd": 130.22,
         "slUsd": 1523.55
       },
       {
         "level": 173,
         "lotsCum": 1.74,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 261.93,
+        "tpRoi": 30,
+        "tpUsd": 130.97,
         "slUsd": 1532.3
       },
       {
         "level": 174,
         "lotsCum": 1.75,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 263.43,
+        "tpRoi": 30,
+        "tpUsd": 131.71,
         "slUsd": 1541.05
       },
       {
         "level": 175,
         "lotsCum": 1.76,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 264.92,
+        "tpRoi": 30,
+        "tpUsd": 132.46,
         "slUsd": 1549.81
       },
       {
         "level": 176,
         "lotsCum": 1.77,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 266.42,
+        "tpRoi": 30,
+        "tpUsd": 133.21,
         "slUsd": 1558.56
       },
       {
         "level": 177,
         "lotsCum": 1.78,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 267.92,
+        "tpRoi": 30,
+        "tpUsd": 133.96,
         "slUsd": 1567.31
       },
       {
         "level": 178,
         "lotsCum": 1.79,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 269.41,
+        "tpRoi": 30,
+        "tpUsd": 134.71,
         "slUsd": 1576.06
       },
       {
         "level": 179,
         "lotsCum": 1.8,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 270.91,
+        "tpRoi": 30,
+        "tpUsd": 135.45,
         "slUsd": 1584.81
       },
       {
         "level": 180,
         "lotsCum": 1.81,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 272.4,
+        "tpRoi": 30,
+        "tpUsd": 136.2,
         "slUsd": 1593.56
       },
       {
         "level": 181,
         "lotsCum": 1.82,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 319.55,
+        "tpRoi": 35,
+        "tpUsd": 159.77,
         "slUsd": 1602.31
       },
       {
         "level": 182,
         "lotsCum": 1.83,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 321.29,
+        "tpRoi": 35,
+        "tpUsd": 160.65,
         "slUsd": 1611.06
       },
       {
         "level": 183,
         "lotsCum": 1.84,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 323.04,
+        "tpRoi": 35,
+        "tpUsd": 161.52,
         "slUsd": 1619.81
       },
       {
         "level": 184,
         "lotsCum": 1.85,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 324.78,
+        "tpRoi": 35,
+        "tpUsd": 162.39,
         "slUsd": 1628.55
       },
       {
         "level": 185,
         "lotsCum": 1.86,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 326.53,
+        "tpRoi": 35,
+        "tpUsd": 163.26,
         "slUsd": 1637.3
       },
       {
         "level": 186,
         "lotsCum": 1.87,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 328.27,
+        "tpRoi": 35,
+        "tpUsd": 164.14,
         "slUsd": 1646.05
       },
       {
         "level": 187,
         "lotsCum": 1.88,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 330.02,
+        "tpRoi": 35,
+        "tpUsd": 165.01,
         "slUsd": 1654.8
       },
       {
         "level": 188,
         "lotsCum": 1.89,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 331.76,
+        "tpRoi": 35,
+        "tpUsd": 165.88,
         "slUsd": 1663.55
       },
       {
         "level": 189,
         "lotsCum": 1.9,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 333.51,
+        "tpRoi": 35,
+        "tpUsd": 166.75,
         "slUsd": 1672.29
       },
       {
         "level": 190,
         "lotsCum": 1.91,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 335.25,
+        "tpRoi": 35,
+        "tpUsd": 167.63,
         "slUsd": 1681.04
       },
       {
         "level": 191,
         "lotsCum": 1.92,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 336.99,
+        "tpRoi": 35,
+        "tpUsd": 168.5,
         "slUsd": 1689.79
       },
       {
         "level": 192,
         "lotsCum": 1.93,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 338.74,
+        "tpRoi": 35,
+        "tpUsd": 169.37,
         "slUsd": 1698.53
       },
       {
         "level": 193,
         "lotsCum": 1.94,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 340.48,
+        "tpRoi": 35,
+        "tpUsd": 170.24,
         "slUsd": 1707.28
       },
       {
         "level": 194,
         "lotsCum": 1.95,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 342.23,
+        "tpRoi": 35,
+        "tpUsd": 171.11,
         "slUsd": 1716.03
       },
       {
         "level": 195,
         "lotsCum": 1.96,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 343.97,
+        "tpRoi": 35,
+        "tpUsd": 171.99,
         "slUsd": 1724.77
       },
       {
         "level": 196,
         "lotsCum": 1.97,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 345.72,
+        "tpRoi": 35,
+        "tpUsd": 172.86,
         "slUsd": 1733.52
       },
       {
         "level": 197,
         "lotsCum": 1.98,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 347.46,
+        "tpRoi": 35,
+        "tpUsd": 173.73,
         "slUsd": 1742.26
       },
       {
         "level": 198,
         "lotsCum": 1.99,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 349.2,
+        "tpRoi": 35,
+        "tpUsd": 174.6,
         "slUsd": 1751.01
       },
       {
         "level": 199,
         "lotsCum": 2,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 350.95,
+        "tpRoi": 35,
+        "tpUsd": 175.47,
         "slUsd": 1759.75
       },
       {
         "level": 200,
         "lotsCum": 2.01,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 352.69,
+        "tpRoi": 35,
+        "tpUsd": 176.35,
         "slUsd": 1768.5
       },
       {
         "level": 201,
         "lotsCum": 2.02,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 354.44,
+        "tpRoi": 35,
+        "tpUsd": 177.22,
         "slUsd": 1777.24
       },
       {
         "level": 202,
         "lotsCum": 2.03,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 356.18,
+        "tpRoi": 35,
+        "tpUsd": 178.09,
         "slUsd": 1785.98
       },
       {
         "level": 203,
         "lotsCum": 2.04,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 357.92,
+        "tpRoi": 35,
+        "tpUsd": 178.96,
         "slUsd": 1794.73
       },
       {
         "level": 204,
         "lotsCum": 2.05,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 359.67,
+        "tpRoi": 35,
+        "tpUsd": 179.83,
         "slUsd": 1803.47
       },
       {
         "level": 205,
         "lotsCum": 2.06,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 361.41,
+        "tpRoi": 35,
+        "tpUsd": 180.7,
         "slUsd": 1812.21
       },
       {
         "level": 206,
         "lotsCum": 2.07,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 363.15,
+        "tpRoi": 35,
+        "tpUsd": 181.58,
         "slUsd": 1820.96
       },
       {
         "level": 207,
         "lotsCum": 2.08,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 364.9,
+        "tpRoi": 35,
+        "tpUsd": 182.45,
         "slUsd": 1829.7
       },
       {
         "level": 208,
         "lotsCum": 2.09,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 366.64,
+        "tpRoi": 35,
+        "tpUsd": 183.32,
         "slUsd": 1838.44
       },
       {
         "level": 209,
         "lotsCum": 2.1,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 526.26,
+        "tpRoi": 50,
+        "tpUsd": 263.13,
         "slUsd": 1847.17
       },
       {
         "level": 210,
         "lotsCum": 2.11,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 528.75,
+        "tpRoi": 50,
+        "tpUsd": 264.37,
         "slUsd": 1855.91
       },
       {
         "level": 211,
         "lotsCum": 2.12,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 531.24,
+        "tpRoi": 50,
+        "tpUsd": 265.62,
         "slUsd": 1864.64
       },
       {
         "level": 212,
         "lotsCum": 2.13,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 533.73,
+        "tpRoi": 50,
+        "tpUsd": 266.86,
         "slUsd": 1873.38
       },
       {
         "level": 213,
         "lotsCum": 2.14,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 536.21,
+        "tpRoi": 50,
+        "tpUsd": 268.11,
         "slUsd": 1882.11
       },
       {
         "level": 214,
         "lotsCum": 2.15,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 538.7,
+        "tpRoi": 50,
+        "tpUsd": 269.35,
         "slUsd": 1890.84
       },
       {
         "level": 215,
         "lotsCum": 2.16,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 541.19,
+        "tpRoi": 50,
+        "tpUsd": 270.6,
         "slUsd": 1899.58
       },
       {
         "level": 216,
         "lotsCum": 2.17,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 543.68,
+        "tpRoi": 50,
+        "tpUsd": 271.84,
         "slUsd": 1908.31
       },
       {
         "level": 217,
         "lotsCum": 2.18,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 546.17,
+        "tpRoi": 50,
+        "tpUsd": 273.08,
         "slUsd": 1917.04
       },
       {
         "level": 218,
         "lotsCum": 2.19,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 548.65,
+        "tpRoi": 50,
+        "tpUsd": 274.33,
         "slUsd": 1925.77
       },
       {
         "level": 219,
         "lotsCum": 2.2,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 551.14,
+        "tpRoi": 50,
+        "tpUsd": 275.57,
         "slUsd": 1934.51
       },
       {
         "level": 220,
         "lotsCum": 2.21,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 553.63,
+        "tpRoi": 50,
+        "tpUsd": 276.81,
         "slUsd": 1943.24
       },
       {
         "level": 221,
         "lotsCum": 2.22,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 556.12,
+        "tpRoi": 50,
+        "tpUsd": 278.06,
         "slUsd": 1951.97
       },
       {
         "level": 222,
         "lotsCum": 2.23,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 558.6,
+        "tpRoi": 50,
+        "tpUsd": 279.3,
         "slUsd": 1960.7
       },
       {
         "level": 223,
         "lotsCum": 2.24,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 561.09,
+        "tpRoi": 50,
+        "tpUsd": 280.55,
         "slUsd": 1969.43
       },
       {
         "level": 224,
         "lotsCum": 2.25,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 563.58,
+        "tpRoi": 50,
+        "tpUsd": 281.79,
         "slUsd": 1978.16
       },
       {
         "level": 225,
         "lotsCum": 2.26,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 566.07,
+        "tpRoi": 50,
+        "tpUsd": 283.03,
         "slUsd": 1986.89
       },
       {
         "level": 226,
         "lotsCum": 2.27,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 568.55,
+        "tpRoi": 50,
+        "tpUsd": 284.28,
         "slUsd": 1995.62
       },
       {
         "level": 227,
         "lotsCum": 2.28,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 571.04,
+        "tpRoi": 50,
+        "tpUsd": 285.52,
         "slUsd": 2004.35
       },
       {
         "level": 228,
         "lotsCum": 2.29,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 573.53,
+        "tpRoi": 50,
+        "tpUsd": 286.76,
         "slUsd": 2013.08
       },
       {
         "level": 229,
         "lotsCum": 2.3,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 576.01,
+        "tpRoi": 50,
+        "tpUsd": 288.01,
         "slUsd": 2021.81
       },
       {
         "level": 230,
         "lotsCum": 2.31,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 578.5,
+        "tpRoi": 50,
+        "tpUsd": 289.25,
         "slUsd": 2030.54
       },
       {
         "level": 231,
         "lotsCum": 2.32,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 580.99,
+        "tpRoi": 50,
+        "tpUsd": 290.49,
         "slUsd": 2039.27
       },
       {
         "level": 232,
         "lotsCum": 2.33,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 583.47,
+        "tpRoi": 50,
+        "tpUsd": 291.74,
         "slUsd": 2048
       },
       {
         "level": 233,
         "lotsCum": 2.34,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 585.96,
+        "tpRoi": 50,
+        "tpUsd": 292.98,
         "slUsd": 2056.72
       },
       {
         "level": 234,
         "lotsCum": 2.35,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 588.45,
+        "tpRoi": 50,
+        "tpUsd": 294.22,
         "slUsd": 2065.45
       },
       {
         "level": 235,
         "lotsCum": 2.36,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 590.93,
+        "tpRoi": 50,
+        "tpUsd": 295.47,
         "slUsd": 2074.18
       },
       {
         "level": 236,
         "lotsCum": 2.37,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 593.42,
+        "tpRoi": 50,
+        "tpUsd": 296.71,
         "slUsd": 2082.91
       },
       {
         "level": 237,
         "lotsCum": 2.38,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 595.91,
+        "tpRoi": 50,
+        "tpUsd": 297.95,
         "slUsd": 2091.64
       },
       {
         "level": 238,
         "lotsCum": 2.39,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 598.39,
+        "tpRoi": 50,
+        "tpUsd": 299.2,
         "slUsd": 2100.36
       },
       {
         "level": 239,
         "lotsCum": 2.4,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 600.88,
+        "tpRoi": 50,
+        "tpUsd": 300.44,
         "slUsd": 2109.09
       },
       {
         "level": 240,
         "lotsCum": 2.41,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 603.37,
+        "tpRoi": 50,
+        "tpUsd": 301.68,
         "slUsd": 2117.81
       },
       {
         "level": 241,
         "lotsCum": 2.42,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 605.85,
+        "tpRoi": 50,
+        "tpUsd": 302.93,
         "slUsd": 2126.54
       },
       {
         "level": 242,
         "lotsCum": 2.43,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 608.34,
+        "tpRoi": 50,
+        "tpUsd": 304.17,
         "slUsd": 2135.27
       },
       {
         "level": 243,
         "lotsCum": 2.44,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 610.82,
+        "tpRoi": 50,
+        "tpUsd": 305.41,
         "slUsd": 2143.99
       },
       {
         "level": 244,
         "lotsCum": 2.45,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 613.31,
+        "tpRoi": 50,
+        "tpUsd": 306.65,
         "slUsd": 2152.72
       },
       {
         "level": 245,
         "lotsCum": 2.46,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 615.8,
+        "tpRoi": 50,
+        "tpUsd": 307.9,
         "slUsd": 2161.44
       },
       {
         "level": 246,
         "lotsCum": 2.47,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 618.28,
+        "tpRoi": 50,
+        "tpUsd": 309.14,
         "slUsd": 2170.17
       },
       {
         "level": 247,
         "lotsCum": 2.48,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 620.77,
+        "tpRoi": 50,
+        "tpUsd": 310.38,
         "slUsd": 2178.89
       },
       {
         "level": 248,
         "lotsCum": 2.49,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 623.25,
+        "tpRoi": 50,
+        "tpUsd": 311.63,
         "slUsd": 2187.62
       },
       {
         "level": 249,
         "lotsCum": 2.5,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 625.74,
+        "tpRoi": 50,
+        "tpUsd": 312.87,
         "slUsd": 2196.34
       },
       {
         "level": 250,
         "lotsCum": 2.51,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 628.22,
+        "tpRoi": 50,
+        "tpUsd": 314.11,
         "slUsd": 2205.06
       },
       {
         "level": 251,
         "lotsCum": 2.52,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 693.78,
+        "tpRoi": 55,
+        "tpUsd": 346.89,
         "slUsd": 2213.79
       },
       {
         "level": 252,
         "lotsCum": 2.53,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 696.51,
+        "tpRoi": 55,
+        "tpUsd": 348.26,
         "slUsd": 2222.51
       },
       {
         "level": 253,
         "lotsCum": 2.54,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 699.25,
+        "tpRoi": 55,
+        "tpUsd": 349.62,
         "slUsd": 2231.23
       },
       {
         "level": 254,
         "lotsCum": 2.55,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 701.98,
+        "tpRoi": 55,
+        "tpUsd": 350.99,
         "slUsd": 2239.96
       },
       {
         "level": 255,
         "lotsCum": 2.56,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 704.71,
+        "tpRoi": 55,
+        "tpUsd": 352.36,
         "slUsd": 2248.68
       },
       {
         "level": 256,
         "lotsCum": 2.57,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 707.45,
+        "tpRoi": 55,
+        "tpUsd": 353.72,
         "slUsd": 2257.4
       },
       {
         "level": 257,
         "lotsCum": 2.58,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 710.18,
+        "tpRoi": 55,
+        "tpUsd": 355.09,
         "slUsd": 2266.12
       },
       {
         "level": 258,
         "lotsCum": 2.59,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 712.91,
+        "tpRoi": 55,
+        "tpUsd": 356.46,
         "slUsd": 2274.85
       },
       {
         "level": 259,
         "lotsCum": 2.6,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 715.65,
+        "tpRoi": 55,
+        "tpUsd": 357.82,
         "slUsd": 2283.57
       },
       {
         "level": 260,
         "lotsCum": 2.61,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 718.38,
+        "tpRoi": 55,
+        "tpUsd": 359.19,
         "slUsd": 2292.29
       },
       {
         "level": 261,
         "lotsCum": 2.62,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 721.11,
+        "tpRoi": 55,
+        "tpUsd": 360.56,
         "slUsd": 2301.01
       },
       {
         "level": 262,
         "lotsCum": 2.63,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 723.85,
+        "tpRoi": 55,
+        "tpUsd": 361.92,
         "slUsd": 2309.73
       },
       {
         "level": 263,
         "lotsCum": 2.64,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 726.58,
+        "tpRoi": 55,
+        "tpUsd": 363.29,
         "slUsd": 2318.45
       },
       {
         "level": 264,
         "lotsCum": 2.65,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 729.31,
+        "tpRoi": 55,
+        "tpUsd": 364.66,
         "slUsd": 2327.17
       },
       {
         "level": 265,
         "lotsCum": 2.66,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 732.05,
+        "tpRoi": 55,
+        "tpUsd": 366.02,
         "slUsd": 2335.89
       },
       {
         "level": 266,
         "lotsCum": 2.67,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 734.78,
+        "tpRoi": 55,
+        "tpUsd": 367.39,
         "slUsd": 2344.61
       },
       {
         "level": 267,
         "lotsCum": 2.68,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 737.51,
+        "tpRoi": 55,
+        "tpUsd": 368.76,
         "slUsd": 2353.33
       },
       {
         "level": 268,
         "lotsCum": 2.69,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 740.24,
+        "tpRoi": 55,
+        "tpUsd": 370.12,
         "slUsd": 2362.05
       },
       {
         "level": 269,
         "lotsCum": 2.7,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 742.98,
+        "tpRoi": 55,
+        "tpUsd": 371.49,
         "slUsd": 2370.77
       },
       {
         "level": 270,
         "lotsCum": 2.71,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 745.71,
+        "tpRoi": 55,
+        "tpUsd": 372.85,
         "slUsd": 2379.49
       },
       {
         "level": 271,
         "lotsCum": 2.72,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 748.44,
+        "tpRoi": 55,
+        "tpUsd": 374.22,
         "slUsd": 2388.21
       },
       {
         "level": 272,
         "lotsCum": 2.73,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 751.17,
+        "tpRoi": 55,
+        "tpUsd": 375.59,
         "slUsd": 2396.93
       },
       {
         "level": 273,
         "lotsCum": 2.74,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 753.91,
+        "tpRoi": 55,
+        "tpUsd": 376.95,
         "slUsd": 2405.65
       },
       {
         "level": 274,
         "lotsCum": 2.75,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 756.64,
+        "tpRoi": 55,
+        "tpUsd": 378.32,
         "slUsd": 2414.37
       },
       {
         "level": 275,
         "lotsCum": 2.76,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 759.37,
+        "tpRoi": 55,
+        "tpUsd": 379.69,
         "slUsd": 2423.08
       },
       {
         "level": 276,
         "lotsCum": 2.77,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 762.1,
+        "tpRoi": 55,
+        "tpUsd": 381.05,
         "slUsd": 2431.8
       },
       {
         "level": 277,
         "lotsCum": 2.78,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 764.84,
+        "tpRoi": 55,
+        "tpUsd": 382.42,
         "slUsd": 2440.52
       },
       {
         "level": 278,
         "lotsCum": 2.79,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 767.57,
+        "tpRoi": 55,
+        "tpUsd": 383.78,
         "slUsd": 2449.24
       },
       {
         "level": 279,
         "lotsCum": 2.8,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 770.3,
+        "tpRoi": 55,
+        "tpUsd": 385.15,
         "slUsd": 2457.95
       },
       {
         "level": 280,
         "lotsCum": 2.81,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 773.03,
+        "tpRoi": 55,
+        "tpUsd": 386.52,
         "slUsd": 2466.67
       },
       {
         "level": 281,
         "lotsCum": 2.82,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 775.76,
+        "tpRoi": 55,
+        "tpUsd": 387.88,
         "slUsd": 2475.39
       },
       {
         "level": 282,
         "lotsCum": 2.83,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 778.49,
+        "tpRoi": 55,
+        "tpUsd": 389.25,
         "slUsd": 2484.1
       },
       {
         "level": 283,
         "lotsCum": 2.84,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 781.23,
+        "tpRoi": 55,
+        "tpUsd": 390.61,
         "slUsd": 2492.82
       },
       {
         "level": 284,
         "lotsCum": 2.85,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 783.96,
+        "tpRoi": 55,
+        "tpUsd": 391.98,
         "slUsd": 2501.54
       },
       {
         "level": 285,
         "lotsCum": 2.86,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 786.69,
+        "tpRoi": 55,
+        "tpUsd": 393.34,
         "slUsd": 2510.25
       },
       {
         "level": 286,
         "lotsCum": 2.87,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 789.42,
+        "tpRoi": 55,
+        "tpUsd": 394.71,
         "slUsd": 2518.97
       },
       {
         "level": 287,
         "lotsCum": 2.88,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 792.15,
+        "tpRoi": 55,
+        "tpUsd": 396.08,
         "slUsd": 2527.68
       },
       {
         "level": 288,
         "lotsCum": 2.89,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 794.88,
+        "tpRoi": 55,
+        "tpUsd": 397.44,
         "slUsd": 2536.4
       },
       {
         "level": 289,
         "lotsCum": 2.9,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 797.61,
+        "tpRoi": 55,
+        "tpUsd": 398.81,
         "slUsd": 2545.11
       },
       {
         "level": 290,
         "lotsCum": 2.91,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 800.35,
+        "tpRoi": 55,
+        "tpUsd": 400.17,
         "slUsd": 2553.83
       },
       {
         "level": 291,
         "lotsCum": 2.92,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 803.08,
+        "tpRoi": 55,
+        "tpUsd": 401.54,
         "slUsd": 2562.54
       },
       {
         "level": 292,
         "lotsCum": 2.93,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 805.81,
+        "tpRoi": 55,
+        "tpUsd": 402.9,
         "slUsd": 2571.26
       },
       {
         "level": 293,
         "lotsCum": 2.94,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 808.54,
+        "tpRoi": 55,
+        "tpUsd": 404.27,
         "slUsd": 2579.97
       },
       {
         "level": 294,
         "lotsCum": 2.95,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 811.27,
+        "tpRoi": 55,
+        "tpUsd": 405.63,
         "slUsd": 2588.69
       },
       {
         "level": 295,
         "lotsCum": 2.96,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 814,
+        "tpRoi": 55,
+        "tpUsd": 407,
         "slUsd": 2597.4
       },
       {
         "level": 296,
         "lotsCum": 2.97,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 816.73,
+        "tpRoi": 55,
+        "tpUsd": 408.37,
         "slUsd": 2606.11
       },
       {
         "level": 297,
         "lotsCum": 2.98,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 819.46,
+        "tpRoi": 55,
+        "tpUsd": 409.73,
         "slUsd": 2614.83
       },
       {
         "level": 298,
         "lotsCum": 2.99,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 822.19,
+        "tpRoi": 55,
+        "tpUsd": 411.1,
         "slUsd": 2623.54
       },
       {
         "level": 299,
         "lotsCum": 3,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 824.92,
+        "tpRoi": 55,
+        "tpUsd": 412.46,
         "slUsd": 2632.25
       },
       {
         "level": 300,
         "lotsCum": 3.01,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 827.65,
+        "tpRoi": 55,
+        "tpUsd": 413.83,
         "slUsd": 2640.97
       },
       {
         "level": 301,
         "lotsCum": 3.02,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 943.62,
+        "tpRoi": 62.5,
+        "tpUsd": 471.81,
         "slUsd": 2649.68
       },
       {
         "level": 302,
         "lotsCum": 3.03,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 946.72,
+        "tpRoi": 62.5,
+        "tpUsd": 473.36,
         "slUsd": 2658.39
       },
       {
         "level": 303,
         "lotsCum": 3.04,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 949.82,
+        "tpRoi": 62.5,
+        "tpUsd": 474.91,
         "slUsd": 2667.1
       },
       {
         "level": 304,
         "lotsCum": 3.05,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 952.93,
+        "tpRoi": 62.5,
+        "tpUsd": 476.46,
         "slUsd": 2675.82
       },
       {
         "level": 305,
         "lotsCum": 3.06,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 956.03,
+        "tpRoi": 62.5,
+        "tpUsd": 478.01,
         "slUsd": 2684.53
       },
       {
         "level": 306,
         "lotsCum": 3.07,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 959.13,
+        "tpRoi": 62.5,
+        "tpUsd": 479.57,
         "slUsd": 2693.24
       },
       {
         "level": 307,
         "lotsCum": 3.08,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 962.23,
+        "tpRoi": 62.5,
+        "tpUsd": 481.12,
         "slUsd": 2701.95
       },
       {
         "level": 308,
         "lotsCum": 3.09,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 965.34,
+        "tpRoi": 62.5,
+        "tpUsd": 482.67,
         "slUsd": 2710.66
       },
       {
         "level": 309,
         "lotsCum": 3.1,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 968.44,
+        "tpRoi": 62.5,
+        "tpUsd": 484.22,
         "slUsd": 2719.37
       },
       {
         "level": 310,
         "lotsCum": 3.11,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 971.54,
+        "tpRoi": 62.5,
+        "tpUsd": 485.77,
         "slUsd": 2728.08
       },
       {
         "level": 311,
         "lotsCum": 3.12,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 974.64,
+        "tpRoi": 62.5,
+        "tpUsd": 487.32,
         "slUsd": 2736.79
       },
       {
         "level": 312,
         "lotsCum": 3.13,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 977.74,
+        "tpRoi": 62.5,
+        "tpUsd": 488.87,
         "slUsd": 2745.5
       },
       {
         "level": 313,
         "lotsCum": 3.14,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 980.85,
+        "tpRoi": 62.5,
+        "tpUsd": 490.42,
         "slUsd": 2754.21
       },
       {
         "level": 314,
         "lotsCum": 3.15,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 983.95,
+        "tpRoi": 62.5,
+        "tpUsd": 491.97,
         "slUsd": 2762.92
       },
       {
         "level": 315,
         "lotsCum": 3.16,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 987.05,
+        "tpRoi": 62.5,
+        "tpUsd": 493.52,
         "slUsd": 2771.63
       },
       {
         "level": 316,
         "lotsCum": 3.17,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 990.15,
+        "tpRoi": 62.5,
+        "tpUsd": 495.08,
         "slUsd": 2780.34
       },
       {
         "level": 317,
         "lotsCum": 3.18,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 993.25,
+        "tpRoi": 62.5,
+        "tpUsd": 496.63,
         "slUsd": 2789.05
       },
       {
         "level": 318,
         "lotsCum": 3.19,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 996.35,
+        "tpRoi": 62.5,
+        "tpUsd": 498.18,
         "slUsd": 2797.76
       },
       {
         "level": 319,
         "lotsCum": 3.2,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 999.46,
+        "tpRoi": 62.5,
+        "tpUsd": 499.73,
         "slUsd": 2806.47
       },
       {
         "level": 320,
         "lotsCum": 3.21,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1002.56,
+        "tpRoi": 62.5,
+        "tpUsd": 501.28,
         "slUsd": 2815.18
       },
       {
         "level": 321,
         "lotsCum": 3.22,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1005.66,
+        "tpRoi": 62.5,
+        "tpUsd": 502.83,
         "slUsd": 2823.89
       },
       {
         "level": 322,
         "lotsCum": 3.23,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1008.76,
+        "tpRoi": 62.5,
+        "tpUsd": 504.38,
         "slUsd": 2832.6
       },
       {
         "level": 323,
         "lotsCum": 3.24,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1011.86,
+        "tpRoi": 62.5,
+        "tpUsd": 505.93,
         "slUsd": 2841.31
       },
       {
         "level": 324,
         "lotsCum": 3.25,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1014.96,
+        "tpRoi": 62.5,
+        "tpUsd": 507.48,
         "slUsd": 2850.01
       },
       {
         "level": 325,
         "lotsCum": 3.26,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1018.06,
+        "tpRoi": 62.5,
+        "tpUsd": 509.03,
         "slUsd": 2858.72
       },
       {
         "level": 326,
         "lotsCum": 3.27,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1021.16,
+        "tpRoi": 62.5,
+        "tpUsd": 510.58,
         "slUsd": 2867.43
       },
       {
         "level": 327,
         "lotsCum": 3.28,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1024.27,
+        "tpRoi": 62.5,
+        "tpUsd": 512.13,
         "slUsd": 2876.14
       },
       {
         "level": 328,
         "lotsCum": 3.29,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1027.37,
+        "tpRoi": 62.5,
+        "tpUsd": 513.68,
         "slUsd": 2884.84
       },
       {
         "level": 329,
         "lotsCum": 3.3,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1030.47,
+        "tpRoi": 62.5,
+        "tpUsd": 515.23,
         "slUsd": 2893.55
       },
       {
         "level": 330,
         "lotsCum": 3.31,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1033.57,
+        "tpRoi": 62.5,
+        "tpUsd": 516.78,
         "slUsd": 2902.26
       },
       {
         "level": 331,
         "lotsCum": 3.32,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1036.67,
+        "tpRoi": 62.5,
+        "tpUsd": 518.33,
         "slUsd": 2910.96
       },
       {
         "level": 332,
         "lotsCum": 3.33,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1039.77,
+        "tpRoi": 62.5,
+        "tpUsd": 519.88,
         "slUsd": 2919.67
       },
       {
         "level": 333,
         "lotsCum": 3.34,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 1042.87,
+        "tpRoi": 62.5,
+        "tpUsd": 521.43,
         "slUsd": 2928.38
       }
     ]
@@ -3525,2672 +3525,2672 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 1.63,
+        "tpRoi": 10,
+        "tpUsd": 0.82,
         "slUsd": 28.64
       },
       {
         "level": 1,
         "lotsCum": 0.02,
         "drop": 20,
-        "tpRoi": 20,
-        "tpUsd": 3.26,
+        "tpRoi": 10,
+        "tpUsd": 1.63,
         "slUsd": 57.27
       },
       {
         "level": 2,
         "lotsCum": 0.03,
         "drop": 40,
-        "tpRoi": 20,
-        "tpUsd": 4.89,
+        "tpRoi": 10,
+        "tpUsd": 2.45,
         "slUsd": 85.88
       },
       {
         "level": 3,
         "lotsCum": 0.04,
         "drop": 40,
-        "tpRoi": 20,
-        "tpUsd": 6.52,
+        "tpRoi": 10,
+        "tpUsd": 3.26,
         "slUsd": 114.49
       },
       {
         "level": 4,
         "lotsCum": 0.05,
         "drop": 60,
-        "tpRoi": 20,
-        "tpUsd": 8.15,
+        "tpRoi": 10,
+        "tpUsd": 4.08,
         "slUsd": 143.08
       },
       {
         "level": 5,
         "lotsCum": 0.06,
         "drop": 60,
-        "tpRoi": 20,
-        "tpUsd": 9.78,
+        "tpRoi": 10,
+        "tpUsd": 4.89,
         "slUsd": 171.66
       },
       {
         "level": 6,
         "lotsCum": 0.07,
         "drop": 60,
-        "tpRoi": 20,
-        "tpUsd": 11.41,
+        "tpRoi": 10,
+        "tpUsd": 5.7,
         "slUsd": 200.24
       },
       {
         "level": 7,
         "lotsCum": 0.08,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 13.04,
+        "tpRoi": 10,
+        "tpUsd": 6.52,
         "slUsd": 228.79
       },
       {
         "level": 8,
         "lotsCum": 0.09,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 14.66,
+        "tpRoi": 10,
+        "tpUsd": 7.33,
         "slUsd": 257.35
       },
       {
         "level": 9,
         "lotsCum": 0.1,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 16.29,
+        "tpRoi": 10,
+        "tpUsd": 8.15,
         "slUsd": 285.9
       },
       {
         "level": 10,
         "lotsCum": 0.11,
         "drop": 80,
-        "tpRoi": 20,
-        "tpUsd": 17.92,
+        "tpRoi": 10,
+        "tpUsd": 8.96,
         "slUsd": 314.44
       },
       {
         "level": 11,
         "lotsCum": 0.12,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 19.54,
+        "tpRoi": 10,
+        "tpUsd": 9.77,
         "slUsd": 342.97
       },
       {
         "level": 12,
         "lotsCum": 0.13,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 21.17,
+        "tpRoi": 10,
+        "tpUsd": 10.58,
         "slUsd": 371.49
       },
       {
         "level": 13,
         "lotsCum": 0.14,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 22.79,
+        "tpRoi": 10,
+        "tpUsd": 11.4,
         "slUsd": 400.01
       },
       {
         "level": 14,
         "lotsCum": 0.15,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 24.42,
+        "tpRoi": 10,
+        "tpUsd": 12.21,
         "slUsd": 428.53
       },
       {
         "level": 15,
         "lotsCum": 0.16,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 26.04,
+        "tpRoi": 10,
+        "tpUsd": 13.02,
         "slUsd": 457.04
       },
       {
         "level": 16,
         "lotsCum": 0.17,
         "drop": 100,
-        "tpRoi": 20,
-        "tpUsd": 27.67,
+        "tpRoi": 10,
+        "tpUsd": 13.83,
         "slUsd": 485.55
       },
       {
         "level": 17,
         "lotsCum": 0.18,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 36.61,
+        "tpRoi": 12.5,
+        "tpUsd": 18.31,
         "slUsd": 514.03
       },
       {
         "level": 18,
         "lotsCum": 0.19,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 38.64,
+        "tpRoi": 12.5,
+        "tpUsd": 19.32,
         "slUsd": 542.52
       },
       {
         "level": 19,
         "lotsCum": 0.2,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 40.67,
+        "tpRoi": 12.5,
+        "tpUsd": 20.33,
         "slUsd": 570.99
       },
       {
         "level": 20,
         "lotsCum": 0.21,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 42.7,
+        "tpRoi": 12.5,
+        "tpUsd": 21.35,
         "slUsd": 599.47
       },
       {
         "level": 21,
         "lotsCum": 0.22,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 44.73,
+        "tpRoi": 12.5,
+        "tpUsd": 22.36,
         "slUsd": 627.94
       },
       {
         "level": 22,
         "lotsCum": 0.23,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 46.75,
+        "tpRoi": 12.5,
+        "tpUsd": 23.38,
         "slUsd": 656.41
       },
       {
         "level": 23,
         "lotsCum": 0.24,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 48.78,
+        "tpRoi": 12.5,
+        "tpUsd": 24.39,
         "slUsd": 684.88
       },
       {
         "level": 24,
         "lotsCum": 0.25,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 50.81,
+        "tpRoi": 12.5,
+        "tpUsd": 25.4,
         "slUsd": 713.34
       },
       {
         "level": 25,
         "lotsCum": 0.26,
         "drop": 130,
-        "tpRoi": 25,
-        "tpUsd": 52.83,
+        "tpRoi": 12.5,
+        "tpUsd": 26.42,
         "slUsd": 741.8
       },
       {
         "level": 26,
         "lotsCum": 0.27,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 54.86,
+        "tpRoi": 12.5,
+        "tpUsd": 27.43,
         "slUsd": 770.24
       },
       {
         "level": 27,
         "lotsCum": 0.28,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 56.89,
+        "tpRoi": 12.5,
+        "tpUsd": 28.44,
         "slUsd": 798.67
       },
       {
         "level": 28,
         "lotsCum": 0.29,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 58.91,
+        "tpRoi": 12.5,
+        "tpUsd": 29.46,
         "slUsd": 827.11
       },
       {
         "level": 29,
         "lotsCum": 0.3,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 60.94,
+        "tpRoi": 12.5,
+        "tpUsd": 30.47,
         "slUsd": 855.54
       },
       {
         "level": 30,
         "lotsCum": 0.31,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 62.96,
+        "tpRoi": 12.5,
+        "tpUsd": 31.48,
         "slUsd": 883.96
       },
       {
         "level": 31,
         "lotsCum": 0.32,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 64.98,
+        "tpRoi": 12.5,
+        "tpUsd": 32.49,
         "slUsd": 912.39
       },
       {
         "level": 32,
         "lotsCum": 0.33,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 67.01,
+        "tpRoi": 12.5,
+        "tpUsd": 33.5,
         "slUsd": 940.81
       },
       {
         "level": 33,
         "lotsCum": 0.34,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 69.03,
+        "tpRoi": 12.5,
+        "tpUsd": 34.52,
         "slUsd": 969.23
       },
       {
         "level": 34,
         "lotsCum": 0.35,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 71.06,
+        "tpRoi": 12.5,
+        "tpUsd": 35.53,
         "slUsd": 997.64
       },
       {
         "level": 35,
         "lotsCum": 0.36,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 73.08,
+        "tpRoi": 12.5,
+        "tpUsd": 36.54,
         "slUsd": 1026.05
       },
       {
         "level": 36,
         "lotsCum": 0.37,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 75.1,
+        "tpRoi": 12.5,
+        "tpUsd": 37.55,
         "slUsd": 1054.46
       },
       {
         "level": 37,
         "lotsCum": 0.38,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 77.13,
+        "tpRoi": 12.5,
+        "tpUsd": 38.56,
         "slUsd": 1082.87
       },
       {
         "level": 38,
         "lotsCum": 0.39,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 79.15,
+        "tpRoi": 12.5,
+        "tpUsd": 39.58,
         "slUsd": 1111.28
       },
       {
         "level": 39,
         "lotsCum": 0.4,
         "drop": 160,
-        "tpRoi": 25,
-        "tpUsd": 81.17,
+        "tpRoi": 12.5,
+        "tpUsd": 40.59,
         "slUsd": 1139.68
       },
       {
         "level": 40,
         "lotsCum": 0.41,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 83.2,
+        "tpRoi": 12.5,
+        "tpUsd": 41.6,
         "slUsd": 1168.06
       },
       {
         "level": 41,
         "lotsCum": 0.42,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 85.22,
+        "tpRoi": 12.5,
+        "tpUsd": 42.61,
         "slUsd": 1196.44
       },
       {
         "level": 42,
         "lotsCum": 0.43,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 87.24,
+        "tpRoi": 12.5,
+        "tpUsd": 43.62,
         "slUsd": 1224.82
       },
       {
         "level": 43,
         "lotsCum": 0.44,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 89.26,
+        "tpRoi": 12.5,
+        "tpUsd": 44.63,
         "slUsd": 1253.2
       },
       {
         "level": 44,
         "lotsCum": 0.45,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 91.28,
+        "tpRoi": 12.5,
+        "tpUsd": 45.64,
         "slUsd": 1281.57
       },
       {
         "level": 45,
         "lotsCum": 0.46,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 93.3,
+        "tpRoi": 12.5,
+        "tpUsd": 46.65,
         "slUsd": 1309.94
       },
       {
         "level": 46,
         "lotsCum": 0.47,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 95.32,
+        "tpRoi": 12.5,
+        "tpUsd": 47.66,
         "slUsd": 1338.31
       },
       {
         "level": 47,
         "lotsCum": 0.48,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 97.34,
+        "tpRoi": 12.5,
+        "tpUsd": 48.67,
         "slUsd": 1366.68
       },
       {
         "level": 48,
         "lotsCum": 0.49,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 99.36,
+        "tpRoi": 12.5,
+        "tpUsd": 49.68,
         "slUsd": 1395.04
       },
       {
         "level": 49,
         "lotsCum": 0.5,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 101.38,
+        "tpRoi": 12.5,
+        "tpUsd": 50.69,
         "slUsd": 1423.41
       },
       {
         "level": 50,
         "lotsCum": 0.51,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 103.4,
+        "tpRoi": 12.5,
+        "tpUsd": 51.7,
         "slUsd": 1451.77
       },
       {
         "level": 51,
         "lotsCum": 0.52,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 105.42,
+        "tpRoi": 12.5,
+        "tpUsd": 52.71,
         "slUsd": 1480.12
       },
       {
         "level": 52,
         "lotsCum": 0.53,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 107.44,
+        "tpRoi": 12.5,
+        "tpUsd": 53.72,
         "slUsd": 1508.48
       },
       {
         "level": 53,
         "lotsCum": 0.54,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 109.46,
+        "tpRoi": 12.5,
+        "tpUsd": 54.73,
         "slUsd": 1536.83
       },
       {
         "level": 54,
         "lotsCum": 0.55,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 111.48,
+        "tpRoi": 12.5,
+        "tpUsd": 55.74,
         "slUsd": 1565.18
       },
       {
         "level": 55,
         "lotsCum": 0.56,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 113.5,
+        "tpRoi": 12.5,
+        "tpUsd": 56.75,
         "slUsd": 1593.53
       },
       {
         "level": 56,
         "lotsCum": 0.57,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 115.52,
+        "tpRoi": 12.5,
+        "tpUsd": 57.76,
         "slUsd": 1621.88
       },
       {
         "level": 57,
         "lotsCum": 0.58,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 117.54,
+        "tpRoi": 12.5,
+        "tpUsd": 58.77,
         "slUsd": 1650.23
       },
       {
         "level": 58,
         "lotsCum": 0.59,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 119.56,
+        "tpRoi": 12.5,
+        "tpUsd": 59.78,
         "slUsd": 1678.57
       },
       {
         "level": 59,
         "lotsCum": 0.6,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 121.58,
+        "tpRoi": 12.5,
+        "tpUsd": 60.79,
         "slUsd": 1706.91
       },
       {
         "level": 60,
         "lotsCum": 0.61,
         "drop": 190,
-        "tpRoi": 25,
-        "tpUsd": 123.59,
+        "tpRoi": 12.5,
+        "tpUsd": 61.8,
         "slUsd": 1735.26
       },
       {
         "level": 61,
         "lotsCum": 0.62,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 150.73,
+        "tpRoi": 15,
+        "tpUsd": 75.37,
         "slUsd": 1763.57
       },
       {
         "level": 62,
         "lotsCum": 0.63,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 153.15,
+        "tpRoi": 15,
+        "tpUsd": 76.58,
         "slUsd": 1791.88
       },
       {
         "level": 63,
         "lotsCum": 0.64,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 155.57,
+        "tpRoi": 15,
+        "tpUsd": 77.79,
         "slUsd": 1820.2
       },
       {
         "level": 64,
         "lotsCum": 0.65,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 157.99,
+        "tpRoi": 15,
+        "tpUsd": 79,
         "slUsd": 1848.51
       },
       {
         "level": 65,
         "lotsCum": 0.66,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 160.41,
+        "tpRoi": 15,
+        "tpUsd": 80.21,
         "slUsd": 1876.81
       },
       {
         "level": 66,
         "lotsCum": 0.67,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 162.83,
+        "tpRoi": 15,
+        "tpUsd": 81.42,
         "slUsd": 1905.12
       },
       {
         "level": 67,
         "lotsCum": 0.68,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 165.25,
+        "tpRoi": 15,
+        "tpUsd": 82.62,
         "slUsd": 1933.42
       },
       {
         "level": 68,
         "lotsCum": 0.69,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 167.67,
+        "tpRoi": 15,
+        "tpUsd": 83.83,
         "slUsd": 1961.73
       },
       {
         "level": 69,
         "lotsCum": 0.7,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 170.09,
+        "tpRoi": 15,
+        "tpUsd": 85.04,
         "slUsd": 1990.03
       },
       {
         "level": 70,
         "lotsCum": 0.71,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 172.51,
+        "tpRoi": 15,
+        "tpUsd": 86.25,
         "slUsd": 2018.32
       },
       {
         "level": 71,
         "lotsCum": 0.72,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 174.92,
+        "tpRoi": 15,
+        "tpUsd": 87.46,
         "slUsd": 2046.62
       },
       {
         "level": 72,
         "lotsCum": 0.73,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 177.34,
+        "tpRoi": 15,
+        "tpUsd": 88.67,
         "slUsd": 2074.91
       },
       {
         "level": 73,
         "lotsCum": 0.74,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 179.76,
+        "tpRoi": 15,
+        "tpUsd": 89.88,
         "slUsd": 2103.21
       },
       {
         "level": 74,
         "lotsCum": 0.75,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 182.18,
+        "tpRoi": 15,
+        "tpUsd": 91.09,
         "slUsd": 2131.5
       },
       {
         "level": 75,
         "lotsCum": 0.76,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 184.6,
+        "tpRoi": 15,
+        "tpUsd": 92.3,
         "slUsd": 2159.79
       },
       {
         "level": 76,
         "lotsCum": 0.77,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 187.01,
+        "tpRoi": 15,
+        "tpUsd": 93.51,
         "slUsd": 2188.08
       },
       {
         "level": 77,
         "lotsCum": 0.78,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 189.43,
+        "tpRoi": 15,
+        "tpUsd": 94.72,
         "slUsd": 2216.36
       },
       {
         "level": 78,
         "lotsCum": 0.79,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 191.85,
+        "tpRoi": 15,
+        "tpUsd": 95.93,
         "slUsd": 2244.65
       },
       {
         "level": 79,
         "lotsCum": 0.8,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 194.27,
+        "tpRoi": 15,
+        "tpUsd": 97.13,
         "slUsd": 2272.93
       },
       {
         "level": 80,
         "lotsCum": 0.81,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 196.68,
+        "tpRoi": 15,
+        "tpUsd": 98.34,
         "slUsd": 2301.21
       },
       {
         "level": 81,
         "lotsCum": 0.82,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 199.1,
+        "tpRoi": 15,
+        "tpUsd": 99.55,
         "slUsd": 2329.49
       },
       {
         "level": 82,
         "lotsCum": 0.83,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 201.52,
+        "tpRoi": 15,
+        "tpUsd": 100.76,
         "slUsd": 2357.77
       },
       {
         "level": 83,
         "lotsCum": 0.84,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 203.94,
+        "tpRoi": 15,
+        "tpUsd": 101.97,
         "slUsd": 2386.04
       },
       {
         "level": 84,
         "lotsCum": 0.85,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 206.35,
+        "tpRoi": 15,
+        "tpUsd": 103.18,
         "slUsd": 2414.32
       },
       {
         "level": 85,
         "lotsCum": 0.86,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 208.77,
+        "tpRoi": 15,
+        "tpUsd": 104.38,
         "slUsd": 2442.59
       },
       {
         "level": 86,
         "lotsCum": 0.87,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 211.18,
+        "tpRoi": 15,
+        "tpUsd": 105.59,
         "slUsd": 2470.86
       },
       {
         "level": 87,
         "lotsCum": 0.88,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 213.6,
+        "tpRoi": 15,
+        "tpUsd": 106.8,
         "slUsd": 2499.13
       },
       {
         "level": 88,
         "lotsCum": 0.89,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 216.02,
+        "tpRoi": 15,
+        "tpUsd": 108.01,
         "slUsd": 2527.4
       },
       {
         "level": 89,
         "lotsCum": 0.9,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 218.43,
+        "tpRoi": 15,
+        "tpUsd": 109.22,
         "slUsd": 2555.67
       },
       {
         "level": 90,
         "lotsCum": 0.91,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 220.85,
+        "tpRoi": 15,
+        "tpUsd": 110.42,
         "slUsd": 2583.93
       },
       {
         "level": 91,
         "lotsCum": 0.92,
         "drop": 230,
-        "tpRoi": 30,
-        "tpUsd": 223.26,
+        "tpRoi": 15,
+        "tpUsd": 111.63,
         "slUsd": 2612.2
       },
       {
         "level": 92,
         "lotsCum": 0.93,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 338.52,
+        "tpRoi": 22.5,
+        "tpUsd": 169.26,
         "slUsd": 2640.44
       },
       {
         "level": 93,
         "lotsCum": 0.94,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 342.14,
+        "tpRoi": 22.5,
+        "tpUsd": 171.07,
         "slUsd": 2668.68
       },
       {
         "level": 94,
         "lotsCum": 0.95,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 345.76,
+        "tpRoi": 22.5,
+        "tpUsd": 172.88,
         "slUsd": 2696.91
       },
       {
         "level": 95,
         "lotsCum": 0.96,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 349.38,
+        "tpRoi": 22.5,
+        "tpUsd": 174.69,
         "slUsd": 2725.15
       },
       {
         "level": 96,
         "lotsCum": 0.97,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 353,
+        "tpRoi": 22.5,
+        "tpUsd": 176.5,
         "slUsd": 2753.38
       },
       {
         "level": 97,
         "lotsCum": 0.98,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 356.62,
+        "tpRoi": 22.5,
+        "tpUsd": 178.31,
         "slUsd": 2781.61
       },
       {
         "level": 98,
         "lotsCum": 0.99,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 360.24,
+        "tpRoi": 22.5,
+        "tpUsd": 180.12,
         "slUsd": 2809.84
       },
       {
         "level": 99,
         "lotsCum": 1,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 363.86,
+        "tpRoi": 22.5,
+        "tpUsd": 181.93,
         "slUsd": 2838.07
       },
       {
         "level": 100,
         "lotsCum": 1.01,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 367.47,
+        "tpRoi": 22.5,
+        "tpUsd": 183.74,
         "slUsd": 2866.3
       },
       {
         "level": 101,
         "lotsCum": 1.02,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 371.09,
+        "tpRoi": 22.5,
+        "tpUsd": 185.55,
         "slUsd": 2894.53
       },
       {
         "level": 102,
         "lotsCum": 1.03,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 374.71,
+        "tpRoi": 22.5,
+        "tpUsd": 187.36,
         "slUsd": 2922.75
       },
       {
         "level": 103,
         "lotsCum": 1.04,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 378.33,
+        "tpRoi": 22.5,
+        "tpUsd": 189.16,
         "slUsd": 2950.97
       },
       {
         "level": 104,
         "lotsCum": 1.05,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 381.95,
+        "tpRoi": 22.5,
+        "tpUsd": 190.97,
         "slUsd": 2979.2
       },
       {
         "level": 105,
         "lotsCum": 1.06,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 385.57,
+        "tpRoi": 22.5,
+        "tpUsd": 192.78,
         "slUsd": 3007.42
       },
       {
         "level": 106,
         "lotsCum": 1.07,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 389.18,
+        "tpRoi": 22.5,
+        "tpUsd": 194.59,
         "slUsd": 3035.63
       },
       {
         "level": 107,
         "lotsCum": 1.08,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 392.8,
+        "tpRoi": 22.5,
+        "tpUsd": 196.4,
         "slUsd": 3063.85
       },
       {
         "level": 108,
         "lotsCum": 1.09,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 396.42,
+        "tpRoi": 22.5,
+        "tpUsd": 198.21,
         "slUsd": 3092.07
       },
       {
         "level": 109,
         "lotsCum": 1.1,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 400.04,
+        "tpRoi": 22.5,
+        "tpUsd": 200.02,
         "slUsd": 3120.28
       },
       {
         "level": 110,
         "lotsCum": 1.11,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 403.65,
+        "tpRoi": 22.5,
+        "tpUsd": 201.83,
         "slUsd": 3148.49
       },
       {
         "level": 111,
         "lotsCum": 1.12,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 407.27,
+        "tpRoi": 22.5,
+        "tpUsd": 203.64,
         "slUsd": 3176.71
       },
       {
         "level": 112,
         "lotsCum": 1.13,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 410.89,
+        "tpRoi": 22.5,
+        "tpUsd": 205.44,
         "slUsd": 3204.92
       },
       {
         "level": 113,
         "lotsCum": 1.14,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 414.5,
+        "tpRoi": 22.5,
+        "tpUsd": 207.25,
         "slUsd": 3233.13
       },
       {
         "level": 114,
         "lotsCum": 1.15,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 418.12,
+        "tpRoi": 22.5,
+        "tpUsd": 209.06,
         "slUsd": 3261.33
       },
       {
         "level": 115,
         "lotsCum": 1.16,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 421.74,
+        "tpRoi": 22.5,
+        "tpUsd": 210.87,
         "slUsd": 3289.54
       },
       {
         "level": 116,
         "lotsCum": 1.17,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 425.35,
+        "tpRoi": 22.5,
+        "tpUsd": 212.68,
         "slUsd": 3317.74
       },
       {
         "level": 117,
         "lotsCum": 1.18,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 428.97,
+        "tpRoi": 22.5,
+        "tpUsd": 214.48,
         "slUsd": 3345.95
       },
       {
         "level": 118,
         "lotsCum": 1.19,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 432.58,
+        "tpRoi": 22.5,
+        "tpUsd": 216.29,
         "slUsd": 3374.15
       },
       {
         "level": 119,
         "lotsCum": 1.2,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 436.2,
+        "tpRoi": 22.5,
+        "tpUsd": 218.1,
         "slUsd": 3402.35
       },
       {
         "level": 120,
         "lotsCum": 1.21,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 439.81,
+        "tpRoi": 22.5,
+        "tpUsd": 219.91,
         "slUsd": 3430.55
       },
       {
         "level": 121,
         "lotsCum": 1.22,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 443.43,
+        "tpRoi": 22.5,
+        "tpUsd": 221.71,
         "slUsd": 3458.75
       },
       {
         "level": 122,
         "lotsCum": 1.23,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 447.04,
+        "tpRoi": 22.5,
+        "tpUsd": 223.52,
         "slUsd": 3486.95
       },
       {
         "level": 123,
         "lotsCum": 1.24,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 450.66,
+        "tpRoi": 22.5,
+        "tpUsd": 225.33,
         "slUsd": 3515.14
       },
       {
         "level": 124,
         "lotsCum": 1.25,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 454.27,
+        "tpRoi": 22.5,
+        "tpUsd": 227.14,
         "slUsd": 3543.34
       },
       {
         "level": 125,
         "lotsCum": 1.26,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 457.89,
+        "tpRoi": 22.5,
+        "tpUsd": 228.94,
         "slUsd": 3571.53
       },
       {
         "level": 126,
         "lotsCum": 1.27,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 461.5,
+        "tpRoi": 22.5,
+        "tpUsd": 230.75,
         "slUsd": 3599.72
       },
       {
         "level": 127,
         "lotsCum": 1.28,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 465.12,
+        "tpRoi": 22.5,
+        "tpUsd": 232.56,
         "slUsd": 3627.92
       },
       {
         "level": 128,
         "lotsCum": 1.29,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 468.73,
+        "tpRoi": 22.5,
+        "tpUsd": 234.37,
         "slUsd": 3656.11
       },
       {
         "level": 129,
         "lotsCum": 1.3,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 472.35,
+        "tpRoi": 22.5,
+        "tpUsd": 236.17,
         "slUsd": 3684.29
       },
       {
         "level": 130,
         "lotsCum": 1.31,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 475.96,
+        "tpRoi": 22.5,
+        "tpUsd": 237.98,
         "slUsd": 3712.48
       },
       {
         "level": 131,
         "lotsCum": 1.32,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 479.57,
+        "tpRoi": 22.5,
+        "tpUsd": 239.79,
         "slUsd": 3740.67
       },
       {
         "level": 132,
         "lotsCum": 1.33,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 483.19,
+        "tpRoi": 22.5,
+        "tpUsd": 241.59,
         "slUsd": 3768.85
       },
       {
         "level": 133,
         "lotsCum": 1.34,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 486.8,
+        "tpRoi": 22.5,
+        "tpUsd": 243.4,
         "slUsd": 3797.04
       },
       {
         "level": 134,
         "lotsCum": 1.35,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 490.41,
+        "tpRoi": 22.5,
+        "tpUsd": 245.21,
         "slUsd": 3825.22
       },
       {
         "level": 135,
         "lotsCum": 1.36,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 494.03,
+        "tpRoi": 22.5,
+        "tpUsd": 247.01,
         "slUsd": 3853.4
       },
       {
         "level": 136,
         "lotsCum": 1.37,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 497.64,
+        "tpRoi": 22.5,
+        "tpUsd": 248.82,
         "slUsd": 3881.58
       },
       {
         "level": 137,
         "lotsCum": 1.38,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 501.25,
+        "tpRoi": 22.5,
+        "tpUsd": 250.63,
         "slUsd": 3909.76
       },
       {
         "level": 138,
         "lotsCum": 1.39,
         "drop": 270,
-        "tpRoi": 45,
-        "tpUsd": 504.86,
+        "tpRoi": 22.5,
+        "tpUsd": 252.43,
         "slUsd": 3937.94
       },
       {
         "level": 139,
         "lotsCum": 1.4,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 677.97,
+        "tpRoi": 30,
+        "tpUsd": 338.98,
         "slUsd": 3966.1
       },
       {
         "level": 140,
         "lotsCum": 1.41,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 682.78,
+        "tpRoi": 30,
+        "tpUsd": 341.39,
         "slUsd": 3994.25
       },
       {
         "level": 141,
         "lotsCum": 1.42,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 687.59,
+        "tpRoi": 30,
+        "tpUsd": 343.8,
         "slUsd": 4022.4
       },
       {
         "level": 142,
         "lotsCum": 1.43,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 692.4,
+        "tpRoi": 30,
+        "tpUsd": 346.2,
         "slUsd": 4050.55
       },
       {
         "level": 143,
         "lotsCum": 1.44,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 697.21,
+        "tpRoi": 30,
+        "tpUsd": 348.61,
         "slUsd": 4078.7
       },
       {
         "level": 144,
         "lotsCum": 1.45,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 702.03,
+        "tpRoi": 30,
+        "tpUsd": 351.01,
         "slUsd": 4106.85
       },
       {
         "level": 145,
         "lotsCum": 1.46,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 706.84,
+        "tpRoi": 30,
+        "tpUsd": 353.42,
         "slUsd": 4135
       },
       {
         "level": 146,
         "lotsCum": 1.47,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 711.65,
+        "tpRoi": 30,
+        "tpUsd": 355.82,
         "slUsd": 4163.15
       },
       {
         "level": 147,
         "lotsCum": 1.48,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 716.46,
+        "tpRoi": 30,
+        "tpUsd": 358.23,
         "slUsd": 4191.29
       },
       {
         "level": 148,
         "lotsCum": 1.49,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 721.27,
+        "tpRoi": 30,
+        "tpUsd": 360.64,
         "slUsd": 4219.44
       },
       {
         "level": 149,
         "lotsCum": 1.5,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 726.08,
+        "tpRoi": 30,
+        "tpUsd": 363.04,
         "slUsd": 4247.58
       },
       {
         "level": 150,
         "lotsCum": 1.51,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 730.89,
+        "tpRoi": 30,
+        "tpUsd": 365.45,
         "slUsd": 4275.72
       },
       {
         "level": 151,
         "lotsCum": 1.52,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 735.7,
+        "tpRoi": 30,
+        "tpUsd": 367.85,
         "slUsd": 4303.86
       },
       {
         "level": 152,
         "lotsCum": 1.53,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 740.51,
+        "tpRoi": 30,
+        "tpUsd": 370.26,
         "slUsd": 4332
       },
       {
         "level": 153,
         "lotsCum": 1.54,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 745.32,
+        "tpRoi": 30,
+        "tpUsd": 372.66,
         "slUsd": 4360.14
       },
       {
         "level": 154,
         "lotsCum": 1.55,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 750.13,
+        "tpRoi": 30,
+        "tpUsd": 375.07,
         "slUsd": 4388.28
       },
       {
         "level": 155,
         "lotsCum": 1.56,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 754.94,
+        "tpRoi": 30,
+        "tpUsd": 377.47,
         "slUsd": 4416.41
       },
       {
         "level": 156,
         "lotsCum": 1.57,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 759.75,
+        "tpRoi": 30,
+        "tpUsd": 379.88,
         "slUsd": 4444.55
       },
       {
         "level": 157,
         "lotsCum": 1.58,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 764.56,
+        "tpRoi": 30,
+        "tpUsd": 382.28,
         "slUsd": 4472.68
       },
       {
         "level": 158,
         "lotsCum": 1.59,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 769.37,
+        "tpRoi": 30,
+        "tpUsd": 384.68,
         "slUsd": 4500.81
       },
       {
         "level": 159,
         "lotsCum": 1.6,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 774.18,
+        "tpRoi": 30,
+        "tpUsd": 387.09,
         "slUsd": 4528.94
       },
       {
         "level": 160,
         "lotsCum": 1.61,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 778.99,
+        "tpRoi": 30,
+        "tpUsd": 389.49,
         "slUsd": 4557.07
       },
       {
         "level": 161,
         "lotsCum": 1.62,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 783.8,
+        "tpRoi": 30,
+        "tpUsd": 391.9,
         "slUsd": 4585.2
       },
       {
         "level": 162,
         "lotsCum": 1.63,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 788.6,
+        "tpRoi": 30,
+        "tpUsd": 394.3,
         "slUsd": 4613.33
       },
       {
         "level": 163,
         "lotsCum": 1.64,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 793.41,
+        "tpRoi": 30,
+        "tpUsd": 396.71,
         "slUsd": 4641.46
       },
       {
         "level": 164,
         "lotsCum": 1.65,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 798.22,
+        "tpRoi": 30,
+        "tpUsd": 399.11,
         "slUsd": 4669.58
       },
       {
         "level": 165,
         "lotsCum": 1.66,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 803.03,
+        "tpRoi": 30,
+        "tpUsd": 401.51,
         "slUsd": 4697.71
       },
       {
         "level": 166,
         "lotsCum": 1.67,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 807.83,
+        "tpRoi": 30,
+        "tpUsd": 403.92,
         "slUsd": 4725.83
       },
       {
         "level": 167,
         "lotsCum": 1.68,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 812.64,
+        "tpRoi": 30,
+        "tpUsd": 406.32,
         "slUsd": 4753.96
       },
       {
         "level": 168,
         "lotsCum": 1.69,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 817.45,
+        "tpRoi": 30,
+        "tpUsd": 408.72,
         "slUsd": 4782.08
       },
       {
         "level": 169,
         "lotsCum": 1.7,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 822.26,
+        "tpRoi": 30,
+        "tpUsd": 411.13,
         "slUsd": 4810.2
       },
       {
         "level": 170,
         "lotsCum": 1.71,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 827.06,
+        "tpRoi": 30,
+        "tpUsd": 413.53,
         "slUsd": 4838.32
       },
       {
         "level": 171,
         "lotsCum": 1.72,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 831.87,
+        "tpRoi": 30,
+        "tpUsd": 415.93,
         "slUsd": 4866.44
       },
       {
         "level": 172,
         "lotsCum": 1.73,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 836.68,
+        "tpRoi": 30,
+        "tpUsd": 418.34,
         "slUsd": 4894.56
       },
       {
         "level": 173,
         "lotsCum": 1.74,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 841.48,
+        "tpRoi": 30,
+        "tpUsd": 420.74,
         "slUsd": 4922.67
       },
       {
         "level": 174,
         "lotsCum": 1.75,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 846.29,
+        "tpRoi": 30,
+        "tpUsd": 423.14,
         "slUsd": 4950.79
       },
       {
         "level": 175,
         "lotsCum": 1.76,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 851.09,
+        "tpRoi": 30,
+        "tpUsd": 425.55,
         "slUsd": 4978.9
       },
       {
         "level": 176,
         "lotsCum": 1.77,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 855.9,
+        "tpRoi": 30,
+        "tpUsd": 427.95,
         "slUsd": 5007.02
       },
       {
         "level": 177,
         "lotsCum": 1.78,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 860.71,
+        "tpRoi": 30,
+        "tpUsd": 430.35,
         "slUsd": 5035.13
       },
       {
         "level": 178,
         "lotsCum": 1.79,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 865.51,
+        "tpRoi": 30,
+        "tpUsd": 432.76,
         "slUsd": 5063.24
       },
       {
         "level": 179,
         "lotsCum": 1.8,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 870.32,
+        "tpRoi": 30,
+        "tpUsd": 435.16,
         "slUsd": 5091.35
       },
       {
         "level": 180,
         "lotsCum": 1.81,
         "drop": 310,
-        "tpRoi": 60,
-        "tpUsd": 875.12,
+        "tpRoi": 30,
+        "tpUsd": 437.56,
         "slUsd": 5119.46
       },
       {
         "level": 181,
         "lotsCum": 1.82,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1026.58,
+        "tpRoi": 35,
+        "tpUsd": 513.29,
         "slUsd": 5147.57
       },
       {
         "level": 182,
         "lotsCum": 1.83,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1032.19,
+        "tpRoi": 35,
+        "tpUsd": 516.09,
         "slUsd": 5175.68
       },
       {
         "level": 183,
         "lotsCum": 1.84,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1037.79,
+        "tpRoi": 35,
+        "tpUsd": 518.9,
         "slUsd": 5203.79
       },
       {
         "level": 184,
         "lotsCum": 1.85,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1043.4,
+        "tpRoi": 35,
+        "tpUsd": 521.7,
         "slUsd": 5231.89
       },
       {
         "level": 185,
         "lotsCum": 1.86,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1049,
+        "tpRoi": 35,
+        "tpUsd": 524.5,
         "slUsd": 5260
       },
       {
         "level": 186,
         "lotsCum": 1.87,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1054.61,
+        "tpRoi": 35,
+        "tpUsd": 527.3,
         "slUsd": 5288.1
       },
       {
         "level": 187,
         "lotsCum": 1.88,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1060.21,
+        "tpRoi": 35,
+        "tpUsd": 530.11,
         "slUsd": 5316.21
       },
       {
         "level": 188,
         "lotsCum": 1.89,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1065.82,
+        "tpRoi": 35,
+        "tpUsd": 532.91,
         "slUsd": 5344.31
       },
       {
         "level": 189,
         "lotsCum": 1.9,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1071.42,
+        "tpRoi": 35,
+        "tpUsd": 535.71,
         "slUsd": 5372.41
       },
       {
         "level": 190,
         "lotsCum": 1.91,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1077.02,
+        "tpRoi": 35,
+        "tpUsd": 538.51,
         "slUsd": 5400.51
       },
       {
         "level": 191,
         "lotsCum": 1.92,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1082.63,
+        "tpRoi": 35,
+        "tpUsd": 541.31,
         "slUsd": 5428.61
       },
       {
         "level": 192,
         "lotsCum": 1.93,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1088.23,
+        "tpRoi": 35,
+        "tpUsd": 544.12,
         "slUsd": 5456.71
       },
       {
         "level": 193,
         "lotsCum": 1.94,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1093.84,
+        "tpRoi": 35,
+        "tpUsd": 546.92,
         "slUsd": 5484.81
       },
       {
         "level": 194,
         "lotsCum": 1.95,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1099.44,
+        "tpRoi": 35,
+        "tpUsd": 549.72,
         "slUsd": 5512.9
       },
       {
         "level": 195,
         "lotsCum": 1.96,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1105.04,
+        "tpRoi": 35,
+        "tpUsd": 552.52,
         "slUsd": 5541
       },
       {
         "level": 196,
         "lotsCum": 1.97,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1110.65,
+        "tpRoi": 35,
+        "tpUsd": 555.32,
         "slUsd": 5569.09
       },
       {
         "level": 197,
         "lotsCum": 1.98,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1116.25,
+        "tpRoi": 35,
+        "tpUsd": 558.12,
         "slUsd": 5597.19
       },
       {
         "level": 198,
         "lotsCum": 1.99,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1121.85,
+        "tpRoi": 35,
+        "tpUsd": 560.93,
         "slUsd": 5625.28
       },
       {
         "level": 199,
         "lotsCum": 2,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1127.45,
+        "tpRoi": 35,
+        "tpUsd": 563.73,
         "slUsd": 5653.37
       },
       {
         "level": 200,
         "lotsCum": 2.01,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1133.06,
+        "tpRoi": 35,
+        "tpUsd": 566.53,
         "slUsd": 5681.47
       },
       {
         "level": 201,
         "lotsCum": 2.02,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1138.66,
+        "tpRoi": 35,
+        "tpUsd": 569.33,
         "slUsd": 5709.56
       },
       {
         "level": 202,
         "lotsCum": 2.03,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1144.26,
+        "tpRoi": 35,
+        "tpUsd": 572.13,
         "slUsd": 5737.65
       },
       {
         "level": 203,
         "lotsCum": 2.04,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1149.86,
+        "tpRoi": 35,
+        "tpUsd": 574.93,
         "slUsd": 5765.74
       },
       {
         "level": 204,
         "lotsCum": 2.05,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1155.46,
+        "tpRoi": 35,
+        "tpUsd": 577.73,
         "slUsd": 5793.82
       },
       {
         "level": 205,
         "lotsCum": 2.06,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1161.06,
+        "tpRoi": 35,
+        "tpUsd": 580.53,
         "slUsd": 5821.91
       },
       {
         "level": 206,
         "lotsCum": 2.07,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1166.67,
+        "tpRoi": 35,
+        "tpUsd": 583.33,
         "slUsd": 5850
       },
       {
         "level": 207,
         "lotsCum": 2.08,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1172.27,
+        "tpRoi": 35,
+        "tpUsd": 586.13,
         "slUsd": 5878.08
       },
       {
         "level": 208,
         "lotsCum": 2.09,
         "drop": 310,
-        "tpRoi": 70,
-        "tpUsd": 1177.87,
+        "tpRoi": 35,
+        "tpUsd": 588.93,
         "slUsd": 5906.17
       },
       {
         "level": 209,
         "lotsCum": 2.1,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1690.66,
+        "tpRoi": 50,
+        "tpUsd": 845.33,
         "slUsd": 5934.23
       },
       {
         "level": 210,
         "lotsCum": 2.11,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1698.66,
+        "tpRoi": 50,
+        "tpUsd": 849.33,
         "slUsd": 5962.29
       },
       {
         "level": 211,
         "lotsCum": 2.12,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1706.65,
+        "tpRoi": 50,
+        "tpUsd": 853.33,
         "slUsd": 5990.35
       },
       {
         "level": 212,
         "lotsCum": 2.13,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1714.65,
+        "tpRoi": 50,
+        "tpUsd": 857.32,
         "slUsd": 6018.41
       },
       {
         "level": 213,
         "lotsCum": 2.14,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1722.64,
+        "tpRoi": 50,
+        "tpUsd": 861.32,
         "slUsd": 6046.47
       },
       {
         "level": 214,
         "lotsCum": 2.15,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1730.63,
+        "tpRoi": 50,
+        "tpUsd": 865.32,
         "slUsd": 6074.52
       },
       {
         "level": 215,
         "lotsCum": 2.16,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1738.63,
+        "tpRoi": 50,
+        "tpUsd": 869.31,
         "slUsd": 6102.58
       },
       {
         "level": 216,
         "lotsCum": 2.17,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1746.62,
+        "tpRoi": 50,
+        "tpUsd": 873.31,
         "slUsd": 6130.63
       },
       {
         "level": 217,
         "lotsCum": 2.18,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1754.61,
+        "tpRoi": 50,
+        "tpUsd": 877.31,
         "slUsd": 6158.69
       },
       {
         "level": 218,
         "lotsCum": 2.19,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1762.6,
+        "tpRoi": 50,
+        "tpUsd": 881.3,
         "slUsd": 6186.74
       },
       {
         "level": 219,
         "lotsCum": 2.2,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1770.6,
+        "tpRoi": 50,
+        "tpUsd": 885.3,
         "slUsd": 6214.79
       },
       {
         "level": 220,
         "lotsCum": 2.21,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1778.59,
+        "tpRoi": 50,
+        "tpUsd": 889.29,
         "slUsd": 6242.84
       },
       {
         "level": 221,
         "lotsCum": 2.22,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1786.58,
+        "tpRoi": 50,
+        "tpUsd": 893.29,
         "slUsd": 6270.89
       },
       {
         "level": 222,
         "lotsCum": 2.23,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1794.57,
+        "tpRoi": 50,
+        "tpUsd": 897.29,
         "slUsd": 6298.94
       },
       {
         "level": 223,
         "lotsCum": 2.24,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1802.56,
+        "tpRoi": 50,
+        "tpUsd": 901.28,
         "slUsd": 6326.99
       },
       {
         "level": 224,
         "lotsCum": 2.25,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1810.55,
+        "tpRoi": 50,
+        "tpUsd": 905.28,
         "slUsd": 6355.04
       },
       {
         "level": 225,
         "lotsCum": 2.26,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1818.54,
+        "tpRoi": 50,
+        "tpUsd": 909.27,
         "slUsd": 6383.09
       },
       {
         "level": 226,
         "lotsCum": 2.27,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1826.53,
+        "tpRoi": 50,
+        "tpUsd": 913.27,
         "slUsd": 6411.13
       },
       {
         "level": 227,
         "lotsCum": 2.28,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1834.52,
+        "tpRoi": 50,
+        "tpUsd": 917.26,
         "slUsd": 6439.18
       },
       {
         "level": 228,
         "lotsCum": 2.29,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1842.51,
+        "tpRoi": 50,
+        "tpUsd": 921.26,
         "slUsd": 6467.22
       },
       {
         "level": 229,
         "lotsCum": 2.3,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1850.5,
+        "tpRoi": 50,
+        "tpUsd": 925.25,
         "slUsd": 6495.27
       },
       {
         "level": 230,
         "lotsCum": 2.31,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1858.49,
+        "tpRoi": 50,
+        "tpUsd": 929.25,
         "slUsd": 6523.31
       },
       {
         "level": 231,
         "lotsCum": 2.32,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1866.48,
+        "tpRoi": 50,
+        "tpUsd": 933.24,
         "slUsd": 6551.35
       },
       {
         "level": 232,
         "lotsCum": 2.33,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1874.47,
+        "tpRoi": 50,
+        "tpUsd": 937.24,
         "slUsd": 6579.39
       },
       {
         "level": 233,
         "lotsCum": 2.34,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1882.46,
+        "tpRoi": 50,
+        "tpUsd": 941.23,
         "slUsd": 6607.43
       },
       {
         "level": 234,
         "lotsCum": 2.35,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1890.45,
+        "tpRoi": 50,
+        "tpUsd": 945.22,
         "slUsd": 6635.47
       },
       {
         "level": 235,
         "lotsCum": 2.36,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1898.44,
+        "tpRoi": 50,
+        "tpUsd": 949.22,
         "slUsd": 6663.51
       },
       {
         "level": 236,
         "lotsCum": 2.37,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1906.42,
+        "tpRoi": 50,
+        "tpUsd": 953.21,
         "slUsd": 6691.55
       },
       {
         "level": 237,
         "lotsCum": 2.38,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1914.41,
+        "tpRoi": 50,
+        "tpUsd": 957.21,
         "slUsd": 6719.58
       },
       {
         "level": 238,
         "lotsCum": 2.39,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1922.4,
+        "tpRoi": 50,
+        "tpUsd": 961.2,
         "slUsd": 6747.62
       },
       {
         "level": 239,
         "lotsCum": 2.4,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1930.39,
+        "tpRoi": 50,
+        "tpUsd": 965.19,
         "slUsd": 6775.65
       },
       {
         "level": 240,
         "lotsCum": 2.41,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1938.37,
+        "tpRoi": 50,
+        "tpUsd": 969.19,
         "slUsd": 6803.69
       },
       {
         "level": 241,
         "lotsCum": 2.42,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1946.36,
+        "tpRoi": 50,
+        "tpUsd": 973.18,
         "slUsd": 6831.72
       },
       {
         "level": 242,
         "lotsCum": 2.43,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1954.35,
+        "tpRoi": 50,
+        "tpUsd": 977.17,
         "slUsd": 6859.75
       },
       {
         "level": 243,
         "lotsCum": 2.44,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1962.33,
+        "tpRoi": 50,
+        "tpUsd": 981.17,
         "slUsd": 6887.79
       },
       {
         "level": 244,
         "lotsCum": 2.45,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1970.32,
+        "tpRoi": 50,
+        "tpUsd": 985.16,
         "slUsd": 6915.82
       },
       {
         "level": 245,
         "lotsCum": 2.46,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1978.3,
+        "tpRoi": 50,
+        "tpUsd": 989.15,
         "slUsd": 6943.85
       },
       {
         "level": 246,
         "lotsCum": 2.47,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1986.29,
+        "tpRoi": 50,
+        "tpUsd": 993.14,
         "slUsd": 6971.88
       },
       {
         "level": 247,
         "lotsCum": 2.48,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 1994.28,
+        "tpRoi": 50,
+        "tpUsd": 997.14,
         "slUsd": 6999.91
       },
       {
         "level": 248,
         "lotsCum": 2.49,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 2002.26,
+        "tpRoi": 50,
+        "tpUsd": 1001.13,
         "slUsd": 7027.93
       },
       {
         "level": 249,
         "lotsCum": 2.5,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 2010.25,
+        "tpRoi": 50,
+        "tpUsd": 1005.12,
         "slUsd": 7055.96
       },
       {
         "level": 250,
         "lotsCum": 2.51,
         "drop": 350,
-        "tpRoi": 100,
-        "tpUsd": 2018.23,
+        "tpRoi": 50,
+        "tpUsd": 1009.11,
         "slUsd": 7083.99
       },
       {
         "level": 251,
         "lotsCum": 2.52,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2228.84,
+        "tpRoi": 55,
+        "tpUsd": 1114.42,
         "slUsd": 7112.01
       },
       {
         "level": 252,
         "lotsCum": 2.53,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2237.62,
+        "tpRoi": 55,
+        "tpUsd": 1118.81,
         "slUsd": 7140.04
       },
       {
         "level": 253,
         "lotsCum": 2.54,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2246.4,
+        "tpRoi": 55,
+        "tpUsd": 1123.2,
         "slUsd": 7168.06
       },
       {
         "level": 254,
         "lotsCum": 2.55,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2255.18,
+        "tpRoi": 55,
+        "tpUsd": 1127.59,
         "slUsd": 7196.08
       },
       {
         "level": 255,
         "lotsCum": 2.56,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2263.97,
+        "tpRoi": 55,
+        "tpUsd": 1131.98,
         "slUsd": 7224.11
       },
       {
         "level": 256,
         "lotsCum": 2.57,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2272.75,
+        "tpRoi": 55,
+        "tpUsd": 1136.37,
         "slUsd": 7252.13
       },
       {
         "level": 257,
         "lotsCum": 2.58,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2281.53,
+        "tpRoi": 55,
+        "tpUsd": 1140.76,
         "slUsd": 7280.15
       },
       {
         "level": 258,
         "lotsCum": 2.59,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2290.31,
+        "tpRoi": 55,
+        "tpUsd": 1145.15,
         "slUsd": 7308.17
       },
       {
         "level": 259,
         "lotsCum": 2.6,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2299.09,
+        "tpRoi": 55,
+        "tpUsd": 1149.55,
         "slUsd": 7336.19
       },
       {
         "level": 260,
         "lotsCum": 2.61,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2307.87,
+        "tpRoi": 55,
+        "tpUsd": 1153.94,
         "slUsd": 7364.21
       },
       {
         "level": 261,
         "lotsCum": 2.62,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2316.65,
+        "tpRoi": 55,
+        "tpUsd": 1158.33,
         "slUsd": 7392.23
       },
       {
         "level": 262,
         "lotsCum": 2.63,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2325.43,
+        "tpRoi": 55,
+        "tpUsd": 1162.72,
         "slUsd": 7420.24
       },
       {
         "level": 263,
         "lotsCum": 2.64,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2334.21,
+        "tpRoi": 55,
+        "tpUsd": 1167.11,
         "slUsd": 7448.26
       },
       {
         "level": 264,
         "lotsCum": 2.65,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2342.99,
+        "tpRoi": 55,
+        "tpUsd": 1171.5,
         "slUsd": 7476.27
       },
       {
         "level": 265,
         "lotsCum": 2.66,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2351.77,
+        "tpRoi": 55,
+        "tpUsd": 1175.89,
         "slUsd": 7504.29
       },
       {
         "level": 266,
         "lotsCum": 2.67,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2360.55,
+        "tpRoi": 55,
+        "tpUsd": 1180.28,
         "slUsd": 7532.3
       },
       {
         "level": 267,
         "lotsCum": 2.68,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2369.33,
+        "tpRoi": 55,
+        "tpUsd": 1184.67,
         "slUsd": 7560.32
       },
       {
         "level": 268,
         "lotsCum": 2.69,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2378.11,
+        "tpRoi": 55,
+        "tpUsd": 1189.05,
         "slUsd": 7588.33
       },
       {
         "level": 269,
         "lotsCum": 2.7,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2386.89,
+        "tpRoi": 55,
+        "tpUsd": 1193.44,
         "slUsd": 7616.34
       },
       {
         "level": 270,
         "lotsCum": 2.71,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2395.67,
+        "tpRoi": 55,
+        "tpUsd": 1197.83,
         "slUsd": 7644.35
       },
       {
         "level": 271,
         "lotsCum": 2.72,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2404.44,
+        "tpRoi": 55,
+        "tpUsd": 1202.22,
         "slUsd": 7672.36
       },
       {
         "level": 272,
         "lotsCum": 2.73,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2413.22,
+        "tpRoi": 55,
+        "tpUsd": 1206.61,
         "slUsd": 7700.37
       },
       {
         "level": 273,
         "lotsCum": 2.74,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2422,
+        "tpRoi": 55,
+        "tpUsd": 1211,
         "slUsd": 7728.38
       },
       {
         "level": 274,
         "lotsCum": 2.75,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2430.78,
+        "tpRoi": 55,
+        "tpUsd": 1215.39,
         "slUsd": 7756.39
       },
       {
         "level": 275,
         "lotsCum": 2.76,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2439.55,
+        "tpRoi": 55,
+        "tpUsd": 1219.78,
         "slUsd": 7784.4
       },
       {
         "level": 276,
         "lotsCum": 2.77,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2448.33,
+        "tpRoi": 55,
+        "tpUsd": 1224.17,
         "slUsd": 7812.4
       },
       {
         "level": 277,
         "lotsCum": 2.78,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2457.11,
+        "tpRoi": 55,
+        "tpUsd": 1228.55,
         "slUsd": 7840.41
       },
       {
         "level": 278,
         "lotsCum": 2.79,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2465.89,
+        "tpRoi": 55,
+        "tpUsd": 1232.94,
         "slUsd": 7868.42
       },
       {
         "level": 279,
         "lotsCum": 2.8,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2474.66,
+        "tpRoi": 55,
+        "tpUsd": 1237.33,
         "slUsd": 7896.42
       },
       {
         "level": 280,
         "lotsCum": 2.81,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2483.44,
+        "tpRoi": 55,
+        "tpUsd": 1241.72,
         "slUsd": 7924.43
       },
       {
         "level": 281,
         "lotsCum": 2.82,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2492.21,
+        "tpRoi": 55,
+        "tpUsd": 1246.11,
         "slUsd": 7952.43
       },
       {
         "level": 282,
         "lotsCum": 2.83,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2500.99,
+        "tpRoi": 55,
+        "tpUsd": 1250.49,
         "slUsd": 7980.43
       },
       {
         "level": 283,
         "lotsCum": 2.84,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2509.77,
+        "tpRoi": 55,
+        "tpUsd": 1254.88,
         "slUsd": 8008.43
       },
       {
         "level": 284,
         "lotsCum": 2.85,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2518.54,
+        "tpRoi": 55,
+        "tpUsd": 1259.27,
         "slUsd": 8036.43
       },
       {
         "level": 285,
         "lotsCum": 2.86,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2527.32,
+        "tpRoi": 55,
+        "tpUsd": 1263.66,
         "slUsd": 8064.44
       },
       {
         "level": 286,
         "lotsCum": 2.87,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2536.09,
+        "tpRoi": 55,
+        "tpUsd": 1268.05,
         "slUsd": 8092.44
       },
       {
         "level": 287,
         "lotsCum": 2.88,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2544.87,
+        "tpRoi": 55,
+        "tpUsd": 1272.43,
         "slUsd": 8120.43
       },
       {
         "level": 288,
         "lotsCum": 2.89,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2553.64,
+        "tpRoi": 55,
+        "tpUsd": 1276.82,
         "slUsd": 8148.43
       },
       {
         "level": 289,
         "lotsCum": 2.9,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2562.41,
+        "tpRoi": 55,
+        "tpUsd": 1281.21,
         "slUsd": 8176.43
       },
       {
         "level": 290,
         "lotsCum": 2.91,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2571.19,
+        "tpRoi": 55,
+        "tpUsd": 1285.59,
         "slUsd": 8204.43
       },
       {
         "level": 291,
         "lotsCum": 2.92,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2579.96,
+        "tpRoi": 55,
+        "tpUsd": 1289.98,
         "slUsd": 8232.42
       },
       {
         "level": 292,
         "lotsCum": 2.93,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2588.74,
+        "tpRoi": 55,
+        "tpUsd": 1294.37,
         "slUsd": 8260.42
       },
       {
         "level": 293,
         "lotsCum": 2.94,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2597.51,
+        "tpRoi": 55,
+        "tpUsd": 1298.75,
         "slUsd": 8288.42
       },
       {
         "level": 294,
         "lotsCum": 2.95,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2606.28,
+        "tpRoi": 55,
+        "tpUsd": 1303.14,
         "slUsd": 8316.41
       },
       {
         "level": 295,
         "lotsCum": 2.96,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2615.06,
+        "tpRoi": 55,
+        "tpUsd": 1307.53,
         "slUsd": 8344.4
       },
       {
         "level": 296,
         "lotsCum": 2.97,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2623.83,
+        "tpRoi": 55,
+        "tpUsd": 1311.91,
         "slUsd": 8372.4
       },
       {
         "level": 297,
         "lotsCum": 2.98,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2632.6,
+        "tpRoi": 55,
+        "tpUsd": 1316.3,
         "slUsd": 8400.39
       },
       {
         "level": 298,
         "lotsCum": 2.99,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2641.37,
+        "tpRoi": 55,
+        "tpUsd": 1320.69,
         "slUsd": 8428.38
       },
       {
         "level": 299,
         "lotsCum": 3,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2650.15,
+        "tpRoi": 55,
+        "tpUsd": 1325.07,
         "slUsd": 8456.37
       },
       {
         "level": 300,
         "lotsCum": 3.01,
         "drop": 350,
-        "tpRoi": 110,
-        "tpUsd": 2658.92,
+        "tpRoi": 55,
+        "tpUsd": 1329.46,
         "slUsd": 8484.36
       },
       {
         "level": 301,
         "lotsCum": 3.02,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3031.47,
+        "tpRoi": 62.5,
+        "tpUsd": 1515.73,
         "slUsd": 8512.35
       },
       {
         "level": 302,
         "lotsCum": 3.03,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3041.43,
+        "tpRoi": 62.5,
+        "tpUsd": 1520.72,
         "slUsd": 8540.34
       },
       {
         "level": 303,
         "lotsCum": 3.04,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3051.4,
+        "tpRoi": 62.5,
+        "tpUsd": 1525.7,
         "slUsd": 8568.33
       },
       {
         "level": 304,
         "lotsCum": 3.05,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3061.37,
+        "tpRoi": 62.5,
+        "tpUsd": 1530.68,
         "slUsd": 8596.32
       },
       {
         "level": 305,
         "lotsCum": 3.06,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3071.33,
+        "tpRoi": 62.5,
+        "tpUsd": 1535.67,
         "slUsd": 8624.31
       },
       {
         "level": 306,
         "lotsCum": 3.07,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3081.3,
+        "tpRoi": 62.5,
+        "tpUsd": 1540.65,
         "slUsd": 8652.29
       },
       {
         "level": 307,
         "lotsCum": 3.08,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3091.27,
+        "tpRoi": 62.5,
+        "tpUsd": 1545.63,
         "slUsd": 8680.28
       },
       {
         "level": 308,
         "lotsCum": 3.09,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3101.23,
+        "tpRoi": 62.5,
+        "tpUsd": 1550.62,
         "slUsd": 8708.27
       },
       {
         "level": 309,
         "lotsCum": 3.1,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3111.2,
+        "tpRoi": 62.5,
+        "tpUsd": 1555.6,
         "slUsd": 8736.25
       },
       {
         "level": 310,
         "lotsCum": 3.11,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3121.17,
+        "tpRoi": 62.5,
+        "tpUsd": 1560.58,
         "slUsd": 8764.23
       },
       {
         "level": 311,
         "lotsCum": 3.12,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3131.13,
+        "tpRoi": 62.5,
+        "tpUsd": 1565.57,
         "slUsd": 8792.22
       },
       {
         "level": 312,
         "lotsCum": 3.13,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3141.1,
+        "tpRoi": 62.5,
+        "tpUsd": 1570.55,
         "slUsd": 8820.2
       },
       {
         "level": 313,
         "lotsCum": 3.14,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3151.06,
+        "tpRoi": 62.5,
+        "tpUsd": 1575.53,
         "slUsd": 8848.18
       },
       {
         "level": 314,
         "lotsCum": 3.15,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3161.03,
+        "tpRoi": 62.5,
+        "tpUsd": 1580.51,
         "slUsd": 8876.16
       },
       {
         "level": 315,
         "lotsCum": 3.16,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3170.99,
+        "tpRoi": 62.5,
+        "tpUsd": 1585.5,
         "slUsd": 8904.15
       },
       {
         "level": 316,
         "lotsCum": 3.17,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3180.96,
+        "tpRoi": 62.5,
+        "tpUsd": 1590.48,
         "slUsd": 8932.13
       },
       {
         "level": 317,
         "lotsCum": 3.18,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3190.92,
+        "tpRoi": 62.5,
+        "tpUsd": 1595.46,
         "slUsd": 8960.11
       },
       {
         "level": 318,
         "lotsCum": 3.19,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3200.89,
+        "tpRoi": 62.5,
+        "tpUsd": 1600.44,
         "slUsd": 8988.09
       },
       {
         "level": 319,
         "lotsCum": 3.2,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3210.85,
+        "tpRoi": 62.5,
+        "tpUsd": 1605.42,
         "slUsd": 9016.06
       },
       {
         "level": 320,
         "lotsCum": 3.21,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3220.81,
+        "tpRoi": 62.5,
+        "tpUsd": 1610.41,
         "slUsd": 9044.04
       },
       {
         "level": 321,
         "lotsCum": 3.22,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3230.78,
+        "tpRoi": 62.5,
+        "tpUsd": 1615.39,
         "slUsd": 9072.02
       },
       {
         "level": 322,
         "lotsCum": 3.23,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3240.74,
+        "tpRoi": 62.5,
+        "tpUsd": 1620.37,
         "slUsd": 9100
       },
       {
         "level": 323,
         "lotsCum": 3.24,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3250.7,
+        "tpRoi": 62.5,
+        "tpUsd": 1625.35,
         "slUsd": 9127.97
       },
       {
         "level": 324,
         "lotsCum": 3.25,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3260.67,
+        "tpRoi": 62.5,
+        "tpUsd": 1630.33,
         "slUsd": 9155.95
       },
       {
         "level": 325,
         "lotsCum": 3.26,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3270.63,
+        "tpRoi": 62.5,
+        "tpUsd": 1635.31,
         "slUsd": 9183.92
       },
       {
         "level": 326,
         "lotsCum": 3.27,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3280.59,
+        "tpRoi": 62.5,
+        "tpUsd": 1640.3,
         "slUsd": 9211.9
       },
       {
         "level": 327,
         "lotsCum": 3.28,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3290.55,
+        "tpRoi": 62.5,
+        "tpUsd": 1645.28,
         "slUsd": 9239.87
       },
       {
         "level": 328,
         "lotsCum": 3.29,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3300.51,
+        "tpRoi": 62.5,
+        "tpUsd": 1650.26,
         "slUsd": 9267.84
       },
       {
         "level": 329,
         "lotsCum": 3.3,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3310.48,
+        "tpRoi": 62.5,
+        "tpUsd": 1655.24,
         "slUsd": 9295.82
       },
       {
         "level": 330,
         "lotsCum": 3.31,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3320.44,
+        "tpRoi": 62.5,
+        "tpUsd": 1660.22,
         "slUsd": 9323.79
       },
       {
         "level": 331,
         "lotsCum": 3.32,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3330.4,
+        "tpRoi": 62.5,
+        "tpUsd": 1665.2,
         "slUsd": 9351.76
       },
       {
         "level": 332,
         "lotsCum": 3.33,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3340.36,
+        "tpRoi": 62.5,
+        "tpUsd": 1670.18,
         "slUsd": 9379.73
       },
       {
         "level": 333,
         "lotsCum": 3.34,
         "drop": 350,
-        "tpRoi": 125,
-        "tpUsd": 3350.32,
+        "tpRoi": 62.5,
+        "tpUsd": 1675.16,
         "slUsd": 9407.7
       }
     ]
@@ -6374,72 +6374,72 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 0.51,
+        "tpRoi": 10,
+        "tpUsd": 0.25,
         "slUsd": 29.73
       },
       {
         "level": 1,
         "lotsCum": 0.03,
         "drop": 52,
-        "tpRoi": 20,
-        "tpUsd": 1.52,
+        "tpRoi": 10,
+        "tpUsd": 0.76,
         "slUsd": 89.12
       },
       {
         "level": 2,
         "lotsCum": 0.07,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 3.55,
+        "tpRoi": 10,
+        "tpUsd": 1.77,
         "slUsd": 207.69
       },
       {
         "level": 3,
         "lotsCum": 0.15,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 7.6,
+        "tpRoi": 10,
+        "tpUsd": 3.8,
         "slUsd": 444.55
       },
       {
         "level": 4,
         "lotsCum": 0.31,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 15.68,
+        "tpRoi": 10,
+        "tpUsd": 7.84,
         "slUsd": 917.26
       },
       {
         "level": 5,
         "lotsCum": 0.63,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 31.81,
+        "tpRoi": 10,
+        "tpUsd": 15.9,
         "slUsd": 1861.16
       },
       {
         "level": 6,
         "lotsCum": 1.27,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 64.02,
+        "tpRoi": 10,
+        "tpUsd": 32.01,
         "slUsd": 3745.96
       },
       {
         "level": 7,
         "lotsCum": 2.55,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 128.27,
+        "tpRoi": 10,
+        "tpUsd": 64.13,
         "slUsd": 7505.7
       },
       {
         "level": 8,
         "lotsCum": 5.11,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 256.51,
+        "tpRoi": 10,
+        "tpUsd": 128.25,
         "slUsd": 15009.5
       }
     ]
@@ -6457,72 +6457,72 @@
         "level": 0,
         "lotsCum": 0.01,
         "drop": 0,
-        "tpRoi": 20,
-        "tpUsd": 1.63,
+        "tpRoi": 10,
+        "tpUsd": 0.82,
         "slUsd": 95.5
       },
       {
         "level": 1,
         "lotsCum": 0.03,
         "drop": 52,
-        "tpRoi": 20,
-        "tpUsd": 4.89,
+        "tpRoi": 10,
+        "tpUsd": 2.45,
         "slUsd": 286.29
       },
       {
         "level": 2,
         "lotsCum": 0.07,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 11.4,
+        "tpRoi": 10,
+        "tpUsd": 5.7,
         "slUsd": 667.22
       },
       {
         "level": 3,
         "lotsCum": 0.15,
         "drop": 104,
-        "tpRoi": 20,
-        "tpUsd": 24.41,
+        "tpRoi": 10,
+        "tpUsd": 12.2,
         "slUsd": 1428.17
       },
       {
         "level": 4,
         "lotsCum": 0.31,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 50.36,
+        "tpRoi": 10,
+        "tpUsd": 25.18,
         "slUsd": 2946.79
       },
       {
         "level": 5,
         "lotsCum": 0.63,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 102.18,
+        "tpRoi": 10,
+        "tpUsd": 51.09,
         "slUsd": 5979.15
       },
       {
         "level": 6,
         "lotsCum": 1.27,
         "drop": 156,
-        "tpRoi": 20,
-        "tpUsd": 205.66,
+        "tpRoi": 10,
+        "tpUsd": 102.83,
         "slUsd": 12034.26
       },
       {
         "level": 7,
         "lotsCum": 2.55,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 412.08,
+        "tpRoi": 10,
+        "tpUsd": 206.04,
         "slUsd": 24112.81
       },
       {
         "level": 8,
         "lotsCum": 5.11,
         "drop": 208,
-        "tpRoi": 20,
-        "tpUsd": 824.05,
+        "tpRoi": 10,
+        "tpUsd": 412.03,
         "slUsd": 48219.48
       }
     ]

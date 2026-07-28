@@ -448,7 +448,7 @@ function main() {
       slRoi: xau.slRoi,
       chartPct: xau.defense?.chartPct ?? null,
       takeProfitMode:
-        logic === "dubai_bruno_313" ? "per-level profit tier" : "fixed 20%",
+        logic === "dubai_bruno_313" ? "per-level profit tier (×0.5)" : "fixed 10%",
       lotMode: logic.startsWith("martin_9") ? "startLots × 2^level" : "equal startLots",
       levelCount: xau.rows.length,
       tiers: logic === "dubai_bruno_313" ? dubaiTierSummary() : null,
