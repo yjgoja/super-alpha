@@ -375,8 +375,18 @@ type BasketRow = {
   filledLevel: number;
   firstEntryPrice: number;
   tradingPaused: boolean;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
   legs: { level: number; lots: number; price: number }[];
 };
+
+/** Account float/margin with an empty book → classic MetaAPI lag. */
+const GHOST_LAG_MARGIN_USD = 1;
+const GHOST_LAG_FLOAT_USD = 1;
+/** Ghost with no OUT deal: allow DB reconcile after this age when side stays empty. */
+const GHOST_STALE_RECONCILE_MS = 2 * 60 * 60 * 1000;
+/** Look back from earliest ghost createdAt (capped). */
+const GHOST_DEAL_HIST_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 
 type PosRow = {
   id?: string;
@@ -678,20 +688,23 @@ async function tryGhostBasketSoftExit(opts: {
 
   const kind = tpDecision.hit ? "TP" : "SL";
 
-  // Lag guard: margin/float with empty book → do not market-close (positions may still exist).
+  // Lag guard: whole book empty + margin/float → positions may still exist (API lag).
+  // Other-symbol float alone must NOT block this side's soft exit / DB close.
   const preClose = await fetchSnapshot(opts.metaId);
   if (preClose.ok) {
-    const m = Number(preClose.margin ?? 0);
-    const eq = Number(preClose.equity ?? 0);
-    const bal = Number(preClose.balance ?? 0);
     const stillEmpty =
       positionsForSymbol(preClose.positions, opts.symbol, opts.direction).length === 0;
     if (
       stillEmpty &&
-      (m > 1 || (bal > 0 && eq > 0 && Math.abs(bal - eq) > 1))
+      shouldSkipGhostHealForAccountLag({
+        positionsCount: preClose.positions.length,
+        margin: Number(preClose.margin ?? 0),
+        equity: Number(preClose.equity ?? 0),
+        balance: Number(preClose.balance ?? 0),
+      })
     ) {
       console.warn(
-        `[engine] ghost soft-${kind} skipped account=${opts.accountId} ${opts.symbol} — margin/float lag guard`,
+        `[engine] ghost soft-${kind} skipped account=${opts.accountId} ${opts.symbol} — whole-book margin/float lag guard`,
       );
       return {
         handled: true as const,
@@ -717,7 +730,36 @@ async function tryGhostBasketSoftExit(opts: {
     closeRes.ok &&
     (closeRes as { emptyWithoutClose?: boolean }).emptyWithoutClose === true &&
     (closeRes.closed ?? 0) === 0;
-  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0 || emptyUnverified) {
+
+  // emptyWithoutClose: either lag OR already flat. Confirm with snap — if this side
+  // is empty and book is healthy (other pos exist / account flat), reconcile DB basket.
+  let reconcileEmpty = false;
+  if (emptyUnverified) {
+    const verify = await fetchSnapshot(opts.metaId);
+    if (verify.ok) {
+      const sideEmpty =
+        positionsForSymbol(verify.positions, opts.symbol, opts.direction).length === 0;
+      const otherPositionsExist = verify.positions.some(
+        (p) =>
+          !(
+            symbolsMatch(p.symbol, opts.symbol) && p.direction === opts.direction
+          ),
+      );
+      reconcileEmpty = canReconcileEmptyGhostSide({
+        sideEmpty,
+        otherPositionsExist,
+        margin: Number(verify.margin ?? 0),
+        equity: verify.equity,
+        balance: verify.balance,
+      });
+    }
+  }
+
+  if (
+    !closeRes.ok ||
+    (closeRes.remaining ?? 0) > 0 ||
+    (emptyUnverified && !reconcileEmpty)
+  ) {
     await logTpMissGuard({
       accountId: opts.accountId,
       symbol: opts.symbol,
@@ -745,6 +787,12 @@ async function tryGhostBasketSoftExit(opts: {
     };
   }
 
+  if (reconcileEmpty) {
+    console.warn(
+      `[engine] ghost soft-${kind} reconcile empty side account=${opts.accountId} ${opts.symbol} ${opts.direction}`,
+    );
+  }
+
   const pnlSum = tpDecision.hit ? tpPnl.pnl : tpPnl.pnlForSl;
   await prisma.basket.update({
     where: { id: opts.basket.id },
@@ -764,7 +812,7 @@ async function tryGhostBasketSoftExit(opts: {
       price: opts.direction === "BUY" ? opts.bid : opts.ask,
       pnl: pnlSum,
       kind,
-      note: `${opts.logic}|ghost_soft_${kind}|roi=${(tpDecision.hit ? tpDecision.floatingRoi : slDecision.floatingRoi).toFixed(2)}`,
+      note: `${opts.logic}|ghost_soft_${kind}${reconcileEmpty ? "|reconcile_empty" : ""}|roi=${(tpDecision.hit ? tpDecision.floatingRoi : slDecision.floatingRoi).toFixed(2)}`,
     },
   });
   if (kind === "TP") {
@@ -786,7 +834,9 @@ async function tryGhostBasketSoftExit(opts: {
         brokerLeverage: opts.brokerLeverage,
         bid: opts.bid,
         ask: opts.ask,
-        noteTag: "reentry_after_ghost_soft_tp",
+        noteTag: reconcileEmpty
+          ? "reentry_after_ghost_reconcile_tp"
+          : "reentry_after_ghost_soft_tp",
       });
       if (!re.ok) {
         console.warn(
@@ -815,7 +865,7 @@ async function tryGhostBasketSoftExit(opts: {
     handled: true as const,
     result: {
       ok: true as const,
-      action: kind === "TP" ? ("ghost_tp" as const) : ("ghost_sl" as const),
+      action: kind === "TP" ? ("tp" as const) : ("sl" as const),
       symbol: opts.symbol,
       floatingPnl: pnlSum,
     },
@@ -1260,6 +1310,62 @@ export function canHealGhostBasketFromDeals(opts: {
 }
 
 /**
+ * Lag guard for ghost heal: ONLY when the entire position book is empty but
+ * margin/float still says risk is open (classic MetaAPI sync lag).
+ * Multi-symbol accounts with float on OTHER pairs must NOT block this-symbol heal.
+ */
+export function shouldSkipGhostHealForAccountLag(opts: {
+  positionsCount: number;
+  margin: number;
+  equity: number;
+  balance: number;
+}): boolean {
+  if ((opts.positionsCount ?? 0) > 0) return false;
+  const margin = Number(opts.margin ?? 0);
+  const equity = Number(opts.equity ?? 0);
+  const balance = Number(opts.balance ?? 0);
+  return (
+    margin > GHOST_LAG_MARGIN_USD ||
+    (balance > 0 &&
+      equity > 0 &&
+      Math.abs(balance - equity) > GHOST_LAG_FLOAT_USD)
+  );
+}
+
+/**
+ * This symbol+direction is empty on snap. Safe to close the DB ghost when:
+ * - other live positions exist (book is healthy; this side really flat), OR
+ * - whole account is flat (no margin/float lag signal).
+ */
+export function canReconcileEmptyGhostSide(opts: {
+  sideEmpty: boolean;
+  otherPositionsExist: boolean;
+  margin: number;
+  equity: number;
+  balance: number;
+}): boolean {
+  if (!opts.sideEmpty) return false;
+  if (opts.otherPositionsExist) return true;
+  return !shouldSkipGhostHealForAccountLag({
+    positionsCount: 0,
+    margin: opts.margin,
+    equity: opts.equity,
+    balance: opts.balance,
+  });
+}
+
+export function ghostBasketAgeMs(
+  basket: { createdAt?: Date | string; updatedAt?: Date | string },
+  now = Date.now(),
+): number {
+  const raw = basket.createdAt ?? basket.updatedAt;
+  if (!raw) return 0;
+  const t = new Date(raw).getTime();
+  if (!Number.isFinite(t) || t <= 0) return 0;
+  return Math.max(0, now - t);
+}
+
+/**
  * Backup/Vercel ticks should manage open baskets only — no new ENTRY/DCA.
  * Primary Render engine uses ENGINE_MODE=direct and never sets this.
  */
@@ -1292,13 +1398,17 @@ async function healGhostBaskets(
   );
   if (ghosts.length === 0) return false;
 
-  // Used margin / equity drawdown → positions almost certainly still open (API lag)
-  const margin = opts?.margin ?? 0;
-  const equity = opts?.equity ?? 0;
-  const balance = opts?.balance ?? 0;
-  if (margin > 1 || (balance > 0 && equity > 0 && Math.abs(balance - equity) > 1)) {
+  // Whole-book empty + margin/float → API lag. Other-symbol float must not block.
+  if (
+    shouldSkipGhostHealForAccountLag({
+      positionsCount: positions.length,
+      margin: opts?.margin ?? 0,
+      equity: opts?.equity ?? 0,
+      balance: opts?.balance ?? 0,
+    })
+  ) {
     console.warn(
-      `[engine] skip ghost-heal account=${accountId} margin=${margin} eq=${equity} bal=${balance}`,
+      `[engine] skip ghost-heal account=${accountId} — whole-book lag margin=${opts?.margin ?? 0} eq=${opts?.equity ?? 0} bal=${opts?.balance ?? 0}`,
     );
     return false;
   }
@@ -1317,18 +1427,24 @@ async function healGhostBaskets(
   );
   if (stillGhost.length === 0) return false;
 
-  const againMargin = Number(again.margin ?? 0);
   if (
-    againMargin > 1 ||
-    (again.balance > 0 &&
-      again.equity > 0 &&
-      Math.abs(again.balance - again.equity) > 1)
+    shouldSkipGhostHealForAccountLag({
+      positionsCount: again.positions.length,
+      margin: Number(again.margin ?? 0),
+      equity: again.equity,
+      balance: again.balance,
+    })
   ) {
     return false;
   }
 
-  // Classify exit via recent deals (broker TP/SL vs manual)
-  const histStart = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const earliestCreated = stillGhost.reduce((min, g) => {
+    const t = g.createdAt ? new Date(g.createdAt).getTime() : Date.now();
+    return Number.isFinite(t) ? Math.min(min, t) : min;
+  }, Date.now());
+  const histStart = new Date(
+    Math.max(earliestCreated - 60_000, Date.now() - GHOST_DEAL_HIST_MAX_MS),
+  );
   const hist = await fetchHistoryDeals(metaId, histStart, new Date());
   if (!hist.ok) {
     console.warn(
@@ -1349,24 +1465,53 @@ async function healGhostBaskets(
     const last = symDeals.sort(
       (a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime(),
     )[0];
+    const hasOut = !!last;
+    const sideEmpty = true;
+    const otherPositionsExist = again.positions.some(
+      (p) =>
+        !(symbolsMatch(p.symbol, g.symbol) && p.direction === dir),
+    );
+    const canStaleReconcile =
+      !hasOut &&
+      ghostBasketAgeMs(g) >= GHOST_STALE_RECONCILE_MS &&
+      canReconcileEmptyGhostSide({
+        sideEmpty,
+        otherPositionsExist,
+        margin: Number(again.margin ?? 0),
+        equity: again.equity,
+        balance: again.balance,
+      });
+
     if (
       !canHealGhostBasketFromDeals({
         histOk: true,
-        hasOutDeal: !!last,
-      })
+        hasOutDeal: hasOut,
+      }) &&
+      !canStaleReconcile
     ) {
       console.warn(
         `[engine] keep ghost basket account=${accountId} ${g.symbol} ${dir} — no OUT deal proof`,
       );
       continue;
     }
-    const pnl =
-      Number(last.profit || 0) + Number(last.swap || 0) + Number(last.commission || 0);
-    const reason = String(last?.reason || "").toLowerCase();
+    const pnl = hasOut
+      ? Number(last.profit || 0) +
+        Number(last.swap || 0) +
+        Number(last.commission || 0)
+      : 0;
+    const reason = hasOut
+      ? String(last?.reason || "").toLowerCase()
+      : "stale_empty_reconcile";
     const explicitSl = reason.includes("sl") || reason.includes("stop");
     const explicitTp = reason.includes("tp") || reason.includes("take");
     // Never infer TP from PnL sign — false reentry after lag/manual exits.
-    const kind = explicitSl ? "SL" : explicitTp ? "TP" : "GUARD";
+    const kind = !hasOut
+      ? "GUARD"
+      : explicitSl
+        ? "SL"
+        : explicitTp
+          ? "TP"
+          : "GUARD";
 
     await prisma.basket.update({
       where: { id: g.id },
@@ -1386,7 +1531,9 @@ async function healGhostBaskets(
         price: Number(last?.price || g.firstEntryPrice || 0),
         pnl,
         kind,
-        note: `ghost_deal|${kind}|reason=${reason || "unclassified"}`,
+        note: hasOut
+          ? `ghost_deal|${kind}|reason=${reason || "unclassified"}`
+          : `ghost_reconcile_stale_empty|${g.symbol}|${dir}|ageMs=${ghostBasketAgeMs(g)}`,
       },
     });
     healed += 1;
