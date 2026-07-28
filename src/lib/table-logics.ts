@@ -50,12 +50,12 @@ export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
     stopLossPct: 225,
     takeProfitPct: 10,
   },
-  /** H8 타임 — 스피드 사다리, 익절 20% 유지 */
+  /** H8 타임 — 스피드 사다리 · 익절 10% */
   martin_9_068_time: {
     chartPct: 0.68,
     dropScale: 1,
     stopLossPct: 225,
-    takeProfitPct: 20,
+    takeProfitPct: 10,
   },
   /** H8 타임 — 안정과 동일 방어폭 */
   martin_9_35_time: {
