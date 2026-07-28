@@ -53,6 +53,7 @@ async function issueVerification(userId: string, email: string) {
 export async function POST(req: Request) {
   try {
     const ip = clientIp(req);
+    const host = req.headers.get("host");
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) {
       const msg = parsed.error.issues[0]?.message || "입력값을 확인하세요.";
@@ -152,7 +153,7 @@ export async function POST(req: Request) {
           hasBrokerAccount: false,
         }),
         token,
-        { rememberMe: true },
+        { rememberMe: true, host },
       );
     }
 
@@ -200,7 +201,7 @@ export async function POST(req: Request) {
         hasBrokerAccount: user._count.accounts > 0,
       }),
       token,
-      { rememberMe },
+      { rememberMe, host },
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "요청 오류";

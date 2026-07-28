@@ -14,12 +14,23 @@ export const REMEMBER_MAX_AGE_SEC = 60 * 60 * 24 * 90; // 90d
  * Share session across apex + www (host-only cookies break when users bounce
  * between superalpha.kr and www.superalpha.kr).
  * Override with AUTH_COOKIE_DOMAIN; set empty string to disable.
+ * Only apply on *.superalpha.kr — never on *.vercel.app (browser rejects mismatched Domain).
  */
-export function sessionCookieDomain(): string | undefined {
+export function sessionCookieDomain(hostHint?: string | null): string | undefined {
   if (process.env.NODE_ENV !== "production") return undefined;
   if (process.env.AUTH_COOKIE_DOMAIN === "") return undefined;
   const d = (process.env.AUTH_COOKIE_DOMAIN || ".superalpha.kr").trim();
-  return d || undefined;
+  if (!d) return undefined;
+  if (hostHint) {
+    const host = hostHint.split(":")[0].toLowerCase();
+    const ok =
+      host === "superalpha.kr" ||
+      host.endsWith(".superalpha.kr") ||
+      host === d.replace(/^\./, "") ||
+      host.endsWith(d.startsWith(".") ? d : `.${d}`);
+    if (!ok) return undefined;
+  }
+  return d;
 }
 
 function secret() {
@@ -33,10 +44,13 @@ function secret() {
   return new TextEncoder().encode(s || "super-alpha-demo-secret-change-me");
 }
 
-export function cookieOptions(opts?: { rememberMe?: boolean }) {
+export function cookieOptions(opts?: {
+  rememberMe?: boolean;
+  host?: string | null;
+}) {
   const remember = opts?.rememberMe !== false;
   const maxAge = remember ? REMEMBER_MAX_AGE_SEC : SESSION_MAX_AGE_SEC;
-  const domain = sessionCookieDomain();
+  const domain = sessionCookieDomain(opts?.host);
   return {
     httpOnly: true,
     sameSite: "lax" as const,
@@ -83,14 +97,17 @@ export async function createSessionToken(
 export function withSessionCookie(
   res: NextResponse,
   token: string,
-  opts?: { rememberMe?: boolean },
+  opts?: { rememberMe?: boolean; host?: string | null },
 ) {
   res.cookies.set(SESSION_COOKIE, token, cookieOptions(opts));
   return res;
 }
 
 /** Clear domain cookie and legacy host-only cookie (pre-domain fix). */
-export function clearSessionCookie(res: NextResponse) {
+export function clearSessionCookie(
+  res: NextResponse,
+  opts?: { host?: string | null },
+) {
   const base = {
     httpOnly: true,
     sameSite: "lax" as const,
@@ -99,12 +116,12 @@ export function clearSessionCookie(res: NextResponse) {
     maxAge: 0,
     expires: new Date(0),
   };
-  const domain = sessionCookieDomain();
+  const domain = sessionCookieDomain(opts?.host);
   // Domain cookie (www + apex share)
   if (domain) {
     res.cookies.set(SESSION_COOKIE, "", { ...base, domain });
   }
-  // Host-only cookie (legacy / local)
+  // Host-only cookie (legacy / local / vercel.app)
   res.cookies.set(SESSION_COOKIE, "", base);
   return res;
 }

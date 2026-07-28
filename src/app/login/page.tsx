@@ -40,16 +40,10 @@ function LoginForm() {
 
   // Explicit logout → stay on form (account switch). Do not auto-enter.
   // Browser reopen with valid remember-me cookie → still auto-enter.
+  // IMPORTANT: do NOT call /api/auth/logout here — that races a subsequent
+  // login and clears the new session cookie (stuck on login / "처리 중").
   useEffect(() => {
-    if (loggedOutParam || wasManualLogout()) {
-      // Belt: clear any leftover session after manual logout
-      void fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      return;
-    }
+    if (loggedOutParam || wasManualLogout()) return;
     let cancelled = false;
     (async () => {
       try {
@@ -58,8 +52,8 @@ function LoginForm() {
           credentials: "same-origin",
         });
         if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (cancelled) return;
+        const data = await res.json().catch(() => null);
+        if (!data || cancelled) return;
         router.replace(
           resolvePostLoginPath({
             role: data.role || "user",
@@ -87,54 +81,89 @@ function LoginForm() {
     } catch {
       /* ignore */
     }
-    const res = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ email, password, mode, rememberMe }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error || "실패");
-      if (data.code === "email_unverified") setUnverified(true);
-      return;
-    }
-    if (data.needsEmailVerification) {
-      setMode("login");
-      setInfo(
-        data.message ||
-          "인증 메일을 보냈습니다. 메일함의 링크를 클릭한 뒤 로그인해 주세요.",
-      );
-      return;
-    }
-    clearManualLogoutFlag();
-    router.push(
-      resolvePostLoginPath({
-        role: data.role || "user",
-        approvalStatus: data.approvalStatus || "pending",
+
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => ac.abort(), 25_000);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        signal: ac.signal,
+        body: JSON.stringify({ email, password, mode, rememberMe }),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        setError(
+          (typeof data.error === "string" && data.error) ||
+            `로그인 실패 (${res.status}). 잠시 후 다시 시도해 주세요.`,
+        );
+        if (data.code === "email_unverified") setUnverified(true);
+        setLoading(false);
+        return;
+      }
+      if (data.needsEmailVerification) {
+        setMode("login");
+        setInfo(
+          (typeof data.message === "string" && data.message) ||
+            "인증 메일을 보냈습니다. 메일함의 링크를 클릭한 뒤 로그인해 주세요.",
+        );
+        setLoading(false);
+        return;
+      }
+      clearManualLogoutFlag();
+      // Full navigation avoids soft-route races with logout / stale login query.
+      const next = resolvePostLoginPath({
+        role: (typeof data.role === "string" && data.role) || "user",
+        approvalStatus:
+          (typeof data.approvalStatus === "string" && data.approvalStatus) ||
+          "pending",
         hasBrokerAccount: !!data.hasBrokerAccount,
-      }),
-    );
+      });
+      window.location.replace(next);
+      return; // keep loading until navigation unloads the page
+    } catch (err) {
+      const aborted =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && err.name === "AbortError");
+      setError(
+        aborted
+          ? "서버 응답이 지연되고 있습니다. 네트워크 확인 후 다시 시도해 주세요."
+          : "네트워크 오류로 로그인하지 못했습니다. 다시 시도해 주세요.",
+      );
+      setLoading(false);
+    } finally {
+      window.clearTimeout(timer);
+    }
   }
 
   async function resendVerification() {
     setLoading(true);
     setError("");
     setInfo("");
-    const res = await fetch("/api/auth/resend-verification", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      setError(data.error || "재발송 실패");
-      return;
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        setError(
+          (typeof data.error === "string" && data.error) || "재발송 실패",
+        );
+        return;
+      }
+      setInfo(
+        (typeof data.message === "string" && data.message) ||
+          "인증 메일을 다시 보냈습니다.",
+      );
+    } catch {
+      setError("네트워크 오류로 재발송에 실패했습니다.");
+    } finally {
+      setLoading(false);
     }
-    setInfo(data.message || "인증 메일을 다시 보냈습니다.");
   }
 
   return (

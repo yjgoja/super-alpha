@@ -49,7 +49,7 @@ export async function middleware(req: NextRequest) {
   if (!userId) {
     const res = NextResponse.redirect(new URL("/login", req.url));
     const cleared = {
-      ...cookieOptions({ rememberMe: true }),
+      ...cookieOptions({ rememberMe: true, host }),
       maxAge: 0,
       expires: new Date(0),
     };
@@ -57,6 +57,12 @@ export async function middleware(req: NextRequest) {
     if (cleared.domain) {
       const { domain: _d, ...hostOnly } = cleared;
       res.cookies.set(SESSION_COOKIE, "", hostOnly);
+    } else if (host.endsWith("superalpha.kr")) {
+      // Host-only path above; still wipe legacy shared domain cookie
+      res.cookies.set(SESSION_COOKIE, "", {
+        ...cleared,
+        domain: ".superalpha.kr",
+      });
     }
     return res;
   }
