@@ -1227,6 +1227,116 @@ function positionsForSymbol(
   );
 }
 
+function sleepMs(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** DB legs ahead of live volume — real mismatch (not 1-tick snapshot lag). */
+export function shouldSoftReconcileLegLag(opts: {
+  dbLegCount: number;
+  livePosCount: number;
+  dbLots: number;
+  liveLots: number;
+}) {
+  if (opts.livePosCount <= 0) return false;
+  if (opts.dbLegCount <= opts.livePosCount) return false;
+  const lotGap = opts.dbLots - opts.liveLots;
+  // >1 min-lot of phantom volume, or DB volume ≥1.5× live
+  return lotGap >= 0.015 || opts.dbLots >= opts.liveLots * 1.5 + 0.001;
+}
+
+/** Map live positions → DB legs (BUY: high→low price as L0..; SELL: low→high). */
+export function planLegsFromLivePositions(
+  positions: Array<{ lots: number; price: number }>,
+  direction: "BUY" | "SELL",
+) {
+  const sorted = [...positions].sort((a, b) =>
+    direction === "BUY" ? b.price - a.price : a.price - b.price,
+  );
+  return sorted.map((p, i) => ({
+    level: i,
+    lots: Math.round(p.lots * 100) / 100,
+    price: p.price,
+  }));
+}
+
+async function confirmLiveVolumeIncreased(opts: {
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  beforeLots: number;
+  expectedAdd: number;
+}): Promise<
+  | { ok: true; afterLots: number; fillPrice: number }
+  | { ok: false; afterLots: number }
+> {
+  const need = opts.beforeLots + Math.max(0.01, opts.expectedAdd) * 0.85;
+  let afterLots = opts.beforeLots;
+  let fillPrice = 0;
+  for (let i = 0; i < 5; i++) {
+    await sleepMs(i === 0 ? 350 : 700);
+    const snap = await fetchSnapshot(opts.metaId, {
+      allowStaleMs: 0,
+      allowStaleOnRateLimit: false,
+    });
+    if (!snap.ok) continue;
+    const side = positionsForSymbol(snap.positions, opts.symbol, opts.direction);
+    afterLots = side.reduce((s, p) => s + p.lots, 0);
+    if (afterLots >= need - 1e-9) {
+      const newest = [...side].sort((a, b) => b.lots - a.lots)[0];
+      fillPrice = newest?.price ?? 0;
+      return { ok: true, afterLots, fillPrice };
+    }
+  }
+  return { ok: false, afterLots };
+}
+
+async function softReconcileBasketLegsToLive(opts: {
+  accountId: string;
+  basketId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  live: Array<{ lots: number; price: number; profit: number }>;
+}) {
+  const planned = planLegsFromLivePositions(opts.live, opts.direction);
+  if (planned.length === 0) return null;
+  await prisma.$transaction(async (tx) => {
+    await tx.basketLeg.deleteMany({ where: { basketId: opts.basketId } });
+    await tx.basketLeg.createMany({
+      data: planned.map((l) => ({
+        basketId: opts.basketId,
+        level: l.level,
+        lots: l.lots,
+        price: l.price,
+      })),
+    });
+    await tx.basket.update({
+      where: { id: opts.basketId },
+      data: {
+        filledLevel: planned.length - 1,
+        firstEntryPrice: planned[0]!.price,
+        unrealizedPnl: opts.live.reduce((s, p) => s + p.profit, 0),
+      },
+    });
+    await tx.fill.create({
+      data: {
+        accountId: opts.accountId,
+        symbol: opts.symbol,
+        side: opts.direction,
+        lots: planned.reduce((s, l) => s + l.lots, 0),
+        price: planned[0]!.price,
+        pnl: 0,
+        kind: "GUARD",
+        note: `leg_lag_reconcile|db→live|legs=${planned.length}`,
+      },
+    });
+  });
+  console.warn(
+    `[engine] leg lag reconcile account=${opts.accountId} ${opts.symbol} ${opts.direction} → liveLegs=${planned.length}`,
+  );
+  return planned;
+}
+
 /** 신규 진입·물타기·익절후재진입 허용 여부 (틱 중 토글 반영) */
 async function canOpenNewRisk(
   accountId: string,
@@ -2238,15 +2348,35 @@ async function runSymbolTableDca(
       });
       return { ok: false as const, error: order.message, symbol };
     }
+    const entryConfirm = await confirmLiveVolumeIncreased({
+      metaId,
+      symbol,
+      direction,
+      beforeLots: 0,
+      expectedAdd: lots,
+    });
+    if (!entryConfirm.ok) {
+      console.warn(
+        `[engine] entry order ok but volume missing account=${accountId} ${symbol} ${direction} liveLots=${entryConfirm.afterLots}`,
+      );
+      return {
+        ok: false as const,
+        error: "entry_ok_but_not_on_book",
+        symbol,
+        spreadPct: spr,
+      };
+    }
+    const confirmedEntryPrice =
+      entryConfirm.fillPrice > 0 ? entryConfirm.fillPrice : fillPrice;
     await prisma.basket.create({
       data: {
         accountId,
         symbol,
         direction,
         filledLevel: 0,
-        firstEntryPrice: fillPrice,
+        firstEntryPrice: confirmedEntryPrice,
         status: "open",
-        legs: { create: [{ level: 0, lots, price: fillPrice }] },
+        legs: { create: [{ level: 0, lots, price: confirmedEntryPrice }] },
       },
     });
     await prisma.fill.create({
@@ -2255,10 +2385,10 @@ async function runSymbolTableDca(
         symbol,
         side: direction,
         lots,
-        price: fillPrice,
+        price: confirmedEntryPrice,
         kind: "ENTRY",
         level: 0,
-        note: `${logic}|spr=${spr.toFixed(4)}|brokerTP=${entryPx.takeProfit ?? "-"}`,
+        note: `${logic}|spr=${spr.toFixed(4)}|brokerTP=${entryPx.takeProfit ?? "-"}|confirmed`,
       },
     });
     const protectRes = await refreshAndProtectBasket({
@@ -2290,14 +2420,65 @@ async function runSymbolTableDca(
     return { ok: true as const, action: "entry", symbol, spreadPct: spr };
   }
 
-  const legs = basket.legs.sort((a, b) => a.level - b.level);
-  // DB 레그 > 라이브 포지션: 대부분 진입/DCA 직후 스냅샷 지연.
-  // 절대 강제청산하지 않음(과거에 partial_orphan_force_close로 정상 바스켓을 죽임).
-  // 라이브가 더 많으면 아래 orphan-adopt 경로가 처리. 라이브가 0이면 ghost 경로.
+  let legs = basket.legs.sort((a, b) => a.level - b.level);
+  // DB 레그 > 라이브 포지션: 스냅샷 지연일 수도, phantom DCA일 수도 있음.
+  // 강제청산 금지. 볼륨이 크게 앞서면 live로 soft reconcile 후 계속.
+  // 소폭 지연(방금 체결)이면 이번 틱 DCA만 막고 hold.
   if (ourPositions.length > 0 && legs.length > ourPositions.length) {
+    const dbLots = legs.reduce((s, l) => s + l.lots, 0);
+    const liveLots = ourPositions.reduce((s, p) => s + p.lots, 0);
     console.warn(
-      `[engine] leg/pos lag account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} — skip force close`,
+      `[engine] leg/pos lag account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} dbLots=${dbLots.toFixed(2)} liveLots=${liveLots.toFixed(2)}`,
     );
+    if (
+      shouldSoftReconcileLegLag({
+        dbLegCount: legs.length,
+        livePosCount: ourPositions.length,
+        dbLots,
+        liveLots,
+      })
+    ) {
+      const planned = await softReconcileBasketLegsToLive({
+        accountId,
+        basketId: basket.id,
+        symbol,
+        direction,
+        live: ourPositions.map((p) => ({
+          lots: p.lots,
+          price: p.price,
+          profit: p.profit,
+        })),
+      });
+      if (planned) {
+        const basketId = basket!.id;
+        basket = {
+          ...basket!,
+          filledLevel: planned.length - 1,
+          legs: planned.map((l) => ({
+            id: `reconciled-${l.level}`,
+            basketId,
+            level: l.level,
+            lots: l.lots,
+            price: l.price,
+            createdAt: new Date(),
+          })),
+        };
+        legs = basket.legs.sort((a, b) => a.level - b.level);
+      }
+    } else {
+      await prisma.basket.update({
+        where: { id: basket!.id },
+        data: { unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0) },
+      });
+      return {
+        ok: true as const,
+        action: "hold",
+        symbol,
+        note: "leg_pos_lag_wait",
+        filled: basket!.filledLevel,
+        spreadPct: spr,
+      };
+    }
   }
   // MT5 실포지션 평단·손익 우선
   const posVol = ourPositions.reduce((s, p) => s + p.lots, 0);
@@ -2657,7 +2838,30 @@ async function runSymbolTableDca(
         spreadPct: spr,
       };
     }
-    const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
+    const dcaConfirm = await confirmLiveVolumeIncreased({
+      metaId,
+      symbol,
+      direction,
+      beforeLots: posVol,
+      expectedAdd: lots,
+    });
+    if (!dcaConfirm.ok) {
+      console.warn(
+        `[engine] dca order ok but volume missing account=${accountId} ${symbol} L${next} before=${posVol} after=${dcaConfirm.afterLots}`,
+      );
+      return {
+        ok: false as const,
+        error: "dca_ok_but_not_on_book",
+        symbol,
+        filled,
+        actions,
+        spreadPct: spr,
+      };
+    }
+    const fillPrice =
+      dcaConfirm.fillPrice > 0
+        ? dcaConfirm.fillPrice
+        : mt5EntryQuote(direction, price.bid, price.ask);
     await prisma.basketLeg.create({
       data: { basketId: basket.id, level: next, lots, price: fillPrice },
     });
@@ -2670,7 +2874,7 @@ async function runSymbolTableDca(
         price: fillPrice,
         kind: "DCA",
         level: next,
-        note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}`,
+        note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}|confirmed`,
       },
     });
     filled = next;
@@ -2937,15 +3141,30 @@ async function runSymbolDca(
       });
       return { ok: false as const, error: order.message, symbol };
     }
+    const entryConfirm2 = await confirmLiveVolumeIncreased({
+      metaId,
+      symbol,
+      direction,
+      beforeLots: 0,
+      expectedAdd: lots,
+    });
+    if (!entryConfirm2.ok) {
+      console.warn(
+        `[engine] entry order ok but volume missing account=${accountId} ${symbol} liveLots=${entryConfirm2.afterLots}`,
+      );
+      return { ok: false as const, error: "entry_ok_but_not_on_book", symbol };
+    }
+    const confirmedPx2 =
+      entryConfirm2.fillPrice > 0 ? entryConfirm2.fillPrice : fillPrice;
     await prisma.basket.create({
       data: {
         accountId,
         symbol,
         direction,
         filledLevel: 0,
-        firstEntryPrice: fillPrice,
+        firstEntryPrice: confirmedPx2,
         status: "open",
-        legs: { create: [{ level: 0, lots, price: fillPrice }] },
+        legs: { create: [{ level: 0, lots, price: confirmedPx2 }] },
       },
     });
     await prisma.fill.create({
@@ -2954,10 +3173,10 @@ async function runSymbolDca(
         symbol,
         side: direction,
         lots,
-        price: fillPrice,
+        price: confirmedPx2,
         kind: "ENTRY",
         level: 0,
-        note: logic,
+        note: `${logic}|confirmed`,
       },
     });
     const protectRes = await refreshAndProtectBasket({
@@ -2980,7 +3199,57 @@ async function runSymbolDca(
     return { ok: true as const, action: "entry", symbol };
   }
 
-  const legs = basket.legs.sort((a, b) => a.level - b.level);
+  let legs = basket.legs.sort((a, b) => a.level - b.level);
+  if (ourPositions.length > 0 && legs.length > ourPositions.length) {
+    const dbLots = legs.reduce((s, l) => s + l.lots, 0);
+    const liveLotsNow = ourPositions.reduce((s, p) => s + p.lots, 0);
+    console.warn(
+      `[engine] leg/pos lag account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} dbLots=${dbLots.toFixed(2)} liveLots=${liveLotsNow.toFixed(2)}`,
+    );
+    if (
+      shouldSoftReconcileLegLag({
+        dbLegCount: legs.length,
+        livePosCount: ourPositions.length,
+        dbLots,
+        liveLots: liveLotsNow,
+      })
+    ) {
+      const planned = await softReconcileBasketLegsToLive({
+        accountId,
+        basketId: basket.id,
+        symbol,
+        direction,
+        live: ourPositions.map((p) => ({
+          lots: p.lots,
+          price: p.price,
+          profit: p.profit,
+        })),
+      });
+      if (planned) {
+        const basketId = basket!.id;
+        basket = {
+          ...basket!,
+          filledLevel: planned.length - 1,
+          legs: planned.map((l) => ({
+            id: `reconciled-${l.level}`,
+            basketId,
+            level: l.level,
+            lots: l.lots,
+            price: l.price,
+            createdAt: new Date(),
+          })),
+        };
+        legs = basket.legs.sort((a, b) => a.level - b.level);
+      }
+    } else {
+      return {
+        ok: true as const,
+        action: "hold",
+        symbol,
+        note: "leg_pos_lag_wait",
+      };
+    }
+  }
   const posVol = ourPositions.reduce((s, p) => s + p.lots, 0);
   const avg =
     posVol > 0
@@ -3294,7 +3563,21 @@ async function runSymbolDca(
         });
         return { ok: false as const, error: order.message, symbol };
       }
-      const fillPrice = estFill;
+      const dcaConfirm = await confirmLiveVolumeIncreased({
+        metaId,
+        symbol,
+        direction,
+        beforeLots: ourPositions.reduce((s, p) => s + p.lots, 0),
+        expectedAdd: lots,
+      });
+      if (!dcaConfirm.ok) {
+        console.warn(
+          `[engine] dca order ok but volume missing account=${accountId} ${symbol} L${nextLevel} after=${dcaConfirm.afterLots}`,
+        );
+        return { ok: false as const, error: "dca_ok_but_not_on_book", symbol };
+      }
+      const fillPrice =
+        dcaConfirm.fillPrice > 0 ? dcaConfirm.fillPrice : estFill;
       await prisma.basketLeg.create({
         data: { basketId: basket.id, level: nextLevel, lots, price: fillPrice },
       });
@@ -3311,7 +3594,7 @@ async function runSymbolDca(
           price: fillPrice,
           kind: "DCA",
           level: nextLevel,
-          note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}`,
+          note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}|confirmed`,
         },
       });
       const protectRes = await refreshAndProtectBasket({

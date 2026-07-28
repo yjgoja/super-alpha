@@ -7,8 +7,10 @@ import {
   canHealGhostBasketFromDeals,
   canReconcileEmptyGhostSide,
   ghostBasketAgeMs,
+  planLegsFromLivePositions,
   resolveForceManageOnly,
   shouldSkipGhostHealForAccountLag,
+  shouldSoftReconcileLegLag,
 } from "../src/lib/meta-engine";
 import fs from "fs";
 import path from "path";
@@ -105,6 +107,35 @@ check(
     equity: 1000,
     balance: 1000,
   }) === true,
+);
+
+check(
+  "leg lag reconcile when dbLots >> live",
+  shouldSoftReconcileLegLag({
+    dbLegCount: 9,
+    livePosCount: 2,
+    dbLots: 10.22,
+    liveLots: 0.06,
+  }) === true,
+);
+check(
+  "no leg lag reconcile on mild +1 snap lag",
+  shouldSoftReconcileLegLag({
+    dbLegCount: 3,
+    livePosCount: 2,
+    dbLots: 0.07,
+    liveLots: 0.06,
+  }) === false,
+);
+check(
+  "planLegs BUY high price = L0",
+  planLegsFromLivePositions(
+    [
+      { lots: 0.04, price: 4025 },
+      { lots: 0.02, price: 4026 },
+    ],
+    "BUY",
+  )[0]?.price === 4026,
 );
 
 const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
