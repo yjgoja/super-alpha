@@ -36,6 +36,20 @@ export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
     stopLossPct: 225,
     takeProfitPct: 20,
   },
+  /** 스피드 물타기 ×2 — SL −225% 유지 */
+  martin_9_091: {
+    chartPct: 0.91,
+    dropScale: 2,
+    stopLossPct: 225,
+    takeProfitPct: 20,
+  },
+  /** 스피드 물타기 ×3 — SL −225% 유지 */
+  martin_9_113: {
+    chartPct: 1.13,
+    dropScale: 3,
+    stopLossPct: 225,
+    takeProfitPct: 20,
+  },
   /** H8 타임 — 스피드와 동일 방어폭 */
   martin_9_068_time: {
     chartPct: 0.68,
@@ -118,6 +132,8 @@ export const TABLE_LOGIC_IDS = [
   "martin_9_65",
   "martin_9_35",
   "martin_9_068",
+  "martin_9_091",
+  "martin_9_113",
   "martin_9_068_time",
   "martin_9_35_time",
   "dubai_bruno_313",

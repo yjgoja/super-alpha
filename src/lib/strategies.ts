@@ -15,13 +15,23 @@ export const SYMBOL_OPTIONS = SYMBOL_GROUPS.flatMap((g) => [...g.symbols]);
 
 /**
  * 마틴9 계열 · 313 — 내부 id 유지. 사용자 노출 문구는 strategy-public.ts 사용.
- * 표시 순서: 스피드 → 안정 → 코어 → 지속 → 스피드타임 → 안정타임
+ * 표시 순서: 스피드 → 스피드2배 → 스피드3배 → 안정 → 코어 → 지속 → 타임
  */
 export const LOGIC_OPTIONS = [
   {
     id: "martin_9_068",
     name: "알파 스피드 로직 - 0.68%",
     desc: "회전이 빠른 스피드 프리셋",
+  },
+  {
+    id: "martin_9_091",
+    name: "알파 스피드 2배 - 0.91%",
+    desc: "스피드 물타기 2배 늦은 프리셋",
+  },
+  {
+    id: "martin_9_113",
+    name: "알파 스피드 3배 - 1.13%",
+    desc: "스피드 물타기 3배 늦은 프리셋",
   },
   {
     id: "martin_9_35",
@@ -68,6 +78,8 @@ export const LOGIC_OPTIONS = [
 /** 메인으로 노출하는 알파 전략 (룰렛·존캘리 = 테스트 전용, 비공개) */
 export const PRIMARY_LOGIC_IDS = [
   "martin_9_068",
+  "martin_9_091",
+  "martin_9_113",
   "martin_9_35",
   "martin_9_65",
   "dubai_bruno_313",

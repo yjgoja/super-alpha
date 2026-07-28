@@ -13,6 +13,16 @@ export const PUBLIC_LOGIC_OPTIONS = [
     desc: "회전이 빠른 스피드 프리셋",
   },
   {
+    id: "martin_9_091" as const,
+    name: "알파 스피드 2배 - 0.91%",
+    desc: "스피드 물타기 2배 늦은 프리셋",
+  },
+  {
+    id: "martin_9_113" as const,
+    name: "알파 스피드 3배 - 1.13%",
+    desc: "스피드 물타기 3배 늦은 프리셋",
+  },
+  {
     id: "martin_9_35" as const,
     name: "알파 안정 로직 - 3.5%",
     desc: "안정 우선 프리셋",

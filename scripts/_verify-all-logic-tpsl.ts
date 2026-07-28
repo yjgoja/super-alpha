@@ -247,6 +247,14 @@ function testResolvers() {
     "스피드 TP locked 20",
     resolveLiveTakeProfitPct("martin_9_068", 50) === 20,
   );
+  assert(
+    "스피드2배 SL 225",
+    resolveLiveStopLossPct("martin_9_091", 1250) === 225,
+  );
+  assert(
+    "스피드3배 SL 225",
+    resolveLiveStopLossPct("martin_9_113", 1250) === 225,
+  );
 }
 
 function testMartinDrops() {
@@ -256,6 +264,18 @@ function testMartinDrops() {
     "스피드 drops",
     JSON.stringify(speed.map((l) => l.drop)) ===
       JSON.stringify([0, 10, 20, 20, 30, 30, 30, 40, 40]),
+  );
+  const speed2 = getTableLevels("martin_9_091", 2);
+  assert(
+    "스피드2배 drops",
+    JSON.stringify(speed2.map((l) => l.drop)) ===
+      JSON.stringify([0, 20, 40, 40, 60, 60, 60, 80, 80]),
+  );
+  const speed3 = getTableLevels("martin_9_113", 2);
+  assert(
+    "스피드3배 drops",
+    JSON.stringify(speed3.map((l) => l.drop)) ===
+      JSON.stringify([0, 30, 60, 60, 90, 90, 90, 120, 120]),
   );
   const stab = getTableLevels("martin_9_35", 2);
   assert(
