@@ -10,6 +10,18 @@ export const SESSION_MAX_AGE_SEC = 60 * 60 * 12; // 12h
 /** Remember-me / 자동로그인 */
 export const REMEMBER_MAX_AGE_SEC = 60 * 60 * 24 * 90; // 90d
 
+/**
+ * Share session across apex + www (host-only cookies break when users bounce
+ * between superalpha.kr and www.superalpha.kr).
+ * Override with AUTH_COOKIE_DOMAIN; set empty string to disable.
+ */
+export function sessionCookieDomain(): string | undefined {
+  if (process.env.NODE_ENV !== "production") return undefined;
+  if (process.env.AUTH_COOKIE_DOMAIN === "") return undefined;
+  const d = (process.env.AUTH_COOKIE_DOMAIN || ".superalpha.kr").trim();
+  return d || undefined;
+}
+
 function secret() {
   const s = process.env.AUTH_SECRET;
   if (!s || s.length < 16) {
@@ -24,6 +36,7 @@ function secret() {
 export function cookieOptions(opts?: { rememberMe?: boolean }) {
   const remember = opts?.rememberMe !== false;
   const maxAge = remember ? REMEMBER_MAX_AGE_SEC : SESSION_MAX_AGE_SEC;
+  const domain = sessionCookieDomain();
   return {
     httpOnly: true,
     sameSite: "lax" as const,
@@ -32,6 +45,7 @@ export function cookieOptions(opts?: { rememberMe?: boolean }) {
     maxAge,
     // Some mobile browsers honor expires more reliably than maxAge alone.
     expires: new Date(Date.now() + maxAge * 1000),
+    ...(domain ? { domain } : {}),
   };
 }
 export async function hashPassword(password: string) {
@@ -75,12 +89,18 @@ export function withSessionCookie(
   return res;
 }
 
+/** Clear domain cookie and legacy host-only cookie (pre-domain fix). */
 export function clearSessionCookie(res: NextResponse) {
-  res.cookies.set(SESSION_COOKIE, "", {
+  const cleared = {
     ...cookieOptions({ rememberMe: true }),
     maxAge: 0,
     expires: new Date(0),
-  });
+  };
+  res.cookies.set(SESSION_COOKIE, "", cleared);
+  if (cleared.domain) {
+    const { domain: _d, ...hostOnly } = cleared;
+    res.cookies.set(SESSION_COOKIE, "", hostOnly);
+  }
   return res;
 }
 

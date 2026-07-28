@@ -2309,7 +2309,7 @@ async function runSymbolTableDca(
   const profit = mt5ProfitPct(direction, avg, price.bid, price.ask);
 
   // 익절 ROI: 313차(bulk 표)는 현재 filledLevel 의 표 profit% (회차 티어).
-  // 마틴9 계열은 resolveLiveTakeProfitPct → 고정 20%.
+  // 마틴9 계열은 resolveLiveTakeProfitPct → 프리셋 takeProfitPct (현재 10%).
   const levelProfit = levels[basket.filledLevel]?.profit;
   const tpRoiFallback = isBulkLogic(logic)
     ? levelProfit != null && levelProfit > 0

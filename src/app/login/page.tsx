@@ -34,6 +34,34 @@ function LoginForm() {
     }
   }, []);
 
+  // Already signed in → skip login form (survives browser reopen).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/me", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+        router.replace(
+          resolvePostLoginPath({
+            role: data.role || "user",
+            approvalStatus: data.approvalStatus || "pending",
+            hasBrokerAccount: !!data.hasBrokerAccount,
+          }),
+        );
+      } catch {
+        /* stay on login */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
