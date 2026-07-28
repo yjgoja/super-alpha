@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PUBLIC_LOGIC_OPTIONS, publicLogicLabel } from "@/lib/strategy-public";
+import { PUBLIC_LOGIC_OPTIONS, publicLogicLabel, isPublicTimeLogic } from "@/lib/strategy-public";
 import { SYMBOL_GROUPS, normalizeLogicId } from "@/lib/strategies";
 import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
 import { TradingViewSymbolChart } from "@/components/TradingViewSymbolChart";
@@ -311,6 +311,8 @@ export default function BotPage() {
   }
 
   const dir = ((draft.direction as string) || "BUY") as string;
+  const draftLogic = normalizeLogicId((draft.logic as string) || "");
+  const isTimeDraft = isPublicTimeLogic(draftLogic);
 
   return (
     <>
@@ -673,17 +675,23 @@ export default function BotPage() {
                       </div>
 
                       <div>
-                        <span className="sa-label">방향 (봇 고정)</span>
-                        <div className="sa-dir">
-                          <button type="button" className={dir === "BUY" ? "is-on" : ""} disabled>
-                            BUY (매수)
-                          </button>
-                          <button type="button" className={dir === "SELL" ? "is-on" : ""} disabled>
-                            SELL (매도)
-                          </button>
-                        </div>
+                        <span className="sa-label">
+                          {isTimeDraft ? "방향 (H8 자동)" : "방향 (봇 고정)"}
+                        </span>
+                        {!isTimeDraft ? (
+                          <div className="sa-dir">
+                            <button type="button" className={dir === "BUY" ? "is-on" : ""} disabled>
+                              BUY (매수)
+                            </button>
+                            <button type="button" className={dir === "SELL" ? "is-on" : ""} disabled>
+                              SELL (매도)
+                            </button>
+                          </div>
+                        ) : null}
                         <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
-                          BUY봇·SELL봇은 별도로 설정합니다.
+                          {isTimeDraft
+                            ? "제로마켓 H8(00/08/16) 새 봉에 전량 청산 → 15분 후 시가 대비 상승=BUY·하락=SELL. 봇 고정 방향은 무시됩니다."
+                            : "BUY봇·SELL봇은 별도로 설정합니다."}
                         </p>
                       </div>
 

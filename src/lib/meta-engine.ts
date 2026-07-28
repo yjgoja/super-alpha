@@ -16,6 +16,7 @@ import {
 } from "./dca1000";
 import {
   isBulkLogic,
+  isMartin9TimeLogic,
   isTableLogic,
   lotsForLogicLevel,
   resolveLiveStopLossPct,
@@ -50,6 +51,13 @@ import {
   isMarketSessionBlockedError,
   isSessionTradeBackoffReason,
 } from "./market-hours";
+import {
+  canH8Enter,
+  h8DirectionFromOpen,
+  h8SessionKey,
+  isH8OpenMinute,
+  isInH8EntryQuiet,
+} from "./session-h8";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
 import { setAccountLiveState } from "./state-cache";
 import {
@@ -65,8 +73,171 @@ const softCloseCooldown = new Map<
   { until: number; reason: string; loggedAt: number }
 >();
 
+/** H8 time-logic session state (process memory — fail-closed on restart). */
+type H8SessionState = {
+  sessionKey: string;
+  barOpen: number | null;
+  entered: boolean;
+  direction: "BUY" | "SELL" | null;
+};
+const h8SessionState = new Map<string, H8SessionState>();
+
+function h8StateKey(accountId: string, symbol: string, logic: string) {
+  return `${accountId}|${symbol}|${normalizeLogicId(logic)}`;
+}
+
 function softCloseKey(accountId: string, symbol: string, direction: string) {
   return `${accountId}|${symbol}|${direction}`;
+}
+
+/**
+ * H8 time logic: on new bar flatten both sides + snap barOpen (open minute only).
+ * Restart mid-bar with open book → adopt (no flatten). Missed open → no ENTRY this bar.
+ */
+async function syncH8TimeSession(opts: {
+  accountId: string;
+  metaId: string;
+  symbol: string;
+  logic: string;
+  positions: PosRow[];
+  baskets: BasketRow[];
+}): Promise<{
+  state: H8SessionState;
+  closed: boolean;
+  positions: PosRow[];
+  baskets: BasketRow[];
+}> {
+  const logic = normalizeLogicId(opts.logic);
+  const sk = h8StateKey(opts.accountId, opts.symbol, logic);
+  const sessionKey = h8SessionKey();
+  const prev = h8SessionState.get(sk);
+  let positions = opts.positions;
+  let baskets = opts.baskets;
+  let closed = false;
+
+  const ourPos = positions.filter((p) => symbolsMatch(p.symbol, opts.symbol));
+  const ourBaskets = baskets.filter(
+    (b) => symbolsMatch(b.symbol, opts.symbol) && b.legs.length > 0,
+  );
+  const hasOpen = ourPos.length > 0 || ourBaskets.length > 0;
+
+  const closeBothSides = async () => {
+    for (const dir of ["BUY", "SELL"] as const) {
+      const sidePos = ourPos.filter((p) => p.direction === dir);
+      if (sidePos.length === 0 && !ourBaskets.some((b) => (b.direction === "SELL" ? "SELL" : "BUY") === dir)) {
+        continue;
+      }
+      let closeRes = await closePositionsBySymbolDirection(opts.metaId, opts.symbol, dir);
+      if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+        closeRes = await forceCloseRemainder({
+          metaId: opts.metaId,
+          symbol: opts.symbol,
+          direction: dir,
+        });
+      }
+      for (const b of ourBaskets.filter((x) => (x.direction === "SELL" ? "SELL" : "BUY") === dir)) {
+        await prisma.basket.update({
+          where: { id: b.id },
+          data: {
+            status: "closed",
+            lastExitAt: new Date(),
+            unrealizedPnl: 0,
+          },
+        });
+        await prisma.fill.create({
+          data: {
+            accountId: opts.accountId,
+            symbol: opts.symbol,
+            side: dir === "BUY" ? "SELL" : "BUY",
+            lots: b.legs.reduce((s, l) => s + l.lots, 0),
+            price: 0,
+            kind: "SESSION",
+            note: `${logic}|h8_flatten|${sessionKey}`,
+          },
+        });
+      }
+    }
+    closed = true;
+    const fresh = await fetchSnapshot(opts.metaId);
+    if (fresh.ok) positions = fresh.positions;
+    baskets = await prisma.basket.findMany({
+      where: { accountId: opts.accountId, status: "open" },
+      include: { legs: true },
+    });
+  };
+
+  if (!prev) {
+    if (hasOpen) {
+      const dir = (ourPos[0]?.direction ||
+        (ourBaskets[0]?.direction === "SELL" ? "SELL" : "BUY")) as "BUY" | "SELL";
+      const state: H8SessionState = {
+        sessionKey,
+        barOpen: null,
+        entered: true,
+        direction: dir,
+      };
+      h8SessionState.set(sk, state);
+      return { state, closed: false, positions, baskets };
+    }
+    if (isH8OpenMinute()) {
+      const price = await getSymbolPrice(opts.metaId, opts.symbol);
+      const mid =
+        price && price.bid > 0 && price.ask > 0 ? (price.bid + price.ask) / 2 : null;
+      const state: H8SessionState = {
+        sessionKey,
+        barOpen: mid,
+        entered: false,
+        direction: null,
+      };
+      h8SessionState.set(sk, state);
+      return { state, closed: false, positions, baskets };
+    }
+    // Cold start mid-bar flat — fail-closed (no ENTRY this H8)
+    const state: H8SessionState = {
+      sessionKey,
+      barOpen: null,
+      entered: true,
+      direction: null,
+    };
+    h8SessionState.set(sk, state);
+    return { state, closed: false, positions, baskets };
+  }
+
+  if (prev.sessionKey !== sessionKey) {
+    if (hasOpen) await closeBothSides();
+    if (isH8OpenMinute()) {
+      const price = await getSymbolPrice(opts.metaId, opts.symbol);
+      const mid =
+        price && price.bid > 0 && price.ask > 0 ? (price.bid + price.ask) / 2 : null;
+      const state: H8SessionState = {
+        sessionKey,
+        barOpen: mid,
+        entered: false,
+        direction: null,
+      };
+      h8SessionState.set(sk, state);
+      return { state, closed, positions, baskets };
+    }
+    const state: H8SessionState = {
+      sessionKey,
+      barOpen: null,
+      entered: true,
+      direction: null,
+    };
+    h8SessionState.set(sk, state);
+    return { state, closed, positions, baskets };
+  }
+
+  // Same session: capture barOpen if we are on open minute and missing it
+  if (prev.barOpen == null && isH8OpenMinute() && !prev.entered) {
+    const price = await getSymbolPrice(opts.metaId, opts.symbol);
+    if (price && price.bid > 0 && price.ask > 0) {
+      prev.barOpen = (price.bid + price.ask) / 2;
+      h8SessionState.set(sk, prev);
+    }
+  }
+
+  return { state: prev, closed: false, positions, baskets };
 }
 
 function getSoftCloseCooldown(key: string) {
@@ -1014,7 +1185,7 @@ async function canOpenNewRisk(
     }),
     prisma.symbolBot.findMany({
       where: { accountId, symbol },
-      select: { enabled: true, direction: true, dualDirection: true },
+      select: { enabled: true, direction: true, dualDirection: true, logic: true },
     }),
   ]);
   if (!account?.botEnabled) return false;
@@ -1025,6 +1196,8 @@ async function canOpenNewRisk(
   }
   return bots.some((b) => {
     if (!b.enabled) return false;
+    // H8 time logics pick direction from bar open — DB direction is ignored
+    if (isMartin9TimeLogic(b.logic)) return true;
     if (b.dualDirection) return true;
     return (b.direction === "SELL" ? "SELL" : "BUY") === direction;
   });
@@ -1616,8 +1789,27 @@ async function runSymbolTableDca(
   positions: PosRow[],
 ) {
   const symbol = cfg.symbol;
-  const direction = (cfg.direction === "SELL" ? "SELL" : "BUY") as "BUY" | "SELL";
+  let direction = (cfg.direction === "SELL" ? "SELL" : "BUY") as "BUY" | "SELL";
   const logic = isTableLogic(cfg.logic) ? normalizeLogicId(cfg.logic) : "dubai_bruno_313";
+  const timeLogic = isMartin9TimeLogic(logic);
+  const h8Sk = timeLogic ? h8StateKey(accountId, symbol, logic) : "";
+  let h8 = timeLogic ? h8SessionState.get(h8Sk) : undefined;
+
+  // H8: resolve session direction before ENTRY; one L0 per bar (no TP reentry)
+  if (timeLogic && h8) {
+    if (h8.direction) direction = h8.direction;
+    if (isInH8EntryQuiet() && (!h8.entered || !h8.direction)) {
+      // Quiet window with no open book yet — skip entirely
+      const hasBook =
+        baskets.some(
+          (b) => symbolsMatch(b.symbol, symbol) && b.legs.length > 0,
+        ) || positions.some((p) => symbolsMatch(p.symbol, symbol));
+      if (!hasBook) {
+        return { ok: true as const, note: "h8_entry_quiet", symbol };
+      }
+    }
+  }
+
   const resolved = await resolveStrategyForAccount(accountId, logic, {
     entryMultiplier: cfg.entryMultiplier,
     startLots: cfg.startLots,
@@ -1654,7 +1846,31 @@ async function runSymbolTableDca(
   let basket = baskets.find(
     (b) => symbolsMatch(b.symbol, symbol) && (b.direction === "SELL" ? "SELL" : "BUY") === direction,
   );
+  // H8 time: DB/placeholder direction may differ — adopt any open book for symbol
+  if (timeLogic && !basket) {
+    basket = baskets.find((b) => symbolsMatch(b.symbol, symbol) && b.legs.length > 0);
+    if (basket) {
+      direction = (basket.direction === "SELL" ? "SELL" : "BUY") as "BUY" | "SELL";
+      if (h8) {
+        h8.direction = direction;
+        h8.entered = true;
+        h8SessionState.set(h8Sk, h8);
+      }
+    }
+  }
   let ourPositions = positionsForSymbol(positions, symbol, direction);
+  if (timeLogic && ourPositions.length === 0) {
+    const anySide = positions.filter((p) => symbolsMatch(p.symbol, symbol));
+    if (anySide.length > 0) {
+      direction = anySide[0]!.direction;
+      ourPositions = positionsForSymbol(positions, symbol, direction);
+      if (h8) {
+        h8.direction = direction;
+        h8.entered = true;
+        h8SessionState.set(h8Sk, h8);
+      }
+    }
+  }
 
   if (!price || price.bid <= 0 || price.ask <= 0) {
     if (basket && basket.legs.length > 0 && ourPositions.length === 0) {
@@ -1710,7 +1926,7 @@ async function runSymbolTableDca(
         stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: cfg.brokerLeverage,
-        allowReentry: !cfg.manageOnly,
+        allowReentry: !cfg.manageOnly && !timeLogic,
         repeatEnabled: cfg.repeatEnabled,
         reentryLots: levelLots(0),
       });
@@ -1761,6 +1977,24 @@ async function runSymbolTableDca(
     // 종목/전체 OFF: 신규 진입 금지 (열린 바스켓만 TP/SL 관리)
     if (cfg.manageOnly) {
       return { ok: true as const, note: "manage_only_no_entry", symbol };
+    }
+    // H8 time: only after +15m, with barOpen snap, once per session
+    if (timeLogic) {
+      h8 = h8SessionState.get(h8Sk);
+      if (!h8 || h8.entered) {
+        return { ok: true as const, note: "h8_already_entered_or_skip", symbol };
+      }
+      if (!canH8Enter() || h8.barOpen == null) {
+        return { ok: true as const, note: "h8_wait_or_no_bar_open", symbol };
+      }
+      const mid = (price.bid + price.ask) / 2;
+      const dir = h8DirectionFromOpen(mid, h8.barOpen);
+      if (!dir) {
+        return { ok: true as const, note: "h8_flat_no_direction", symbol };
+      }
+      direction = dir;
+      h8.direction = dir;
+      h8SessionState.set(h8Sk, h8);
     }
     if (!(await canOpenNewRisk(accountId, symbol, direction))) {
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
@@ -1875,6 +2109,14 @@ async function runSymbolTableDca(
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: cfg.brokerLeverage,
     });
+    if (timeLogic && h8Sk) {
+      const st = h8SessionState.get(h8Sk);
+      if (st) {
+        st.entered = true;
+        st.direction = direction;
+        h8SessionState.set(h8Sk, st);
+      }
+    }
     if (!protectRes.ok && protectRes.reason !== "disabled") {
       return {
         ok: false as const,
@@ -2020,7 +2262,7 @@ async function runSymbolTableDca(
       floatingRoi: tpDecision.floatingRoi,
       pnlSum: tpPnl.apiProfit,
       pnlForGuard: tpPnl.pnl,
-      allowReentry: !cfg.manageOnly,
+      allowReentry: !cfg.manageOnly && !timeLogic,
       stopLossPct: liveUsd.stopLossPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: brokerLev,
@@ -2109,7 +2351,8 @@ async function runSymbolTableDca(
   // 물타기: 순수 바스켓 마진 ROI ≤ -표 drop% (가격 로직 없음). drop 은 20/40/…/350.
   // 한 틱(평가)당 최대 1회차만 추가 → 다음 틱에서 avg/margin/ROI 재계산 (바이낸스 안전주문식).
   // manageOnly / 토글 OFF 시 물타기 금지 (열린 바스켓은 익절·손절만).
-  if (cfg.manageOnly) {
+  // H8 quiet (open~+15m): no DCA for time logics either.
+  if (cfg.manageOnly || (timeLogic && isInH8EntryQuiet())) {
     await prisma.basket.update({
       where: { id: basket.id },
       data: { unrealizedPnl: ourPositions.reduce((s, p) => s + p.profit, 0) },
@@ -3219,6 +3462,35 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
   }
 
   const lev = snap.leverage > 0 ? snap.leverage : MT5_BROKER_LEVERAGE_DEFAULT;
+
+  // H8 time logics: flatten on new bar + snap barOpen before building bot list
+  let h8ClosedAny = false;
+  for (const b of account.symbolBots) {
+    if (!b.enabled && !openBaskets.some((x) => symbolsMatch(x.symbol, b.symbol))) continue;
+    if (!isMartin9TimeLogic(b.logic)) continue;
+    const sync = await syncH8TimeSession({
+      accountId: account.id,
+      metaId,
+      symbol: b.symbol,
+      logic: b.logic,
+      positions: snap.positions,
+      baskets: openBaskets,
+    });
+    snap.positions = sync.positions;
+    openBaskets = sync.baskets;
+    if (sync.closed) h8ClosedAny = true;
+  }
+  if (h8ClosedAny) {
+    const fresh = await fetchSnapshot(metaId);
+    if (fresh.ok) {
+      snap = fresh;
+    }
+    openBaskets = await prisma.basket.findMany({
+      where: { accountId: account.id, status: "open" },
+      include: { legs: true },
+    });
+  }
+
   const mapBotRow = (
     b: (typeof account.symbolBots)[number],
     manageOnly: boolean,
@@ -3253,6 +3525,14 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
   if (!forceManageOnly) {
     for (const b of account.symbolBots) {
       if (!b.enabled) continue;
+      const logic = normalizeLogicId(b.logic);
+      // H8 time: single basket per symbol (ignore dualDirection + DB direction)
+      if (isMartin9TimeLogic(logic)) {
+        const st = h8SessionState.get(h8StateKey(account.id, b.symbol, logic));
+        const dir = st?.direction || "BUY";
+        needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+        continue;
+      }
       const dir = b.direction === "SELL" ? "SELL" : "BUY";
       if (b.dualDirection) {
         needed.set(`${b.symbol}|BUY`, { manageOnly: !masterOn });
@@ -3303,10 +3583,12 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
     let row = botByKey.get(key);
     if (!row) {
       // dualDirection 단일 행이 BUY|SELL 둘 다 커버하는 경우
+      // 또는 H8 time 로직 (DB direction ≠ 세션 direction)
       row = account.symbolBots.find(
         (b) =>
           b.symbol === symbol &&
-          ((b as { dualDirection?: boolean }).dualDirection ||
+          (isMartin9TimeLogic(b.logic) ||
+            (b as { dualDirection?: boolean }).dualDirection ||
             (b.direction === "SELL" ? "SELL" : "BUY") === direction),
       );
     }

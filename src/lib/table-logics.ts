@@ -1,5 +1,7 @@
 import martin9Json from "./presets/martin9-levels.json";
 import dubai313Json from "./presets/dubai313-levels.json";
+import roulette9Json from "./presets/roulette9-levels.json";
+import johnKelly1006Json from "./presets/john-kelly-1006-levels.json";
 import type { Dca1000Level } from "./dca1000";
 import { DCA1000_DEFAULT_SL_ROI } from "./dca1000";
 import { normalizeLogicId } from "./strategies";
@@ -34,11 +36,39 @@ export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
     stopLossPct: 225,
     takeProfitPct: 20,
   },
+  /** H8 타임 — 스피드와 동일 방어폭 */
+  martin_9_068_time: {
+    chartPct: 0.68,
+    dropScale: 1,
+    stopLossPct: 225,
+    takeProfitPct: 20,
+  },
+  /** H8 타임 — 안정과 동일 방어폭 */
+  martin_9_35_time: {
+    chartPct: 3.5,
+    dropScale: 5.201,
+    stopLossPct: 1170.3,
+    takeProfitPct: 20,
+  },
 };
+
+/** H8 세션 방향 + 마틴 (스피드/안정 타임) */
+export function isMartin9TimeLogic(logic: string) {
+  const id = normalizeLogicId(logic);
+  return id === "martin_9_068_time" || id === "martin_9_35_time";
+}
+
+/** 타임 로직 → 기반 마틴 id (사다리/방어 동일) */
+export function martinTimeBaseLogic(logic: string): string {
+  const id = normalizeLogicId(logic);
+  if (id === "martin_9_068_time") return "martin_9_068";
+  if (id === "martin_9_35_time") return "martin_9_35";
+  return id;
+}
 
 export function getMartin9Defense(logic: string): Martin9DefensePreset | null {
   const id = normalizeLogicId(logic);
-  return MARTIN9_DEFENSE[id] ?? null;
+  return MARTIN9_DEFENSE[id] ?? MARTIN9_DEFENSE[martinTimeBaseLogic(id)] ?? null;
 }
 
 export function isMartin9Logic(logic: string) {
@@ -88,15 +118,23 @@ export const TABLE_LOGIC_IDS = [
   "martin_9_65",
   "martin_9_35",
   "martin_9_068",
+  "martin_9_068_time",
+  "martin_9_35_time",
   "dubai_bruno_313",
+  "roulette_9",
+  "john_kelly_1006",
   "custom",
 ] as const;
 
 export type TableLogicId = (typeof TABLE_LOGIC_IDS)[number];
 
-const TABLE_FILES: Record<"martin_9" | "dubai_bruno_313", LevelsFile> = {
+type TableFileKey = "martin_9" | "dubai_bruno_313" | "roulette_9" | "john_kelly_1006";
+
+const TABLE_FILES: Record<TableFileKey, LevelsFile> = {
   martin_9: martin9Json as LevelsFile,
   dubai_bruno_313: dubai313Json as LevelsFile,
+  roulette_9: roulette9Json as LevelsFile,
+  john_kelly_1006: johnKelly1006Json as LevelsFile,
 };
 
 const LEVELS_CACHE: Partial<Record<string, Dca1000Level[]>> = {};
@@ -106,8 +144,12 @@ export function isTableLogic(logic: string): logic is TableLogicId {
   return (TABLE_LOGIC_IDS as readonly string[]).includes(id);
 }
 
+/** Per-level TP table logics (313 / roulette / kelly) */
 export function isBulkLogic(logic: string) {
-  return normalizeLogicId(logic) === "dubai_bruno_313";
+  const id = normalizeLogicId(logic);
+  return (
+    id === "dubai_bruno_313" || id === "roulette_9" || id === "john_kelly_1006"
+  );
 }
 
 export function isMartinLogic(logic: string) {
@@ -138,9 +180,11 @@ function roundDrop(n: number) {
   return Math.round(n);
 }
 
-function tableFileKey(logic: string): "martin_9" | "dubai_bruno_313" {
+function tableFileKey(logic: string): TableFileKey {
   const id = normalizeLogicId(logic);
   if (isMartin9Logic(id)) return "martin_9";
+  if (id === "roulette_9") return "roulette_9";
+  if (id === "john_kelly_1006") return "john_kelly_1006";
   if (id === "dubai_bruno_313") return "dubai_bruno_313";
   return "dubai_bruno_313";
 }
@@ -325,7 +369,7 @@ export function resolveLiveStopLossPct(logic: string, storedPct?: number | null)
   const id = normalizeLogicId(logic);
   const defense = getMartin9Defense(id);
   if (defense) return defense.stopLossPct;
-  if (id === "dubai_bruno_313") return DCA1000_DEFAULT_SL_ROI;
+  if (isBulkLogic(id)) return DCA1000_DEFAULT_SL_ROI;
   if (storedPct != null && storedPct > 0) return storedPct;
   return DCA1000_DEFAULT_SL_ROI;
 }
@@ -335,7 +379,8 @@ export function resolveLiveTakeProfitPct(logic: string, storedPct?: number | nul
   const id = normalizeLogicId(logic);
   const defense = getMartin9Defense(id);
   if (defense) return defense.takeProfitPct;
-  if (id === "dubai_bruno_313") {
+  if (isBulkLogic(id)) {
+    // per-level TP from table; fallback for empty override
     return storedPct != null && storedPct > 0 ? storedPct : 20;
   }
   if (storedPct != null && storedPct > 0) return storedPct;

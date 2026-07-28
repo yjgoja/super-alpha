@@ -1,0 +1,52 @@
+{
+  "leverageBase": 20,
+  "source": "coin_futures_20x_roulette9",
+  "mt5Note": "size/=15 so L0 unit\u224810; ROI% unchanged (margin ROI @ MT5 1:500)",
+  "levels": [
+    {
+      "size": 10.0,
+      "profit": 10.0,
+      "drop": 5.0
+    },
+    {
+      "size": 15.0,
+      "profit": 10.0,
+      "drop": 10.0
+    },
+    {
+      "size": 22.5,
+      "profit": 10.0,
+      "drop": 15.0
+    },
+    {
+      "size": 33.75,
+      "profit": 10.0,
+      "drop": 20.0
+    },
+    {
+      "size": 50.63,
+      "profit": 10.0,
+      "drop": 25.0
+    },
+    {
+      "size": 75.94,
+      "profit": 10.0,
+      "drop": 30.0
+    },
+    {
+      "size": 113.91,
+      "profit": 10.0,
+      "drop": 35.0
+    },
+    {
+      "size": 170.86,
+      "profit": 10.0,
+      "drop": 40.0
+    },
+    {
+      "size": 256.29,
+      "profit": 10.0,
+      "drop": 45.0
+    }
+  ]
+}

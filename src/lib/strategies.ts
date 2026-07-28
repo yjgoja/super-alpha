@@ -15,7 +15,7 @@ export const SYMBOL_OPTIONS = SYMBOL_GROUPS.flatMap((g) => [...g.symbols]);
 
 /**
  * 마틴9 계열 · 313 — 내부 id 유지. 사용자 노출 문구는 strategy-public.ts 사용.
- * 표시 순서: 스피드 → 안정 → 코어 → 지속
+ * 표시 순서: 스피드 → 안정 → 코어 → 지속 → 스피드타임 → 안정타임
  */
 export const LOGIC_OPTIONS = [
   {
@@ -39,18 +39,42 @@ export const LOGIC_OPTIONS = [
     desc: "회차가 깊은 지속형 프리셋",
   },
   {
+    id: "roulette_9",
+    name: "알파 룰렛 로직",
+    desc: "9회차 룰렛 스케일 프리셋",
+  },
+  {
+    id: "john_kelly_1006",
+    name: "알파 존캘리 로직",
+    desc: "1006회차 존캘리 프리셋",
+  },
+  {
+    id: "martin_9_068_time",
+    name: "알파 스피드 타임 로직",
+    desc: "H8 세션 방향 + 스피드 마틴",
+  },
+  {
+    id: "martin_9_35_time",
+    name: "알파 안정 타임 로직",
+    desc: "H8 세션 방향 + 안정 마틴",
+  },
+  {
     id: "custom",
     name: "커스텀",
     desc: "고급 설정 전용",
   },
 ] as const;
 
-/** 메인으로 노출하는 알파 전략 4개 */
+/** 메인으로 노출하는 알파 전략 */
 export const PRIMARY_LOGIC_IDS = [
   "martin_9_068",
   "martin_9_35",
   "martin_9_65",
   "dubai_bruno_313",
+  "roulette_9",
+  "john_kelly_1006",
+  "martin_9_068_time",
+  "martin_9_35_time",
 ] as const;
 
 export const PRIMARY_LOGIC_OPTIONS = LOGIC_OPTIONS.filter((l) =>

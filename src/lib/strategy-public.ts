@@ -28,6 +28,26 @@ export const PUBLIC_LOGIC_OPTIONS = [
     desc: "회차가 깊은 지속형 프리셋",
   },
   {
+    id: "roulette_9" as const,
+    name: "알파 룰렛 로직",
+    desc: "9회차 룰렛 스케일",
+  },
+  {
+    id: "john_kelly_1006" as const,
+    name: "알파 존캘리 로직",
+    desc: "1006회차 존캘리",
+  },
+  {
+    id: "martin_9_068_time" as const,
+    name: "알파 스피드 타임 로직",
+    desc: "8시간봉 방향 + 스피드",
+  },
+  {
+    id: "martin_9_35_time" as const,
+    name: "알파 안정 타임 로직",
+    desc: "8시간봉 방향 + 안정",
+  },
+  {
     id: "custom" as const,
     name: "커스텀",
     desc: "관리자·고급 설정 전용",
@@ -37,6 +57,12 @@ export const PUBLIC_LOGIC_OPTIONS = [
 export function publicLogicLabel(id: string) {
   const n = normalizeLogicId(id);
   return PUBLIC_LOGIC_OPTIONS.find((l) => l.id === n)?.name || "전략 프리셋";
+}
+
+/** H8 세션 방향 로직 (스피드/안정 타임) */
+export function isPublicTimeLogic(id: string) {
+  const n = normalizeLogicId(id);
+  return n === "martin_9_068_time" || n === "martin_9_35_time";
 }
 
 export function publicLogicOptions() {
