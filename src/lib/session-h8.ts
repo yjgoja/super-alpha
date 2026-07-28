@@ -43,7 +43,7 @@ export function brokerParts(d: Date = new Date(), timeZone = H8_BROKER_TZ): Brok
 
 /** Largest H8 open at or before this broker minute (00:00 is a valid open). */
 export function currentH8OpenMin(minutesOfDay: number): number {
-  let best = H8_OPEN_MINS[0]!;
+  let best: number = H8_OPEN_MINS[0]!;
   for (const m of H8_OPEN_MINS) {
     if (minutesOfDay >= m) best = m;
   }

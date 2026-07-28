@@ -3465,6 +3465,7 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
 
   // H8 time logics: flatten on new bar + snap barOpen before building bot list
   let h8ClosedAny = false;
+  let h8Positions: PosRow[] = snap.positions;
   for (const b of account.symbolBots) {
     if (!b.enabled && !openBaskets.some((x) => symbolsMatch(x.symbol, b.symbol))) continue;
     if (!isMartin9TimeLogic(b.logic)) continue;
@@ -3473,22 +3474,32 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
       metaId,
       symbol: b.symbol,
       logic: b.logic,
-      positions: snap.positions,
+      positions: h8Positions,
       baskets: openBaskets,
     });
-    snap.positions = sync.positions;
-    openBaskets = sync.baskets;
-    if (sync.closed) h8ClosedAny = true;
+    h8Positions = sync.positions;
+    if (sync.closed) {
+      h8ClosedAny = true;
+      // Prefer DB refresh for full basket row shape
+      openBaskets = await prisma.basket.findMany({
+        where: { accountId: account.id, status: "open" },
+        include: { legs: true },
+      });
+    }
   }
   if (h8ClosedAny) {
     const fresh = await fetchSnapshot(metaId);
     if (fresh.ok) {
       snap = fresh;
+      h8Positions = fresh.positions;
     }
     openBaskets = await prisma.basket.findMany({
       where: { accountId: account.id, status: "open" },
       include: { legs: true },
     });
+  } else {
+    // Keep snap.positions in sync for downstream (same reference when unchanged)
+    h8Positions = snap.positions;
   }
 
   const mapBotRow = (
