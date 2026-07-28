@@ -91,16 +91,21 @@ export function withSessionCookie(
 
 /** Clear domain cookie and legacy host-only cookie (pre-domain fix). */
 export function clearSessionCookie(res: NextResponse) {
-  const cleared = {
-    ...cookieOptions({ rememberMe: true }),
+  const base = {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
     maxAge: 0,
     expires: new Date(0),
   };
-  res.cookies.set(SESSION_COOKIE, "", cleared);
-  if (cleared.domain) {
-    const { domain: _d, ...hostOnly } = cleared;
-    res.cookies.set(SESSION_COOKIE, "", hostOnly);
+  const domain = sessionCookieDomain();
+  // Domain cookie (www + apex share)
+  if (domain) {
+    res.cookies.set(SESSION_COOKIE, "", { ...base, domain });
   }
+  // Host-only cookie (legacy / local)
+  res.cookies.set(SESSION_COOKIE, "", base);
   return res;
 }
 

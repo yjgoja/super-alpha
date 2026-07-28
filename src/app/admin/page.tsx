@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { logoutToLogin } from "@/lib/logout-client";
 
 type Overview = {
   summary: {
@@ -299,10 +300,7 @@ export default function AdminPage() {
           ))}
           <button
             className="sa-btn sa-btn-ghost text-sm py-2 px-4"
-            onClick={async () => {
-              await fetch("/api/auth/logout", { method: "POST" });
-              window.location.href = "/";
-            }}
+            onClick={() => void logoutToLogin()}
           >
             로그아웃
           </button>

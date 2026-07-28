@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { resolvePostLoginPath } from "@/lib/post-login";
+import { clearManualLogoutFlag, wasManualLogout } from "@/lib/logout-client";
 
 const REMEMBER_KEY = "sa_remember_me";
 
@@ -11,6 +12,7 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const initialMode = params.get("mode") === "register" ? "register" : "login";
+  const loggedOutParam = params.get("logout") === "1";
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +21,9 @@ function LoginForm() {
   const [info, setInfo] = useState(
     params.get("verified") === "1"
       ? "이메일 인증이 완료되었습니다. 로그인해 주세요."
-      : "",
+      : loggedOutParam
+        ? "로그아웃되었습니다. 다른 계정으로 로그인할 수 있습니다."
+        : "",
   );
   const [loading, setLoading] = useState(false);
   const [unverified, setUnverified] = useState(false);
@@ -34,8 +38,18 @@ function LoginForm() {
     }
   }, []);
 
-  // Already signed in → skip login form (survives browser reopen).
+  // Explicit logout → stay on form (account switch). Do not auto-enter.
+  // Browser reopen with valid remember-me cookie → still auto-enter.
   useEffect(() => {
+    if (loggedOutParam || wasManualLogout()) {
+      // Belt: clear any leftover session after manual logout
+      void fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -60,7 +74,7 @@ function LoginForm() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, loggedOutParam]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -94,6 +108,7 @@ function LoginForm() {
       );
       return;
     }
+    clearManualLogoutFlag();
     router.push(
       resolvePostLoginPath({
         role: data.role || "user",

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountLinkBadge } from "@/components/ConnectPrompt";
+import { logoutToLogin } from "@/lib/logout-client";
 
 export default function MyPage() {
   const [name, setName] = useState("");
@@ -42,8 +43,7 @@ export default function MyPage() {
   }, []);
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    window.location.href = "/login";
+    await logoutToLogin();
   }
 
   return (

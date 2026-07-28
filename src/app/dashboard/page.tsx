@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { logoutToLogin } from "@/lib/logout-client";
 
 type AccountPayload = {
   id: string;
@@ -152,8 +153,7 @@ export default function DashboardPage() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    window.location.href = "/";
+    await logoutToLogin();
   }
 
   if (loading) {
