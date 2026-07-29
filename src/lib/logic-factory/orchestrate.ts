@@ -39,6 +39,7 @@ export function defaultFactoryConfig(partial?: Partial<FactoryConfig>): FactoryC
     sleepMs: partial?.sleepMs ?? 5_000,
     autoPromote,
     maxGenerations: partial?.maxGenerations ?? (partial?.continuous ? 0 : 1),
+    dryPromote: partial?.dryPromote ?? false,
   };
 }
 
@@ -132,7 +133,7 @@ export async function runFactoryGeneration(opts: {
     ),
   );
 
-  if (best && !opts.dryPromote) {
+  if (best && !opts.dryPromote && !cfg.dryPromote) {
     try {
       const promo = await promoteWinner(best, cfg);
       appendAudit(
@@ -143,7 +144,7 @@ export async function runFactoryGeneration(opts: {
     } catch (e) {
       appendAudit(`PROMOTE_ERR ${(e as Error).message} · best=${best.label}`);
     }
-  } else if (best && opts.dryPromote) {
+  } else if (best && (opts.dryPromote || cfg.dryPromote)) {
     appendAudit(`PROMOTE_DRY best=${best.label} score=${best.metrics.score.toFixed(3)}`);
   }
 

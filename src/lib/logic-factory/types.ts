@@ -103,4 +103,6 @@ export type FactoryConfig = {
   autoPromote: boolean;
   /** max generations in one process (0 = infinite when continuous) */
   maxGenerations: number;
+  /** skip DB promote (still invent/sim/rank/persist files) */
+  dryPromote: boolean;
 };
