@@ -1,0 +1,30 @@
+# Soft backup: run one logic-factory generation when secrets exist.
+# Primary unattended loop is Render worker `super-alpha-logic-factory`.
+name: logic-factory-once
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+jobs:
+  factory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Run one factory generation
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          METAAPI_TOKEN: ${{ secrets.METAAPI_TOKEN }}
+          FACTORY_AUTO_PROMOTE: ${{ secrets.FACTORY_AUTO_PROMOTE || '1' }}
+          FACTORY_MAX_LOTS: "0.05"
+          FACTORY_SYMBOLS: "GBPUSD,EURUSD"
+        run: npx tsx scripts/logic-factory-run.ts --once --n 24 --stride 20

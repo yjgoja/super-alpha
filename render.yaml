@@ -62,3 +62,33 @@ services:
         value: "45000"
       - key: NODE_ENV
         value: production
+
+  # Offline logic factory — invent + preset param search + sim/rank + safe promote
+  # Separate from trading engine so discovery never blocks live ticks.
+  - type: worker
+    name: super-alpha-logic-factory
+    runtime: docker
+    dockerfilePath: ./Dockerfile.engine
+    dockerCommand: npx tsx scripts/logic-factory-run.ts --continuous --n 32 --gens 0 --sleep-ms 15000
+    repo: https://github.com/yjgoja/super-alpha
+    plan: starter
+    region: ohio
+    branch: master
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: super-alpha-db
+          property: connectionString
+      - key: METAAPI_TOKEN
+        sync: false
+      - key: FACTORY_AUTO_PROMOTE
+        value: "1"
+      - key: FACTORY_PROMOTE_DEMO_ONLY
+        value: "0"
+      - key: FACTORY_MAX_LOTS
+        value: "0.05"
+      - key: FACTORY_SYMBOLS
+        value: "GBPUSD,EURUSD"
+      - key: NODE_ENV
+        value: production

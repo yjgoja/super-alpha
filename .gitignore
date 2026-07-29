@@ -55,3 +55,4 @@ prisma/dev.db-journal
 # local PC-transfer zips (contain .env secrets — never commit)
 /tmp/
 *.zip
+scripts/out/logic-factory/

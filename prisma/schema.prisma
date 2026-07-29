@@ -69,6 +69,7 @@ model BrokerAccount {
   fills      Fill[]
   snapshots  EquitySnapshot[]
   dailyStats DailyStat[]
+  factoryPromotions LogicFactoryPromotion[]
 
   @@index([userId])
   @@unique([login])
@@ -233,4 +234,38 @@ model PriceTick {
   bid       Float
   ask       Float
   updatedAt DateTime @updatedAt
+}
+
+/// Logic factory epoch pointer (unattended discovery)
+model LogicFactoryRun {
+  id          String   @id @default(cuid())
+  runId       String   @unique
+  epoch       Int      @default(1)
+  generation  Int      @default(1)
+  tested      Int      @default(0)
+  bestScore   Float?
+  bestLabel   String?
+  bestPayload Json?
+  leaderboard Json?
+  status      String   @default("running")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// Safe promote audit — never deletes open baskets
+model LogicFactoryPromotion {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     BrokerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  candidateId String
+  label       String
+  symbol      String
+  direction   String
+  score       Float
+  payload     Json
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([score])
 }
