@@ -44,6 +44,16 @@ export const LOGIC_OPTIONS = [
     desc: "균형형 코어 프리셋",
   },
   {
+    id: "martin_9_gbp_sell_n9",
+    name: "알파 GBP숏 코어 N9",
+    desc: "GBPUSD SELL · 코어 간격 · 0.05×1.7 · 9회차 · TP10%",
+  },
+  {
+    id: "martin_9_xau_buy_n5",
+    name: "알파 XAU롱 코어 N5",
+    desc: "XAUUSD BUY · 코어 간격 · 0.02×2 · 5회차 · TP10%",
+  },
+  {
     id: "dubai_bruno_313",
     name: "알파 지속 로직 - 2.35%",
     desc: "회차가 깊은 지속형 프리셋",
@@ -82,6 +92,8 @@ export const PRIMARY_LOGIC_IDS = [
   "martin_9_113",
   "martin_9_35",
   "martin_9_65",
+  "martin_9_gbp_sell_n9",
+  "martin_9_xau_buy_n5",
   "dubai_bruno_313",
   "martin_9_068_time",
   "martin_9_35_time",
@@ -97,6 +109,40 @@ export const LOGIC_IDS = LOGIC_OPTIONS.map((l) => l.id) as [
   LogicId,
   ...LogicId[],
 ];
+
+/** Named discovery presets — startLots / multiplier / entryCount defaults */
+export const LOGIC_BOT_DEFAULTS: Partial<
+  Record<
+    LogicId,
+    {
+      startLots: number;
+      entryMultiplier: number;
+      entryCount: number;
+      suggestedSymbol?: string;
+      suggestedDirection?: "BUY" | "SELL";
+    }
+  >
+> = {
+  martin_9_gbp_sell_n9: {
+    startLots: 0.05,
+    entryMultiplier: 1.7,
+    entryCount: 9,
+    suggestedSymbol: "GBPUSD",
+    suggestedDirection: "SELL",
+  },
+  martin_9_xau_buy_n5: {
+    startLots: 0.02,
+    entryMultiplier: 2,
+    entryCount: 5,
+    suggestedSymbol: "XAUUSD",
+    suggestedDirection: "BUY",
+  },
+};
+
+export function logicBotDefaults(logic: string) {
+  const id = normalizeLogicId(logic) as LogicId;
+  return LOGIC_BOT_DEFAULTS[id] ?? null;
+}
 
 /** 삭제·구버전 프리셋 → 현재 로직 */
 export const LEGACY_LOGIC_ALIASES: Record<string, LogicId> = {

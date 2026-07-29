@@ -33,6 +33,16 @@ export const PUBLIC_LOGIC_OPTIONS = [
     desc: "균형형 코어 프리셋",
   },
   {
+    id: "martin_9_gbp_sell_n9" as const,
+    name: "알파 GBP숏 코어 N9",
+    desc: "GBPUSD SELL · 코어 간격 · 0.05×1.7 · 9회차",
+  },
+  {
+    id: "martin_9_xau_buy_n5" as const,
+    name: "알파 XAU롱 코어 N5",
+    desc: "XAUUSD BUY · 코어 간격 · 0.02×2 · 5회차",
+  },
+  {
     id: "dubai_bruno_313" as const,
     name: "알파 지속 로직 - 2.35%",
     desc: "회차가 깊은 지속형 프리셋",

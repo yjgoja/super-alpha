@@ -8,6 +8,7 @@ import {
   SYMBOL_GROUPS,
   SYMBOL_OPTIONS,
   isLogicId,
+  logicBotDefaults,
   normalizeLogicId,
 } from "@/lib/strategies";
 import { publicLogicOptions, redactSymbolBot } from "@/lib/strategy-public";
@@ -230,12 +231,20 @@ export async function PUT(req: Request) {
     const logic =
       body.logic && isLogicId(body.logic) ? body.logic : undefined;
     const resolvedLogic = logic ?? "dubai_bruno_313";
+    const namedDefaults = logicBotDefaults(resolvedLogic);
     const meta = tableLogicMeta(resolvedLogic);
-    const levels = getTableLevels(resolvedLogic);
-    const defaultMult = defaultEntryMultiplier(resolvedLogic);
+    const levels = getTableLevels(
+      resolvedLogic,
+      body.entryMultiplier ?? namedDefaults?.entryMultiplier ?? defaultEntryMultiplier(resolvedLogic),
+    );
+    const defaultMult =
+      namedDefaults?.entryMultiplier ?? defaultEntryMultiplier(resolvedLogic);
     const editorDefaults = defaultEditorPayload(resolvedLogic);
+    const defaultEntryCount =
+      namedDefaults?.entryCount ?? meta.count ?? levels.length;
 
-    const createLots = body.startLots ?? editorDefaults.startLots ?? 0.01;
+    const createLots =
+      body.startLots ?? namedDefaults?.startLots ?? editorDefaults.startLots ?? 0.01;
     const createTpPct =
       body.takeProfitPct ?? editorDefaults.takeProfitPct ?? meta.firstTpRoi ?? 20;
     const createSlPct =
@@ -264,7 +273,7 @@ export async function PUT(req: Request) {
         logic: resolvedLogic,
         direction,
         dualDirection: body.dualDirection ?? false,
-        entryCount: body.entryCount ?? meta.count,
+        entryCount: body.entryCount ?? defaultEntryCount,
         entryMultiplier: body.entryMultiplier ?? defaultMult,
         entryIntervalPct: body.entryIntervalPct ?? 5,
         takeProfitPct: createTpPct,
@@ -280,16 +289,17 @@ export async function PUT(req: Request) {
         ...(logic
           ? {
               logic,
-              entryCount: body.entryCount ?? levels.length,
-              // 마틴으로 바꿀 때 배수 미지정이면 기본 2배
+              entryCount: body.entryCount ?? defaultEntryCount,
+              // 마틴으로 바꿀 때 배수 미지정이면 로직 기본 배수
               ...(body.entryMultiplier == null && isMartinLogic(logic)
-                ? { entryMultiplier: 2 }
+                ? { entryMultiplier: defaultMult }
                 : {}),
-              // 프리셋 변경 시 사용자 요청 ROI/$ 무시하고 표 기본값 적용
+              // 프리셋 변경 시 사용자 요청 ROI/$ 무시하고 표·발굴 기본값 적용
               ...(!isAdmin
                 ? {
-                    entryMultiplier: defaultEntryMultiplier(logic),
-                    entryCount: levels.length,
+                    entryMultiplier: defaultMult,
+                    entryCount: defaultEntryCount,
+                    startLots: namedDefaults?.startLots ?? createLots,
                     takeProfitPct: createTpPct,
                     stopLossPct: createSlPct,
                     takeProfitUsd: createUsd.takeProfitUsd,

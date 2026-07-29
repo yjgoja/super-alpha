@@ -4,7 +4,7 @@ import roulette9Json from "./presets/roulette9-levels.json";
 import johnKelly1006Json from "./presets/john-kelly-1006-levels.json";
 import type { Dca1000Level } from "./dca1000";
 import { DCA1000_DEFAULT_SL_ROI } from "./dca1000";
-import { normalizeLogicId } from "./strategies";
+import { normalizeLogicId, logicBotDefaults } from "./strategies";
 
 type LevelsFile = { leverageBase?: number; levels: Dca1000Level[] };
 
@@ -19,6 +19,20 @@ export type Martin9DefensePreset = {
 
 export const MARTIN9_DEFENSE: Record<string, Martin9DefensePreset> = {
   martin_9_65: {
+    chartPct: 6.5,
+    dropScale: 9.741,
+    stopLossPct: 2191.7,
+    takeProfitPct: 10,
+  },
+  /** 발굴: GBPUSD SELL · N9 · 0.05×1.7 — 코어(6.5%) 간격 동일 */
+  martin_9_gbp_sell_n9: {
+    chartPct: 6.5,
+    dropScale: 9.741,
+    stopLossPct: 2191.7,
+    takeProfitPct: 10,
+  },
+  /** 발굴: XAUUSD BUY · N5 · 0.02×2 — 코어(6.5%) 간격 동일 */
+  martin_9_xau_buy_n5: {
     chartPct: 6.5,
     dropScale: 9.741,
     stopLossPct: 2191.7,
@@ -130,6 +144,8 @@ function buildLevels(file: LevelsFile): Dca1000Level[] {
 
 export const TABLE_LOGIC_IDS = [
   "martin_9_65",
+  "martin_9_gbp_sell_n9",
+  "martin_9_xau_buy_n5",
   "martin_9_35",
   "martin_9_068",
   "martin_9_091",
@@ -192,17 +208,23 @@ export function isLevelsEditableLogic(logic: string) {
   return isMartinLogic(logic);
 }
 
-/** 마틴게일 9차 → 최대 9회차 (L0~L8) */
+/** 마틴게일 9차 → 최대 9회차 (L0~L8). 발굴 N5 변형은 5. */
 export function martinMaxLevels(logic: string): number {
-  if (logic === "custom") return 12;
-  if (isMartin9Logic(logic)) return 9;
-  const m = logic.match(/martin_(\d+)/i);
+  const id = normalizeLogicId(logic);
+  if (id === "custom") return 12;
+  if (id === "martin_9_xau_buy_n5") return 5;
+  if (id === "martin_9_gbp_sell_n9") return 9;
+  if (isMartin9Logic(id)) return 9;
+  const m = id.match(/martin_(\d+)/i);
   if (!m) return 12;
   return Math.max(2, Math.min(30, Number(m[1])));
 }
 
 export function defaultEntryMultiplier(logic: string): number {
-  return isMartinLogic(logic) && normalizeLogicId(logic) !== "custom" ? 2 : 1;
+  const id = normalizeLogicId(logic);
+  const named = logicBotDefaults(id);
+  if (named) return named.entryMultiplier;
+  return isMartinLogic(id) && id !== "custom" ? 2 : 1;
 }
 
 function roundDrop(n: number) {
@@ -368,12 +390,15 @@ export function tableLogicMeta(logic: string) {
 
 export function defaultEditorPayload(logic: string): StrategyPayload {
   const defense = getMartin9Defense(logic);
+  const named = logicBotDefaults(logic);
+  const startLots = named?.startLots ?? 0.01;
+  const mult = named?.entryMultiplier ?? defaultEntryMultiplier(logic);
   if (isBulkLogic(logic)) {
     const meta = tableLogicMeta(logic);
     return {
       mode: "bulk",
       leverageBase: getTableLeverage(logic),
-      startLots: 0.01,
+      startLots,
       takeProfitPct: meta.firstTpRoi || 20,
       stopLossPct: isSustainedBulkLogic(logic)
         ? sustainedBulkStopLossPct(logic)
@@ -385,12 +410,12 @@ export function defaultEditorPayload(logic: string): StrategyPayload {
   return {
     mode: "levels",
     leverageBase: getTableLeverage(logic),
-    startLots: 0.01,
+    startLots,
     takeProfitPct: defense?.takeProfitPct ?? 20,
     stopLossPct: defense?.stopLossPct ?? DCA1000_DEFAULT_SL_ROI,
     takeProfitUsd: 0,
     stopLossUsd: 0,
-    levels: presetToEditorRows(logic, 0.01, 2),
+    levels: presetToEditorRows(logic, startLots, mult),
   };
 }
 
