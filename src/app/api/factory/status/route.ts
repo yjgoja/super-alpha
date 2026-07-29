@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/access";
 import { gateErrorKo } from "@/lib/ko-errors";
-import { loadLeaderboard } from "@/lib/logic-factory";
+// Import store only — never pull bars/orchestrate into the Next bundle.
+import { loadLeaderboard } from "@/lib/logic-factory/store";
 
 /** Admin: latest logic-factory leaderboard (file + DB). */
 export async function GET() {
