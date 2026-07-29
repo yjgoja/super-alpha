@@ -77,7 +77,7 @@ async function persistEpochToDb(
               kind: result.best.kind,
             }
           : undefined,
-        leaderboard: board,
+        leaderboard: board as object,
         status: "running",
       },
       update: {
@@ -94,7 +94,7 @@ async function persistEpochToDb(
               kind: result.best.kind,
             }
           : undefined,
-        leaderboard: board,
+        leaderboard: board as object,
       },
     });
   } catch (e) {
