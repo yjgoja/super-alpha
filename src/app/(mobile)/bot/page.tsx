@@ -750,14 +750,24 @@ export default function BotPage() {
                             }))
                           }
                         >
-                          {publicLogicOptions().map((l) => (
+                          {publicLogicOptions({
+                            symbol: bot.symbol,
+                            direction: dir === "SELL" ? "SELL" : "BUY",
+                            includeId:
+                              (draft.logic as string) || bot.logic || undefined,
+                          }).map((l) => (
                             <option key={l.id} value={l.id}>
                               {l.name}
                             </option>
                           ))}
                         </select>
                         <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
-                          {publicLogicOptions().find(
+                          {publicLogicOptions({
+                            symbol: bot.symbol,
+                            direction: dir === "SELL" ? "SELL" : "BUY",
+                            includeId:
+                              (draft.logic as string) || bot.logic || undefined,
+                          }).find(
                             (l) =>
                               l.id ===
                               normalizeLogicId(

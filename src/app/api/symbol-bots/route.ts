@@ -8,6 +8,7 @@ import {
   SYMBOL_GROUPS,
   SYMBOL_OPTIONS,
   isLogicId,
+  logicAllowedForBot,
   logicBotDefaults,
   normalizeLogicId,
 } from "@/lib/strategies";
@@ -231,6 +232,20 @@ export async function PUT(req: Request) {
     const logic =
       body.logic && isLogicId(body.logic) ? body.logic : undefined;
     const resolvedLogic = logic ?? "dubai_bruno_313";
+    if (
+      logic &&
+      !logicAllowedForBot(logic, body.symbol, direction === "SELL" ? "SELL" : "BUY")
+    ) {
+      const scope = logicBotDefaults(logic);
+      return NextResponse.json(
+        {
+          error: scope
+            ? `${scope.requiredSymbol} ${scope.requiredDirection} 전용 로직입니다.`
+            : "이 종목/방향에서는 사용할 수 없는 로직입니다.",
+        },
+        { status: 400 },
+      );
+    }
     const namedDefaults = logicBotDefaults(resolvedLogic);
     const meta = tableLogicMeta(resolvedLogic);
     const levels = getTableLevels(

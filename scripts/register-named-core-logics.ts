@@ -28,8 +28,8 @@ async function applyOne(t: Target) {
   if (!account) return { login: t.login, ok: false, error: "no account" };
 
   const d = logicBotDefaults(t.logicId)!;
-  const symbol = d.suggestedSymbol!;
-  const direction = d.suggestedDirection!;
+  const symbol = d.requiredSymbol;
+  const direction = d.requiredDirection;
   const defense = getMartin9Defense(t.logicId);
   const tp = resolveLiveTakeProfitPct(t.logicId, defense?.takeProfitPct ?? 10) ?? 10;
   const sl =

@@ -3,7 +3,13 @@
  * Names show chart defense % only — no drop/lot ladders.
  */
 
-import { LOGIC_OPTIONS, normalizeLogicId, type LogicId } from "./strategies";
+import {
+  LOGIC_OPTIONS,
+  logicAllowedForBot,
+  logicBotDefaults,
+  normalizeLogicId,
+  type LogicId,
+} from "./strategies";
 
 /** User-facing names — 로직명 + 차트 방어폭% */
 export const PUBLIC_LOGIC_OPTIONS = [
@@ -35,12 +41,12 @@ export const PUBLIC_LOGIC_OPTIONS = [
   {
     id: "martin_9_gbp_sell_n9" as const,
     name: "알파 GBP숏 코어 N9",
-    desc: "GBPUSD SELL · 코어 간격 · 0.05×1.7 · 9회차",
+    desc: "GBPUSD SELL 전용 · 코어 간격 · 0.05×1.7 · 9회차",
   },
   {
     id: "martin_9_xau_buy_n5" as const,
     name: "알파 XAU롱 코어 N5",
-    desc: "XAUUSD BUY · 코어 간격 · 0.02×2 · 5회차",
+    desc: "XAUUSD BUY 전용 · 코어 간격 · 0.02×2 · 5회차",
   },
   {
     id: "dubai_bruno_313" as const,
@@ -75,9 +81,32 @@ export function isPublicTimeLogic(id: string) {
   return n === "martin_9_068_time" || n === "martin_9_35_time";
 }
 
-/** Test-only roulette/kelly stay in engine; not listed in PUBLIC_LOGIC_OPTIONS */
-export function publicLogicOptions() {
-  return PUBLIC_LOGIC_OPTIONS.filter((l) => l.id !== "custom");
+export type PublicLogicFilter = {
+  symbol?: string;
+  direction?: "BUY" | "SELL";
+  /** Always include this id (current bot value) even if out of scope */
+  includeId?: string;
+};
+
+/**
+ * Public preset list.
+ * - No filter: hide symbol-scoped discovery logics (only general presets).
+ * - With symbol/direction: general presets + matching scoped logics only.
+ */
+export function publicLogicOptions(filter?: PublicLogicFilter) {
+  const base = PUBLIC_LOGIC_OPTIONS.filter((l) => l.id !== "custom");
+  const sym = filter?.symbol?.toUpperCase();
+  const dir = filter?.direction === "SELL" ? "SELL" : filter?.direction === "BUY" ? "BUY" : undefined;
+  const include = filter?.includeId ? normalizeLogicId(filter.includeId) : null;
+
+  return base.filter((l) => {
+    if (include && l.id === include) return true;
+    const scoped = logicBotDefaults(l.id);
+    if (!scoped) return true; // general preset
+    // Scoped: only when filter matches required symbol+direction
+    if (!sym || !dir) return false;
+    return logicAllowedForBot(l.id, sym, dir);
+  });
 }
 
 /** Strip SymbolBot fields that reveal margin ROI / ladder math / TP-SL $ */

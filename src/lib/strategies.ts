@@ -110,7 +110,7 @@ export const LOGIC_IDS = LOGIC_OPTIONS.map((l) => l.id) as [
   ...LogicId[],
 ];
 
-/** Named discovery presets — startLots / multiplier / entryCount defaults */
+/** Named discovery presets — startLots / multiplier / entryCount + symbol/dir scope */
 export const LOGIC_BOT_DEFAULTS: Partial<
   Record<
     LogicId,
@@ -118,8 +118,10 @@ export const LOGIC_BOT_DEFAULTS: Partial<
       startLots: number;
       entryMultiplier: number;
       entryCount: number;
-      suggestedSymbol?: string;
-      suggestedDirection?: "BUY" | "SELL";
+      /** If set, logic only appears / applies for this symbol */
+      requiredSymbol: string;
+      /** If set, logic only appears / applies for this direction */
+      requiredDirection: "BUY" | "SELL";
     }
   >
 > = {
@@ -127,21 +129,36 @@ export const LOGIC_BOT_DEFAULTS: Partial<
     startLots: 0.05,
     entryMultiplier: 1.7,
     entryCount: 9,
-    suggestedSymbol: "GBPUSD",
-    suggestedDirection: "SELL",
+    requiredSymbol: "GBPUSD",
+    requiredDirection: "SELL",
   },
   martin_9_xau_buy_n5: {
     startLots: 0.02,
     entryMultiplier: 2,
     entryCount: 5,
-    suggestedSymbol: "XAUUSD",
-    suggestedDirection: "BUY",
+    requiredSymbol: "XAUUSD",
+    requiredDirection: "BUY",
   },
 };
 
 export function logicBotDefaults(logic: string) {
   const id = normalizeLogicId(logic) as LogicId;
   return LOGIC_BOT_DEFAULTS[id] ?? null;
+}
+
+/** True if logic may be used on this symbol/direction (unscoped = always). */
+export function logicAllowedForBot(
+  logic: string,
+  symbol: string,
+  direction: "BUY" | "SELL",
+) {
+  const d = logicBotDefaults(logic);
+  if (!d) return true;
+  const sym = (symbol || "").toUpperCase();
+  const dir = direction === "SELL" ? "SELL" : "BUY";
+  if (d.requiredSymbol && d.requiredSymbol.toUpperCase() !== sym) return false;
+  if (d.requiredDirection && d.requiredDirection !== dir) return false;
+  return true;
 }
 
 /** 삭제·구버전 프리셋 → 현재 로직 */
