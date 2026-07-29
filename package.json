@@ -35,6 +35,7 @@
     "verify:rate-harden": "tsx scripts/_verify-metaapi-rate-harden.ts",
     "verify:render-deploy": "tsx scripts/_verify-render-deploy-script.ts",
     "verify:ghost-heal": "tsx scripts/_verify-ghost-heal-safety.ts",
+    "verify:vercel-no-dupe": "bash scripts/check-vercel-no-duplicate.sh",
     "render:deploy": "tsx scripts/render-deploy.ts --sync-env --wait",
     "render:status": "tsx scripts/render-deploy.ts --status"
   },

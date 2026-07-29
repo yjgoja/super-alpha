@@ -39,3 +39,11 @@ Run what applies:
 ## Scope
 
 One job per request. If the user asks for “everything”, split into ordered steps and finish the first with QA before expanding.
+
+## Vercel / deploy (fail-email prevention)
+
+- Production site is **only** Vercel project `super-alpha` (www.superalpha.kr).
+- **Never** `vercel link` / `vercel project add` in a way that creates a new project (e.g. `workspace`) for this repo — that duplicates GitHub deploys and sends false failure emails.
+- If linking is required: `vercel link --project super-alpha --yes` under team `watch-s-projects` (existing project only; never create).
+- Treat emails from project name `workspace` as phantom; delete that project if it reappears.
+- Before claiming a Vercel failure is app code: check deployment environment name (`Production – super-alpha` vs other).
