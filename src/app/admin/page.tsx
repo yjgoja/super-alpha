@@ -161,6 +161,14 @@ export default function AdminPage() {
       return;
     }
     await Promise.all([loadOverview(), loadUsers()]);
+    // Soft-heal accounts wrongly marked failed solely due to MetaAPI 429.
+    void fetch("/api/admin/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "check_provision" }),
+    })
+      .then(() => loadUsers())
+      .catch(() => null);
   }, [loadOverview, loadUsers]);
 
   useEffect(() => {
@@ -534,7 +542,11 @@ export default function AdminPage() {
                       >
                         {busy === a.id
                           ? "연동 중…"
-                          : a.status === "provisioning"
+                          : a.status === "provisioning" ||
+                              (a.status === "failed" &&
+                                /요청 제한|429|rate\s*limit|too many/i.test(
+                                  a.statusMessage || "",
+                                ))
                             ? "상태 확인/재시도"
                             : "연동 승인"}
                       </button>

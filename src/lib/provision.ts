@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { toKoreanError } from "./ko-errors";
+import { isRateLimitError, toKoreanError } from "./ko-errors";
 import {
   fetchSnapshot,
   findMetaAccountByLogin,
@@ -9,6 +9,21 @@ import {
 function looksLikeUuid(id: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id);
 }
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Transient MetaAPI provisioning / deploy rate limits — never permanent fail. */
+export function isProvisionRateLimitMessage(msg: unknown): boolean {
+  if (isRateLimitError(msg)) return true;
+  const t = String(msg || "");
+  return /요청 제한|요청이 너무 많|잠시 후 재시도|rate\s*limit|rate_limit|too many|429/i.test(
+    t,
+  );
+}
+
+const PROVISION_RETRY_COOLDOWN_MS = 30_000;
 
 async function markLinked(
   accountId: string,
@@ -66,6 +81,26 @@ export async function finalizeProvisionIfReady(accountId: string) {
 
   const metaId = await ensureCorrectMetaId(account);
   if (!metaId) {
+    // No cloud id yet — retry create/deploy, but cooldown so admin 5s poll does not hammer MetaAPI.
+    if (account.syncToken) {
+      const ageMs = Date.now() - new Date(account.updatedAt).getTime();
+      if (ageMs >= PROVISION_RETRY_COOLDOWN_MS) {
+        const again = await runAdminProvision(account.id);
+        if (again.ok && !again.pending) {
+          return { done: true as const, status: "connected" as const };
+        }
+        return {
+          done: false as const,
+          status: "provisioning" as const,
+          message: again.ok ? again.message : again.error,
+        };
+      }
+      return {
+        done: false as const,
+        status: "provisioning" as const,
+        message: account.statusMessage || "요청 제한 · 자동 재시도 대기 중…",
+      };
+    }
     return { done: false as const, status: "provisioning" as const };
   }
 
@@ -86,14 +121,32 @@ export async function finalizeProvisionIfReady(accountId: string) {
       where: { id: account.id },
       data: {
         metaApiAccountId: metaId,
-        statusMessage: "브로커 연결됨 · 잔고 동기화 대기 중…",
+        statusMessage: isProvisionRateLimitMessage(snap.ok ? "" : snap.message)
+          ? "요청 제한 · 자동 재시도 중…"
+          : "브로커 연결됨 · 잔고 동기화 대기 중…",
       },
     });
-    return { done: false as const, status: "provisioning" as const, message: snap.ok ? "empty snap" : snap.message };
+    return {
+      done: false as const,
+      status: "provisioning" as const,
+      message: snap.ok ? "empty snap" : snap.message,
+    };
   }
 
   if (st.state === "DEPLOY_FAILED") {
     const msg = toKoreanError(st.raw, "브로커 연결에 실패했습니다. 계좌 정보를 확인하세요.");
+    // Auth/server errors are permanent; rate-limit-ish deploy noise stays provisioning.
+    if (isProvisionRateLimitMessage(msg) || isProvisionRateLimitMessage(st.raw)) {
+      await prisma.brokerAccount.update({
+        where: { id: account.id },
+        data: {
+          metaApiAccountId: metaId,
+          status: "provisioning",
+          statusMessage: "요청 제한 · 자동 재시도 중…",
+        },
+      });
+      return { done: false as const, status: "provisioning" as const, message: msg };
+    }
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: { status: "failed", statusMessage: msg, botEnabled: false },
@@ -112,18 +165,47 @@ export async function finalizeProvisionIfReady(accountId: string) {
 }
 
 export async function finalizeAllProvisioning() {
+  // Recover accounts wrongly marked failed solely due to MetaAPI 429.
+  await prisma.brokerAccount.updateMany({
+    where: {
+      status: "failed",
+      OR: [
+        { statusMessage: { contains: "요청 제한" } },
+        { statusMessage: { contains: "요청이 너무 많" } },
+        { statusMessage: { contains: "rate" } },
+        { statusMessage: { contains: "429" } },
+      ],
+    },
+    data: {
+      status: "provisioning",
+      statusMessage: "요청 제한 · 자동 재시도 중…",
+    },
+  });
+
   const list = await prisma.brokerAccount.findMany({
     where: { status: "provisioning" },
     select: { id: true },
+    orderBy: { updatedAt: "asc" },
+    take: 8,
   });
-  const settled = await Promise.all(
-    list.map(async (a) => ({ id: a.id, ...(await finalizeProvisionIfReady(a.id)) })),
-  );
+  // Serialize — parallel finalize/provision bursts MetaAPI provisioning API into 429.
+  const settled: Array<{ id: string } & Awaited<ReturnType<typeof finalizeProvisionIfReady>>> =
+    [];
+  for (const a of list) {
+    settled.push({ id: a.id, ...(await finalizeProvisionIfReady(a.id)) });
+  }
+
+  // Only time-out provisioning that never got a MetaAPI id (true stuck), not rate-limit waits.
   await prisma.brokerAccount.updateMany({
     where: {
       status: "provisioning",
       metaApiAccountId: null,
-      updatedAt: { lt: new Date(Date.now() - 2 * 60 * 1000) },
+      updatedAt: { lt: new Date(Date.now() - 10 * 60 * 1000) },
+      NOT: [
+        { statusMessage: { contains: "요청 제한" } },
+        { statusMessage: { contains: "요청이 너무 많" } },
+        { statusMessage: { contains: "자동 재시도" } },
+      ],
     },
     data: {
       status: "failed",
@@ -135,7 +217,7 @@ export async function finalizeAllProvisioning() {
 
 /**
  * Admin approve: prove CONNECTED + live snapshot, keep cloud DEPLOYED.
- * Retries rate-limits; never soft-links a DISCONNECTED cloud.
+ * Rate limits stay in provisioning + auto-retry — never permanent failed.
  */
 export async function runAdminProvision(accountId: string) {
   const account = await prisma.brokerAccount.findUnique({ where: { id: accountId } });
@@ -154,21 +236,11 @@ export async function runAdminProvision(accountId: string) {
 
   const { ensureAccountCloudLive } = await import("./metaapi");
 
-  let repaired = await ensureAccountCloudLive({
-    metaApiAccountId: account.metaApiAccountId,
-    login: account.login,
-    password: account.syncToken,
-    server: account.server,
-    waitMs: 90000,
-    allowRecreate: true,
-  });
+  // Keep in-request retries short: Vercel serverless budgets + admin polls check_provision.
+  const maxAttempts = 2;
+  let repaired: Awaited<ReturnType<typeof ensureAccountCloudLive>> | null = null;
 
-  if (!repaired.ok && /너무 많|rate|429/i.test(repaired.message)) {
-    await prisma.brokerAccount.update({
-      where: { id: account.id },
-      data: { statusMessage: "요청 제한 · 잠시 후 재시도 중…" },
-    });
-    await new Promise((r) => setTimeout(r, 65000));
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     repaired = await ensureAccountCloudLive({
       metaApiAccountId: account.metaApiAccountId,
       login: account.login,
@@ -177,18 +249,55 @@ export async function runAdminProvision(accountId: string) {
       waitMs: 90000,
       allowRecreate: true,
     });
+
+    if (repaired.ok) break;
+
+    if (!isProvisionRateLimitMessage(repaired.message)) {
+      break;
+    }
+
+    await prisma.brokerAccount.update({
+      where: { id: account.id },
+      data: {
+        status: "provisioning",
+        statusMessage: `요청 제한 · 재시도 ${attempt}/${maxAttempts}…`,
+        botEnabled: false,
+      },
+    });
+    if (attempt < maxAttempts) {
+      await sleep(8_000 * attempt);
+    }
   }
 
-  if (!repaired.ok) {
+  if (!repaired || !repaired.ok) {
+    const msg = repaired?.message || "계좌 연동에 실패했습니다.";
+    if (isProvisionRateLimitMessage(msg)) {
+      await prisma.brokerAccount.update({
+        where: { id: account.id },
+        data: {
+          status: "provisioning",
+          statusMessage: "요청 제한 · 자동 재시도 대기 중… (실패로 표시하지 않음)",
+          botEnabled: false,
+        },
+      });
+      return {
+        ok: true as const,
+        pending: true,
+        message:
+          "MetaAPI 요청 제한입니다. 계좌는 연동 중 상태로 유지되며 자동/수동 재시도합니다.",
+        status: "provisioning" as const,
+      };
+    }
+
     await prisma.brokerAccount.update({
       where: { id: account.id },
       data: {
         status: "failed",
-        statusMessage: repaired.message,
+        statusMessage: msg,
         botEnabled: false,
       },
     });
-    return { ok: false as const, error: repaired.message };
+    return { ok: false as const, error: msg };
   }
 
   const metaId = String(repaired.metaApiAccountId);
