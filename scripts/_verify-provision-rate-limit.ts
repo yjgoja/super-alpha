@@ -1,11 +1,13 @@
 /**
- * Offline checks for admin provision rate-limit soft-fail behavior.
+ * Offline checks for provision auth vs transient error classification.
  * Run: npx tsx scripts/_verify-provision-rate-limit.ts
- *
- * Does NOT call MetaAPI or touch live baskets.
  */
-import { isRateLimitError } from "../src/lib/ko-errors";
-import { isProvisionRateLimitMessage } from "../src/lib/provision";
+import { isMt5AuthError, isNetworkTransientError, toKoreanError } from "../src/lib/ko-errors";
+import {
+  isProvisionAuthMessage,
+  isProvisionRateLimitMessage,
+  isProvisionTransientMessage,
+} from "../src/lib/provision";
 
 let fail = 0;
 function check(name: string, pass: boolean, detail?: string) {
@@ -28,14 +30,32 @@ const rateSamples = [
 
 for (const s of rateSamples) {
   check(`rate detect: ${JSON.stringify(s).slice(0, 48)}`, isProvisionRateLimitMessage(s));
+  check(`transient rate: ${JSON.stringify(s).slice(0, 40)}`, isProvisionTransientMessage(s));
 }
 
-check("ko isRateLimitError 요청 제한", isRateLimitError("요청 제한 · 재시도"));
-check("ko isRateLimitError rate_limit", isRateLimitError("RATE_LIMIT"));
+const net = "네트워크 연결이 불안정합니다. 잠시 후 다시 시도하세요.";
+check("network soft", isNetworkTransientError(net) && isProvisionTransientMessage(net));
+check("network not auth", !isProvisionAuthMessage(net));
+
+const authSamples = [
+  "E_AUTH",
+  "Invalid account",
+  "invalid password",
+  "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+];
+for (const s of authSamples) {
+  check(`auth: ${s}`, isMt5AuthError(s) && isProvisionAuthMessage(s));
+  check(`auth not transient: ${s}`, !isProvisionTransientMessage(s));
+}
+
+check(
+  "toKorean E_AUTH",
+  toKoreanError("E_AUTH: invalid account") ===
+    "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+);
 
 const permanent = [
   "계정 배포 실패",
-  "비밀번호가 올바르지 않습니다",
   "브로커 계좌 정보를 확인하지 못했습니다",
 ];
 for (const s of permanent) {
@@ -46,4 +66,4 @@ if (fail > 0) {
   console.error(`\n${fail} check(s) failed`);
   process.exit(1);
 }
-console.log("\nAll provision rate-limit checks passed.");
+console.log("\nAll provision rate-limit / auth checks passed.");

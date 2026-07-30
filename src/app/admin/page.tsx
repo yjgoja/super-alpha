@@ -4,6 +4,19 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { logoutToLogin } from "@/lib/logout-client";
 
+function provisionButtonLabel(status: string, statusMessage: string | null | undefined, busy: boolean) {
+  if (busy) return "연동 중…";
+  if (status === "connected") return "재검증";
+  if (
+    status === "provisioning" ||
+    status === "pending_registration" ||
+    status === "failed"
+  ) {
+    return "상태 확인/재시도";
+  }
+  return "연동 승인";
+}
+
 type Overview = {
   summary: {
     users: number;
@@ -273,7 +286,12 @@ export default function AdminPage() {
   }
 
   const pendingServers = users.filter((u) =>
-    u.accounts.some((a) => a.status === "pending_registration" || a.status === "provisioning"),
+    u.accounts.some(
+      (a) =>
+        a.status === "pending_registration" ||
+        a.status === "provisioning" ||
+        a.status === "failed",
+    ),
   );
   const pendingMembers = users.filter(
     (u) => u.role !== "admin" && u.approvalStatus === "pending",
@@ -540,15 +558,7 @@ export default function AdminPage() {
                         }
                         onClick={() => patch({ accountId: a.id, action: "provision" }, a.id)}
                       >
-                        {busy === a.id
-                          ? "연동 중…"
-                          : a.status === "provisioning" ||
-                              (a.status === "failed" &&
-                                /요청 제한|429|rate\s*limit|too many/i.test(
-                                  a.statusMessage || "",
-                                ))
-                            ? "상태 확인/재시도"
-                            : "연동 승인"}
+                        {provisionButtonLabel(a.status, a.statusMessage, busy === a.id)}
                       </button>
                       <button
                         className="sa-btn sa-btn-ghost text-xs py-2 px-3"
@@ -641,6 +651,21 @@ export default function AdminPage() {
                         >
                           상세
                         </button>
+                        {a &&
+                          u.approvalStatus === "approved" &&
+                          (a.status === "pending_registration" ||
+                            a.status === "provisioning" ||
+                            a.status === "failed") && (
+                            <button
+                              className="sa-btn sa-btn-primary text-xs py-2 px-3"
+                              disabled={busy === a.id}
+                              onClick={() =>
+                                patch({ accountId: a.id, action: "provision" }, a.id)
+                              }
+                            >
+                              {provisionButtonLabel(a.status, a.statusMessage, busy === a.id)}
+                            </button>
+                          )}
                         {a?.metaApiAccountId && a.status === "connected" && (
                           <button
                             className="sa-btn sa-btn-ghost text-xs py-2 px-3"
@@ -752,6 +777,24 @@ export default function AdminPage() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {(a.status === "pending_registration" ||
+                    a.status === "provisioning" ||
+                    a.status === "failed" ||
+                    a.status === "connected" ||
+                    a.status === "undeployed") && (
+                    <button
+                      className="sa-btn sa-btn-primary text-xs py-2 px-3"
+                      disabled={busy === a.id || detail.user.approvalStatus !== "approved"}
+                      title={
+                        detail.user.approvalStatus !== "approved"
+                          ? "먼저 회원 승인이 필요합니다"
+                          : undefined
+                      }
+                      onClick={() => patch({ accountId: a.id, action: "provision" }, a.id)}
+                    >
+                      {provisionButtonLabel(a.status, a.statusMessage, busy === a.id)}
+                    </button>
+                  )}
                   {a.status === "connected" && (
                     <button
                       className="sa-btn sa-btn-ghost text-xs py-2 px-3"

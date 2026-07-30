@@ -6,7 +6,7 @@
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
-import { isRateLimitError, isTopUpOrHighReliabilityError, toKoreanError } from "./ko-errors";
+import { isRateLimitError, isTopUpOrHighReliabilityError, isMt5AuthError, isNetworkTransientError, toKoreanError } from "./ko-errors";
 
 const PROVISIONING =
   process.env.METAAPI_PROVISIONING_URL ||
@@ -161,6 +161,7 @@ async function api(
   pathName: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
+  opts?: { timeoutMs?: number; maxAttempts?: number },
 ) {
   const t = token();
   if (!t) {
@@ -173,7 +174,14 @@ async function api(
     };
   }
 
-  const maxAttempts = 3;
+  // Account create/validation often exceeds 12s — abort was mislabeled as "network unstable".
+  const isProvisionWrite =
+    base.includes("provisioning") &&
+    (method === "POST" || method === "PUT" || method === "DELETE");
+  const timeoutMs =
+    opts?.timeoutMs ??
+    (isProvisionWrite && pathName.includes("/accounts") ? 90_000 : 12_000);
+  const maxAttempts = opts?.maxAttempts ?? (isProvisionWrite ? 2 : 3);
   let lastStatus = 0;
   let lastData: unknown = null;
 
@@ -181,7 +189,7 @@ async function api(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12_000);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       let res: Response;
       try {
         res = await fetch(`${base}${pathName}`, {
@@ -792,7 +800,17 @@ export async function ensureAccountCloudLive(input: {
       return { ok: true, snap: liveReuse.snap, metaApiAccountId: c.id };
     }
     lastReuseFail = liveReuse.message || lastReuseFail;
-    if (isRateLimitError(liveReuse.message)) {
+    if (
+      liveReuse.code === "E_AUTH" ||
+      isMt5AuthError(liveReuse.message) ||
+      isMt5AuthError(liveReuse.code)
+    ) {
+      return {
+        ok: false,
+        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+      };
+    }
+    if (isRateLimitError(liveReuse.message) || isNetworkTransientError(liveReuse.message)) {
       return { ok: false, message: liveReuse.message };
     }
   }
@@ -817,6 +835,12 @@ export async function ensureAccountCloudLive(input: {
     mode: { type: "cloud-g2", reliability: "high", label: "고성능(g2)" },
   });
   if (!created.ok) {
+    if (created.code === "E_AUTH" || isMt5AuthError(created.message) || isMt5AuthError(created.code)) {
+      return {
+        ok: false,
+        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+      };
+    }
     return {
       ok: false,
       message: created.message || lastReuseFail || "계좌 연동에 실패했습니다.",
@@ -831,7 +855,15 @@ export async function ensureAccountCloudLive(input: {
     name: `SA-${input.login}`,
   }).catch(() => null);
   const live2 = await ensureCloudLive(newId, Math.max(waitMs, 70000));
-  if (!live2.ok) return { ok: false, message: live2.message };
+  if (!live2.ok) {
+    if (live2.code === "E_AUTH" || isMt5AuthError(live2.message)) {
+      return {
+        ok: false,
+        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
+      };
+    }
+    return { ok: false, message: live2.message };
+  }
   return { ok: true, snap: live2.snap, metaApiAccountId: newId };
 }
 
@@ -887,6 +919,18 @@ function softLinkSnap(
   };
 }
 
+function isAcceptedValidationPending(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  const err = String(d.error || "");
+  const msg = String(d.message || "").toLowerCase();
+  return (
+    err === "AcceptedError" ||
+    msg.includes("validation is in progress") ||
+    msg.includes("please retry in")
+  );
+}
+
 async function createAndConnect(input: {
   login: string;
   password: string;
@@ -917,6 +961,17 @@ async function createAndConnect(input: {
   let created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
     "transaction-id": newTransactionId(),
   });
+
+  // 202 AcceptedError: broker validation still running — wait and retry (not a network fail).
+  for (let i = 0; i < 3 && (created.status === 202 || isAcceptedValidationPending(created.data)); i++) {
+    await sleep(recommendedRetryMs(created.data) ?? 60_000);
+    const foundMid = await findMetaAccountByLogin(input.login);
+    if (foundMid?.id) return softLinkSnap(input, foundMid.id, foundMid.name);
+    created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
+      "transaction-id": newTransactionId(),
+    });
+  }
+
   // Account create must survive transient 429 — retry twice with backoff.
   for (
     let i = 0;
@@ -928,6 +983,16 @@ async function createAndConnect(input: {
     created = await api(PROVISIONING, "POST", "/users/current/accounts", payload, {
       "transaction-id": newTransactionId(),
     });
+  }
+
+  if (created.status === 202 || isAcceptedValidationPending(created.data)) {
+    const found = await findMetaAccountByLogin(input.login);
+    if (found?.id) return softLinkSnap(input, found.id, found.name);
+    return {
+      ok: false,
+      code: "VALIDATION_PENDING",
+      message: "브로커 계좌 검증 중입니다. 1분 후 다시 시도하세요.",
+    };
   }
 
   if (created.status === 0 || created.status >= 400) {
@@ -960,6 +1025,13 @@ async function createAndConnect(input: {
         ok: false,
         code: "RATE_LIMIT",
         message: "요청이 너무 많습니다. 1분 후 다시 시도하세요.",
+      };
+    }
+    if (code === "E_AUTH" || isMt5AuthError(created.data) || isMt5AuthError(code)) {
+      return {
+        ok: false,
+        code: "E_AUTH",
+        message: "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.",
       };
     }
     return {

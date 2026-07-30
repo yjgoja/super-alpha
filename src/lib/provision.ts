@@ -1,5 +1,10 @@
 import { prisma } from "./db";
-import { isRateLimitError, toKoreanError } from "./ko-errors";
+import {
+  isMt5AuthError,
+  isNetworkTransientError,
+  isRateLimitError,
+  toKoreanError,
+} from "./ko-errors";
 import {
   fetchSnapshot,
   findMetaAccountByLogin,
@@ -14,13 +19,27 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const AUTH_FAIL_MSG = "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.";
+
 /** Transient MetaAPI provisioning / deploy rate limits — never permanent fail. */
 export function isProvisionRateLimitMessage(msg: unknown): boolean {
   if (isRateLimitError(msg)) return true;
   const t = String(msg || "");
-  return /요청 제한|요청이 너무 많|잠시 후 재시도|rate\s*limit|rate_limit|too many|429/i.test(
-    t,
-  );
+  return /요청 제한|요청이 너무 많|rate\s*limit|rate_limit|too many|429/i.test(t);
+}
+
+/** Soft-retryable provision errors (not wrong password). */
+export function isProvisionTransientMessage(msg: unknown): boolean {
+  if (isMt5AuthError(msg)) return false;
+  const t = String(msg || "");
+  if (/브로커 계좌 검증 중|validation is in progress|1분 후 다시 시도/i.test(t)) {
+    return true;
+  }
+  return isProvisionRateLimitMessage(msg) || isNetworkTransientError(msg);
+}
+
+export function isProvisionAuthMessage(msg: unknown): boolean {
+  return isMt5AuthError(msg);
 }
 
 /** Admin poll / finalize must not re-hit MetaAPI create more than once per few minutes. */
@@ -166,7 +185,7 @@ export async function finalizeProvisionIfReady(accountId: string) {
 }
 
 export async function finalizeAllProvisioning() {
-  // Recover accounts wrongly marked failed solely due to MetaAPI 429.
+  // Recover accounts wrongly marked failed solely due to MetaAPI 429 / network blips.
   await prisma.brokerAccount.updateMany({
     where: {
       status: "failed",
@@ -175,11 +194,17 @@ export async function finalizeAllProvisioning() {
         { statusMessage: { contains: "요청이 너무 많" } },
         { statusMessage: { contains: "rate" } },
         { statusMessage: { contains: "429" } },
+        { statusMessage: { contains: "네트워크 연결이 불안정" } },
+        { statusMessage: { contains: "NETWORK" } },
+      ],
+      NOT: [
+        { statusMessage: { contains: "비밀번호가 올바르지" } },
+        { statusMessage: { contains: "계좌번호 또는 비밀번호" } },
       ],
     },
     data: {
       status: "provisioning",
-      statusMessage: "요청 제한 · 자동 재시도 중…",
+      statusMessage: "일시 오류 · 자동 재시도 중…",
     },
   });
 
@@ -196,7 +221,7 @@ export async function finalizeAllProvisioning() {
     settled.push({ id: a.id, ...(await finalizeProvisionIfReady(a.id)) });
   }
 
-  // Only time-out provisioning that never got a MetaAPI id (true stuck), not rate-limit waits.
+  // Only time-out provisioning that never got a MetaAPI id (true stuck), not soft waits.
   await prisma.brokerAccount.updateMany({
     where: {
       status: "provisioning",
@@ -206,6 +231,8 @@ export async function finalizeAllProvisioning() {
         { statusMessage: { contains: "요청 제한" } },
         { statusMessage: { contains: "요청이 너무 많" } },
         { statusMessage: { contains: "자동 재시도" } },
+        { statusMessage: { contains: "네트워크" } },
+        { statusMessage: { contains: "일시 오류" } },
       ],
     },
     data: {
@@ -253,7 +280,10 @@ export async function runAdminProvision(accountId: string) {
 
     if (repaired.ok) break;
 
-    if (!isProvisionRateLimitMessage(repaired.message)) {
+    if (isProvisionAuthMessage(repaired.message)) {
+      break;
+    }
+    if (!isProvisionTransientMessage(repaired.message)) {
       break;
     }
 
@@ -261,7 +291,9 @@ export async function runAdminProvision(accountId: string) {
       where: { id: account.id },
       data: {
         status: "provisioning",
-        statusMessage: `요청 제한 · 재시도 ${attempt}/${maxAttempts}…`,
+        statusMessage: isProvisionRateLimitMessage(repaired.message)
+          ? `요청 제한 · 재시도 ${attempt}/${maxAttempts}…`
+          : `일시 오류 · 재시도 ${attempt}/${maxAttempts}…`,
         botEnabled: false,
       },
     });
@@ -271,21 +303,34 @@ export async function runAdminProvision(accountId: string) {
   }
 
   if (!repaired || !repaired.ok) {
-    const msg = repaired?.message || "계좌 연동에 실패했습니다.";
-    if (isProvisionRateLimitMessage(msg)) {
+    const rawMsg = repaired?.message || "계좌 연동에 실패했습니다.";
+    if (isProvisionAuthMessage(rawMsg)) {
+      await prisma.brokerAccount.update({
+        where: { id: account.id },
+        data: {
+          status: "failed",
+          statusMessage: AUTH_FAIL_MSG,
+          botEnabled: false,
+        },
+      });
+      return { ok: false as const, error: AUTH_FAIL_MSG };
+    }
+    if (isProvisionTransientMessage(rawMsg)) {
+      const softMsg = isProvisionRateLimitMessage(rawMsg)
+        ? "요청 제한 · 자동 재시도 대기 중… (실패로 표시하지 않음)"
+        : "네트워크 일시 오류 · 자동 재시도 대기 중… (실패로 표시하지 않음)";
       await prisma.brokerAccount.update({
         where: { id: account.id },
         data: {
           status: "provisioning",
-          statusMessage: "요청 제한 · 자동 재시도 대기 중… (실패로 표시하지 않음)",
+          statusMessage: softMsg,
           botEnabled: false,
         },
       });
       return {
         ok: true as const,
         pending: true,
-        message:
-          "MetaAPI 요청 제한입니다. 계좌는 연동 중 상태로 유지되며 자동/수동 재시도합니다.",
+        message: softMsg,
         status: "provisioning" as const,
       };
     }
@@ -294,11 +339,11 @@ export async function runAdminProvision(accountId: string) {
       where: { id: account.id },
       data: {
         status: "failed",
-        statusMessage: msg,
+        statusMessage: toKoreanError(rawMsg, rawMsg),
         botEnabled: false,
       },
     });
-    return { ok: false as const, error: msg };
+    return { ok: false as const, error: toKoreanError(rawMsg, rawMsg) };
   }
 
   const metaId = String(repaired.metaApiAccountId);

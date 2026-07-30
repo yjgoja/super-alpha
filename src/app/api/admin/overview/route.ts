@@ -44,7 +44,7 @@ export async function GET() {
   ]);
 
   const pending = accounts.filter((a) =>
-    ["pending_registration", "provisioning"].includes(a.status),
+    ["pending_registration", "provisioning", "failed"].includes(a.status),
   );
   const connected = accounts.filter((a) => a.status === "connected");
   const undeployed = accounts.filter((a) => a.status === "undeployed");
