@@ -9,50 +9,38 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-
 # testing
 /coverage
-
 # next.js
 /.next/
 /out/
-
 # production
 /build
-
 # misc
 .DS_Store
 *.pem
-
 # debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
-
 # vercel
 .vercel
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
 /src/generated/prisma
 prisma/dev.db
 prisma/dev.db-journal
 *.db
-
-.vercel
-
 # local engine runtime
 /scripts/out/engine.pid
 /scripts/out/engine-heartbeat.json
-
 # local PC-transfer zips (contain .env secrets — never commit)
 /tmp/
 *.zip
 scripts/out/logic-factory/
+.metaapi/

@@ -59,46 +59,48 @@ export async function GET(req: NextRequest) {
           tick += 1;
           // Baskets every ~3rd tick — equity/scalars every tick
           const includeBaskets = tick === 1 || tick % 3 === 0;
-          const account = await prisma.brokerAccount.findFirst({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
-            select: {
-              id: true,
-              login: true,
-              server: true,
-              mode: true,
-              status: true,
-              statusMessage: true,
-              metaApiAccountId: true,
-              lastSyncAt: true,
-              botEnabled: true,
-              balance: true,
-              equity: true,
-              startingBalance: true,
-              tpCount: true,
-              slCount: true,
-              cycleCount: true,
-              ...(includeBaskets
-                ? {
-                    baskets: {
-                      where: { status: "open" as const },
-                      select: {
-                        id: true,
-                        symbol: true,
-                        direction: true,
-                        status: true,
-                        unrealizedPnl: true,
-                      },
-                    },
-                  }
-                : {}),
-              dailyStats: {
-                where: { date: dayKeySeoul() },
-                take: 1,
-                select: { date: true, pnl: true, returnPct: true },
-              },
-            },
-          });
+          const _active = await resolveActiveBrokerAccount(userId);
+          const account = _active
+            ? await prisma.brokerAccount.findUnique({
+                where: { id: _active.id },
+                select: {
+                  id: true,
+                  login: true,
+                  server: true,
+                  mode: true,
+                  status: true,
+                  statusMessage: true,
+                  metaApiAccountId: true,
+                  lastSyncAt: true,
+                  botEnabled: true,
+                  balance: true,
+                  equity: true,
+                  startingBalance: true,
+                  tpCount: true,
+                  slCount: true,
+                  cycleCount: true,
+                  ...(includeBaskets
+                    ? {
+                        baskets: {
+                          where: { status: "open" as const },
+                          select: {
+                            id: true,
+                            symbol: true,
+                            direction: true,
+                            status: true,
+                            unrealizedPnl: true,
+                          },
+                        },
+                      }
+                    : {}),
+                  dailyStats: {
+                    where: { date: dayKeySeoul() },
+                    take: 1,
+                    select: { date: true, pnl: true, returnPct: true },
+                  },
+                },
+              })
+            : null;
 
           if (!account) {
             const payload = {
