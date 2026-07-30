@@ -23,8 +23,11 @@ function ConnectForm() {
   const router = useRouter();
   const params = useSearchParams();
   const reapply = params.get("reapply") === "1";
+  const add = params.get("add") === "1";
+  const accountId = params.get("accountId") || "";
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -52,21 +55,30 @@ function ConnectForm() {
         setChecking(false);
         return;
       }
-      const st = me.account?.status as string | undefined;
-      const linked = Boolean(me.account?.metaApiAccountId);
+      // Adding another account — never bounce to home
+      if (add) {
+        setChecking(false);
+        return;
+      }
+      const list = Array.isArray(me.accounts) ? me.accounts : [];
+      const target =
+        (accountId && list.find((a: { id: string }) => a.id === accountId)) || me.account;
+      const st = target?.status as string | undefined;
+      const linked = Boolean(target?.metaApiAccountId);
       const canReapply =
         reapply ||
         st === "failed" ||
         st === "pending_registration" ||
         st === "provisioning";
-      if (linked && !canReapply) {
-        router.replace("/home");
+      if (linked && !canReapply && list.length > 0) {
+        router.replace("/manage");
         return;
       }
-      if (me.account?.login) setLogin(String(me.account.login).replace(/\D/g, ""));
+      if (target?.login) setLogin(String(target.login).replace(/\D/g, ""));
+      if (target?.displayName) setDisplayName(String(target.displayName));
       setChecking(false);
     })();
-  }, [router, reapply]);
+  }, [router, reapply, add, accountId]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -80,7 +92,10 @@ function ConnectForm() {
           login,
           password,
           server: FIXED_MT5_SERVER,
-          reapply: reapply || true,
+          add: add || undefined,
+          reapply: reapply || undefined,
+          accountId: accountId || undefined,
+          displayName: displayName.trim() || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -89,7 +104,7 @@ function ConnectForm() {
         return;
       }
       setDone(true);
-      setTimeout(() => router.push("/home"), 1500);
+      setTimeout(() => router.push("/manage"), 1500);
     } catch {
       setError("연결이 잠시 불안정합니다. 다시 한 번 시도해 주세요.");
     } finally {
@@ -116,11 +131,12 @@ function ConnectForm() {
         </div>
 
         <h1 className="mt-6 text-2xl font-semibold">
-          {reapply ? "실계좌 다시 연결 신청" : "MT5 실계좌 연결 신청"}
+          {add ? "계좌 추가" : reapply ? "실계좌 다시 연결 신청" : "MT5 실계좌 연결 신청"}
         </h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          계좌·비밀번호를 제출하면 관리자 승인 후 연동됩니다. 비밀번호가 틀리면 승인
-          단계에서 거절되니 정확히 입력하세요.
+          {add
+            ? "추가 MT5 계좌를 등록합니다. 관리자 승인 후 이용할 수 있습니다."
+            : "계좌·비밀번호를 제출하면 관리자 승인 후 연동됩니다. 비밀번호가 틀리면 승인 단계에서 거절되니 정확히 입력하세요."}
         </p>
 
         {approvalPending ? (
@@ -137,11 +153,21 @@ function ConnectForm() {
           <div className="mt-8 rounded-2xl border border-[var(--accent)]/40 bg-[rgba(200,245,66,0.08)] p-5">
             <div className="font-display text-2xl text-[var(--accent)]">연동 신청 완료</div>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              관리자 승인 대기 중입니다. 홈으로 이동합니다…
+              관리자 승인 대기 중입니다. 계좌 관리로 이동합니다…
             </p>
           </div>
         ) : (
           <div className="mt-6 space-y-4">
+            <div>
+              <label className="sa-label">계좌 이름 (선택)</label>
+              <input
+                className="sa-input"
+                maxLength={40}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="예: 메인 / 서브"
+              />
+            </div>
             <div>
               <label className="sa-label">계좌번호 (MT5 Login)</label>
               <input
@@ -152,6 +178,7 @@ function ConnectForm() {
                 value={login}
                 onChange={(e) => setLogin(e.target.value.replace(/\D/g, ""))}
                 placeholder="실제 MT5 계좌번호"
+                readOnly={Boolean(reapply && accountId && login)}
               />
             </div>
             <div>
@@ -172,8 +199,11 @@ function ConnectForm() {
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>
-              {loading ? "신청 중…" : "연동 신청하기"}
+              {loading ? "신청 중…" : add ? "계좌 추가 신청" : "연동 신청하기"}
             </button>
+            <Link href="/manage" className="sa-btn sa-btn-ghost w-full inline-flex justify-center">
+              계좌 관리로
+            </Link>
           </div>
         )}
       </form>

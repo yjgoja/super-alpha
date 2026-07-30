@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/access";
 import { addSeoulDays, dayKeySeoul, seoulDayStartUtc } from "@/lib/day-key";
 import { ensureTradingSchema, prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached } from "@/lib/metaapi";
 import { mt5DailyPnlFromDeals, mt5LifetimeClosedPnl } from "@/lib/mt5-pnl-sync";
@@ -427,20 +428,22 @@ export async function GET(req: NextRequest) {
   const wantSummary = req.nextUrl.searchParams.get("summary") === "1";
 
   // Explicit select — avoid 500 if a pending Prisma column is missing from DB
-  const account = await prisma.brokerAccount.findFirst({
-    where: { userId: gate.user.id },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      login: true,
-      balance: true,
-      equity: true,
-      startingBalance: true,
-      tpCount: true,
-      slCount: true,
-      metaApiAccountId: true,
-    },
-  });
+  const _active = await resolveActiveBrokerAccount(gate.user.id);
+  const account = _active
+    ? await prisma.brokerAccount.findUnique({
+        where: { id: _active.id },
+        select: {
+          id: true,
+          login: true,
+          balance: true,
+          equity: true,
+          startingBalance: true,
+          tpCount: true,
+          slCount: true,
+          metaApiAccountId: true,
+        },
+      })
+    : null;
 
   if (!account) {
     return NextResponse.json(emptyPnl());

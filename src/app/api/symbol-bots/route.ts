@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser, requireUser, requireAdmin } from "@/lib/access";
 import { ensureTradingSchema, prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { DCA1000_DEFAULT_SL_ROI, resolveTpSlUsd } from "@/lib/dca1000";
 import {
@@ -32,9 +33,10 @@ const DUBAI313_LEVEL_COUNT = tableLogicMeta("dubai_bruno_313").count;
 
 async function getAccount(userId: string) {
   // Explicit select so a pending Prisma column migration cannot 500 this route
-  return prisma.brokerAccount.findFirst({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
+  const active = await resolveActiveBrokerAccount(userId);
+  if (!active) return null;
+  return prisma.brokerAccount.findUnique({
+    where: { id: active.id },
     select: {
       id: true,
       userId: true,

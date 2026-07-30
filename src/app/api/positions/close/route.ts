@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo, toKoreanError } from "@/lib/ko-errors";
 import {
   closeAllPositions,
@@ -46,10 +47,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "청산할 포지션을 지정하세요." }, { status: 400 });
   }
 
-  const account = await prisma.brokerAccount.findFirst({
-    where: { userId: gate.user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const account = await resolveActiveBrokerAccount(gate.user.id);
   if (!account?.metaApiAccountId) {
     return NextResponse.json({ error: "연결된 계좌가 없습니다." }, { status: 400 });
   }

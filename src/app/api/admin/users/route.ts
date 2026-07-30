@@ -26,9 +26,10 @@ export async function GET() {
       createdAt: true,
       accounts: {
         orderBy: { createdAt: "desc" },
-        take: 1,
+        take: 20,
         select: {
           id: true,
+          displayName: true,
           login: true,
           server: true,
           status: true,

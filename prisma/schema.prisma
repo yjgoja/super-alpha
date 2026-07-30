@@ -18,16 +18,21 @@ model User {
   emailVerifiedAt DateTime?
   emailVerifyTokenHash String?
   emailVerifyExpiresAt DateTime?
+  /// Currently selected broker account for app UI / trading controls.
+  activeBrokerAccountId String?
+  activeBrokerAccount   BrokerAccount? @relation("UserActiveAccount", fields: [activeBrokerAccountId], references: [id], onDelete: SetNull)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  accounts BrokerAccount[]
+  accounts BrokerAccount[] @relation("UserAccounts")
 }
 
 model BrokerAccount {
   id               String    @id @default(cuid())
   userId           String
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User      @relation("UserAccounts", fields: [userId], references: [id], onDelete: Cascade)
+  /// Optional nickname shown in account picker (defaults to login in UI).
+  displayName      String?
   login            String
   passwordEnc      String
   server           String
@@ -61,6 +66,8 @@ model BrokerAccount {
   cycleCount       Int       @default(0)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+
+  activeForUsers User[] @relation("UserActiveAccount")
 
   config     StrategyConfig?
   symbolBots SymbolBot[]

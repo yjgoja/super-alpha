@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser, requireUser } from "@/lib/access";
 import { dayKeySeoul } from "@/lib/day-key";
 import { ensureTradingSchema, prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
 import { syncTodayPnlFromMt5Deals } from "@/lib/mt5-pnl-sync";
@@ -25,10 +26,7 @@ export async function POST() {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
 
-  const account = await prisma.brokerAccount.findFirst({
-    where: { userId: gate.user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const account = await resolveActiveBrokerAccount(gate.user.id);
 
   if (!account?.metaApiAccountId) {
     return NextResponse.json({
@@ -189,34 +187,35 @@ export async function GET(req: NextRequest) {
 
   // Home hero: light query (no baskets/fills/snapshots)
   if (wantSummary && !wantLive) {
-    const account = await prisma.brokerAccount.findFirst({
-      where: { userId: gate.user.id },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        login: true,
-        server: true,
-        mode: true,
-        status: true,
-        statusMessage: true,
-        metaApiAccountId: true,
-        lastSyncAt: true,
-        botEnabled: true,
-        skipOpenBurstEntries: true,
-        balance: true,
-        equity: true,
-        startingBalance: true,
-        tpCount: true,
-        slCount: true,
-        cycleCount: true,
-        dailyStats: {
-          where: { date: dayKeySeoul() },
-          take: 1,
-          select: { date: true, pnl: true, returnPct: true },
-        },
-      },
-    });
-
+    const _active = await resolveActiveBrokerAccount(gate.user.id);
+    const account = _active
+      ? await prisma.brokerAccount.findUnique({
+          where: { id: _active.id },
+          select: {
+            id: true,
+            login: true,
+            server: true,
+            mode: true,
+            status: true,
+            statusMessage: true,
+            metaApiAccountId: true,
+            lastSyncAt: true,
+            botEnabled: true,
+            skipOpenBurstEntries: true,
+            balance: true,
+            equity: true,
+            startingBalance: true,
+            tpCount: true,
+            slCount: true,
+            cycleCount: true,
+            dailyStats: {
+              where: { date: dayKeySeoul() },
+              take: 1,
+              select: { date: true, pnl: true, returnPct: true },
+            },
+          },
+        })
+      : null;
     if (!account) {
       return NextResponse.json({
         role: gate.user.role,
@@ -267,42 +266,44 @@ export async function GET(req: NextRequest) {
 
   // Lite live: MetaAPI equity/positions + open baskets only (heartbeat / home)
   if (wantLive && wantLite) {
-    const account = await prisma.brokerAccount.findFirst({
-      where: { userId: gate.user.id },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        login: true,
-        server: true,
-        mode: true,
-        status: true,
-        statusMessage: true,
-        metaApiAccountId: true,
-        lastSyncAt: true,
-        botEnabled: true,
-        balance: true,
-        equity: true,
-        startingBalance: true,
-        tpCount: true,
-        slCount: true,
-        cycleCount: true,
-        baskets: {
-          where: { status: "open" },
+    const _activeLite = await resolveActiveBrokerAccount(gate.user.id);
+    const account = _activeLite
+      ? await prisma.brokerAccount.findUnique({
+          where: { id: _activeLite.id },
           select: {
             id: true,
-            symbol: true,
-            direction: true,
+            login: true,
+            server: true,
+            mode: true,
             status: true,
-            unrealizedPnl: true,
+            statusMessage: true,
+            metaApiAccountId: true,
+            lastSyncAt: true,
+            botEnabled: true,
+            balance: true,
+            equity: true,
+            startingBalance: true,
+            tpCount: true,
+            slCount: true,
+            cycleCount: true,
+            baskets: {
+              where: { status: "open" },
+              select: {
+                id: true,
+                symbol: true,
+                direction: true,
+                status: true,
+                unrealizedPnl: true,
+              },
+            },
+            dailyStats: {
+              where: { date: dayKeySeoul() },
+              take: 1,
+              select: { date: true, pnl: true, returnPct: true },
+            },
           },
-        },
-        dailyStats: {
-          where: { date: dayKeySeoul() },
-          take: 1,
-          select: { date: true, pnl: true, returnPct: true },
-        },
-      },
-    });
+        })
+      : null;
 
     if (!account) {
       return NextResponse.json({ role: gate.user.role, account: null });
@@ -383,33 +384,34 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const account = await prisma.brokerAccount.findFirst({
-    where: { userId: gate.user.id },
-    include: wantFull
-      ? {
-          config: true,
-          baskets: { where: { status: "open" }, include: { legs: true } },
-          fills: { orderBy: { createdAt: "desc" }, take: 20 },
-          snapshots: { orderBy: { createdAt: "desc" }, take: 48 },
-          dailyStats: { orderBy: { date: "desc" }, take: 14 },
-        }
-      : {
-          baskets: {
-            where: { status: "open" },
-            select: {
-              id: true,
-              symbol: true,
-              direction: true,
-              status: true,
-              unrealizedPnl: true,
+  const _activeFull = await resolveActiveBrokerAccount(gate.user.id);
+  const account = _activeFull
+    ? await prisma.brokerAccount.findUnique({
+        where: { id: _activeFull.id },
+        include: wantFull
+          ? {
+              config: true,
+              baskets: { where: { status: "open" }, include: { legs: true } },
+              fills: { orderBy: { createdAt: "desc" }, take: 20 },
+              snapshots: { orderBy: { createdAt: "desc" }, take: 48 },
+              dailyStats: { orderBy: { date: "desc" }, take: 14 },
+            }
+          : {
+              baskets: {
+                where: { status: "open" },
+                select: {
+                  id: true,
+                  symbol: true,
+                  direction: true,
+                  status: true,
+                  unrealizedPnl: true,
+                },
+              },
+              fills: { orderBy: { createdAt: "desc" }, take: 10 },
+              dailyStats: { orderBy: { date: "desc" }, take: 7 },
             },
-          },
-          fills: { orderBy: { createdAt: "desc" }, take: 10 },
-          dailyStats: { orderBy: { date: "desc" }, take: 7 },
-        },
-    orderBy: { createdAt: "desc" },
-  });
-
+      })
+    : null;
   if (!account) {
     return NextResponse.json({
       role: gate.user.role,

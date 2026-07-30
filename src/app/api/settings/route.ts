@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 
 const schema = z.object({
@@ -21,11 +22,13 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
 
-  const account = await prisma.brokerAccount.findFirst({
-    where: { userId: gate.user.id },
-    include: { config: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const _active = await resolveActiveBrokerAccount(gate.user.id);
+  const account = _active
+    ? await prisma.brokerAccount.findUnique({
+        where: { id: _active.id },
+        include: { config: true },
+      })
+    : null;
   if (!account?.config) {
     return NextResponse.json({ error: "계좌/설정 없음" }, { status: 400 });
   }
@@ -43,10 +46,7 @@ export async function POST() {
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
-  const account = await prisma.brokerAccount.findFirst({
-    where: { userId: gate.user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const account = await resolveActiveBrokerAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "no account" }, { status: 400 });
 
   await prisma.basket.updateMany({
