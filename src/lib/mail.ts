@@ -28,11 +28,43 @@ export function mailConfigured() {
   return Boolean(process.env.RESEND_API_KEY?.trim());
 }
 
-function fromAddress() {
-  return (
-    process.env.EMAIL_FROM?.trim() ||
-    "슈퍼알파 <noreply@superalpha.kr>"
-  );
+/** RFC 2047 encoded-word so Korean From names don't become ???? in Naver/Outlook. */
+export function encodeMimeDisplayName(name: string) {
+  const trimmed = name.trim().replace(/^"|"$/g, "");
+  if (!trimmed) return "";
+  // ASCII-only names can stay quoted; non-ASCII must be MIME-encoded.
+  if (/^[\x20-\x7E]+$/.test(trimmed) && !/[=?]/.test(trimmed)) {
+    if (/[,;<>@\\"]/.test(trimmed) || /\s/.test(trimmed)) {
+      return `"${trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    }
+    return trimmed;
+  }
+  return `=?UTF-8?B?${Buffer.from(trimmed, "utf8").toString("base64")}?=`;
+}
+
+/**
+ * Always send a brand From display name.
+ * EMAIL_FROM may be "슈퍼알파 <noreply@…>" or bare "noreply@…".
+ */
+export function fromAddress() {
+  const brand = "슈퍼알파";
+  const fallbackEmail = "noreply@superalpha.kr";
+  const raw = process.env.EMAIL_FROM?.trim() || `${brand} <${fallbackEmail}>`;
+
+  const angled = raw.match(/^(.*)<([^>]+)>\s*$/);
+  if (angled) {
+    const email = angled[2].trim();
+    const name = angled[1].trim().replace(/^"|"$/g, "") || brand;
+    // If env already has mojibake/????, force brand.
+    const safeName = /\?{2,}/.test(name) || !name ? brand : name;
+    return `${encodeMimeDisplayName(safeName)} <${email}>`;
+  }
+
+  if (raw.includes("@")) {
+    return `${encodeMimeDisplayName(brand)} <${raw}>`;
+  }
+
+  return `${encodeMimeDisplayName(brand)} <${fallbackEmail}>`;
 }
 
 export async function sendVerificationEmail(opts: {
