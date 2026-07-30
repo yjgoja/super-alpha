@@ -777,7 +777,27 @@ export async function ensureAccountCloudLive(input: {
     };
   }
 
+  // Prefer reuse — delete+recreate burns provisioning API quota into 429s.
   const existing = await findAllMetaAccountsByLogin(input.login);
+  let lastReuseFail = "";
+  for (const c of existing) {
+    await api(PROVISIONING, "PUT", `/users/current/accounts/${c.id}`, {
+      password: input.password,
+      login: input.login,
+      server: input.server,
+      name: `SA-${input.login}`,
+    }).catch(() => null);
+    const liveReuse = await ensureCloudLive(c.id, waitMs);
+    if (liveReuse.ok) {
+      return { ok: true, snap: liveReuse.snap, metaApiAccountId: c.id };
+    }
+    lastReuseFail = liveReuse.message || lastReuseFail;
+    if (isRateLimitError(liveReuse.message)) {
+      return { ok: false, message: liveReuse.message };
+    }
+  }
+
+  // Recreate only when reuse failed for a non-rate-limit reason (or no cloud yet).
   for (const c of existing) {
     try {
       await undeployAccount(c.id);
@@ -786,7 +806,7 @@ export async function ensureAccountCloudLive(input: {
     }
     await removeMetaAccount(c.id);
   }
-  await sleep(4000);
+  if (existing.length) await sleep(4000);
 
   const profileId = await ensureProvisioningProfile();
   const created = await createAndConnect({
@@ -796,7 +816,12 @@ export async function ensureAccountCloudLive(input: {
     profileId,
     mode: { type: "cloud-g2", reliability: "high", label: "고성능(g2)" },
   });
-  if (!created.ok) return { ok: false, message: created.message };
+  if (!created.ok) {
+    return {
+      ok: false,
+      message: created.message || lastReuseFail || "계좌 연동에 실패했습니다.",
+    };
+  }
 
   const newId = String(created.metaApiAccountId);
   await api(PROVISIONING, "PUT", `/users/current/accounts/${newId}`, {
