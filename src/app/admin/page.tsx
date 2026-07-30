@@ -542,7 +542,11 @@ export default function AdminPage() {
                       >
                         {busy === a.id
                           ? "연동 중…"
-                          : a.status === "provisioning"
+                          : a.status === "provisioning" ||
+                              (a.status === "failed" &&
+                                /요청 제한|429|rate\s*limit|too many/i.test(
+                                  a.statusMessage || "",
+                                ))
                             ? "상태 확인/재시도"
                             : "연동 승인"}
                       </button>
