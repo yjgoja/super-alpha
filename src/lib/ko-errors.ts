@@ -103,8 +103,10 @@ export function isRateLimitError(raw: unknown) {
   const t = extractText(raw).toLowerCase();
   return (
     t.includes("rate limit") ||
+    t.includes("rate_limit") ||
     t.includes("too many") ||
     t.includes("요청이 너무 많") ||
+    t.includes("요청 제한") ||
     t.includes("429")
   );
 }

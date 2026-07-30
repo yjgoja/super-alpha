@@ -161,6 +161,14 @@ export default function AdminPage() {
       return;
     }
     await Promise.all([loadOverview(), loadUsers()]);
+    // Soft-heal accounts wrongly marked failed solely due to MetaAPI 429.
+    void fetch("/api/admin/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "check_provision" }),
+    })
+      .then(() => loadUsers())
+      .catch(() => null);
   }, [loadOverview, loadUsers]);
 
   useEffect(() => {
