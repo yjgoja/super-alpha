@@ -22,7 +22,7 @@ export function toKoreanError(raw: unknown, fallback = "요청 처리 중 오류
   if (lower.includes("rate limit") || lower.includes("too many") || lower.includes("429")) {
     return "요청이 너무 많습니다. 1분 후 다시 시도하세요.";
   }
-  if (lower.includes("e_auth") || lower.includes("invalid account") || lower.includes("authentication")) {
+  if (isMt5AuthError(text)) {
     return "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.";
   }
   if ((lower.includes("e_srv_not_found") || lower.includes("server")) && lower.includes("not found")) {
@@ -108,6 +108,39 @@ export function isRateLimitError(raw: unknown) {
     t.includes("요청이 너무 많") ||
     t.includes("요청 제한") ||
     t.includes("429")
+  );
+}
+
+/** Wrong MT5 login/password — permanent until member re-enters credentials. */
+export function isMt5AuthError(raw: unknown) {
+  const t = extractText(raw).toLowerCase();
+  return (
+    t.includes("e_auth") ||
+    t.includes("invalid account") ||
+    t.includes("invalid password") ||
+    t.includes("wrong password") ||
+    t.includes("incorrect password") ||
+    t.includes("authentication") ||
+    t.includes("비밀번호가 올바르지") ||
+    t.includes("계좌번호 또는 비밀번호")
+  );
+}
+
+/** Transient MetaAPI transport failures (not wrong password). */
+export function isNetworkTransientError(raw: unknown) {
+  if (isMt5AuthError(raw) || isRateLimitError(raw)) return false;
+  const t = extractText(raw).toLowerCase();
+  return (
+    t.includes("network") ||
+    t.includes("fetch failed") ||
+    t.includes("econnreset") ||
+    t.includes("enotfound") ||
+    t.includes("etimedout") ||
+    t.includes("socket") ||
+    t.includes("undici") ||
+    t.includes("네트워크 연결이 불안정") ||
+    t.includes("status\":0") ||
+    /\b503\b/.test(t)
   );
 }
 
