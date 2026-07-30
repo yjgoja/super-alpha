@@ -30,6 +30,12 @@ export function ensureTradingSchema() {
         await prisma.$executeRawUnsafe(
           `ALTER TABLE "BrokerAccount" ADD COLUMN IF NOT EXISTS "openBurstLastFlattenLabel" TEXT`,
         );
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "BrokerAccount" ADD COLUMN IF NOT EXISTS "displayName" TEXT`,
+        );
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "activeBrokerAccountId" TEXT`,
+        );
       } catch (e) {
         console.warn(
           "[db] ensureTradingSchema skipOpenBurstEntries",

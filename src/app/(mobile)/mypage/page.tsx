@@ -71,7 +71,7 @@ export default function MyPage() {
         )}
         {login && (
           <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.35rem" }}>
-            MT5 {login}
+            활성 계좌 MT5 {login}
           </div>
         )}
         <div
@@ -150,9 +150,9 @@ export default function MyPage() {
         }}
       >
         <div>
-          <div style={{ fontWeight: 700 }}>계좌 · 클라우드 관리</div>
+          <div style={{ fontWeight: 700 }}>계좌 관리</div>
           <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
-            연동 · 비용 절감
+            다계좌 선택 · 추가 · 삭제 · 이름 설정
           </div>
         </div>
         <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>

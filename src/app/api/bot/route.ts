@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { ensureTradingSchema, prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { isInOpenBurstQuietPeriod, normalizeOpenBurstOnTrigger } from "@/lib/market-hours";
 import {
@@ -15,8 +16,11 @@ export const maxDuration = 90;
 export const runtime = "nodejs";
 
 async function findUserAccount(userId: string) {
+  const active = await resolveActiveBrokerAccount(userId);
+  if (!active) return null;
   return prisma.brokerAccount.findFirst({
     where: {
+      id: active.id,
       userId,
       OR: [
         {
@@ -27,9 +31,11 @@ async function findUserAccount(userId: string) {
           status: "failed",
           syncToken: { not: null },
         },
+        {
+          status: { in: ["pending_registration", "provisioning", "connected", "undeployed", "failed"] },
+        },
       ],
     },
-    orderBy: { createdAt: "desc" },
     include: {
       baskets: { where: { status: "open" }, select: { id: true } },
     },

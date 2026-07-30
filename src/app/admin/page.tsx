@@ -75,6 +75,7 @@ type UserRow = {
   createdAt: string;
   accounts: Array<{
     id: string;
+    displayName?: string | null;
     login: string;
     server: string;
     status: string;
@@ -527,11 +528,14 @@ export default function AdminPage() {
               {pendingServers.length === 0 && (
                 <p className="text-sm text-[var(--muted)]">대기 없음</p>
               )}
-              {pendingServers.map((u) => {
-                const a = u.accounts[0];
-                return (
+              {pendingServers.flatMap((u) =>
+                u.accounts
+                  .filter((a) =>
+                    ["pending_registration", "provisioning", "failed"].includes(a.status),
+                  )
+                  .map((a) => (
                   <div
-                    key={u.id}
+                    key={a.id}
                     className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--line)] p-4"
                   >
                     <div>
@@ -539,6 +543,7 @@ export default function AdminPage() {
                         {u.email}
                       </button>
                       <div className="mt-1 text-sm text-[var(--muted)]">
+                        {a.displayName ? `${a.displayName} · ` : ""}
                         Account <strong className="text-[var(--ink)]">{a.login}</strong> ·{" "}
                         {a.server}
                       </div>
@@ -571,8 +576,8 @@ export default function AdminPage() {
                       </button>
                     </div>
                   </div>
-                );
-              })}
+                  )),
+              )}
             </div>
           </div>
         </section>
@@ -631,7 +636,13 @@ export default function AdminPage() {
                         </div>
                       )}
                     </td>
-                    <td className="text-[var(--muted)]">{a ? a.login : "-"}</td>
+                    <td className="text-[var(--muted)]">
+                      {a
+                        ? u.accounts.length > 1
+                          ? `${a.login} 외 ${u.accounts.length - 1}`
+                          : a.login
+                        : "-"}
+                    </td>
                     <td>
                       {a ? (
                         <span className="text-xs">

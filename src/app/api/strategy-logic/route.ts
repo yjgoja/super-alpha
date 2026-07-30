@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser, requireAdmin } from "@/lib/access";
 import { prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { DCA1000_DEFAULT_SL_ROI, resolveTpSlUsd } from "@/lib/dca1000";
 import { isLogicId } from "@/lib/strategies";
@@ -15,10 +16,7 @@ import {
 import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
 
 async function getAccount(userId: string) {
-  return prisma.brokerAccount.findFirst({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-  });
+  return resolveActiveBrokerAccount(userId);
 }
 
 const levelSchema = z.object({

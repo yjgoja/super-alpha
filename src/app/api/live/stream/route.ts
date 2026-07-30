@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/access";
 import { dayKeySeoul } from "@/lib/day-key";
 import { prisma } from "@/lib/db";
+import { resolveActiveBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { publicBotStatusMessage } from "@/lib/public-status";
 
