@@ -23,7 +23,8 @@ export function isProvisionRateLimitMessage(msg: unknown): boolean {
   );
 }
 
-const PROVISION_RETRY_COOLDOWN_MS = 30_000;
+/** Admin poll / finalize must not re-hit MetaAPI create more than once per few minutes. */
+const PROVISION_RETRY_COOLDOWN_MS = 180_000;
 
 async function markLinked(
   accountId: string,
