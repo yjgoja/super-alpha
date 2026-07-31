@@ -18,6 +18,9 @@ model User {
   emailVerifiedAt DateTime?
   emailVerifyTokenHash String?
   emailVerifyExpiresAt DateTime?
+  /// Forgot-password one-time token (sha256 hex). Cleared after use.
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
   /// Currently selected broker account for app UI / trading controls.
   activeBrokerAccountId String?
   activeBrokerAccount   BrokerAccount? @relation("UserActiveAccount", fields: [activeBrokerAccountId], references: [id], onDelete: SetNull)

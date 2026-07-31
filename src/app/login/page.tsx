@@ -21,9 +21,11 @@ function LoginForm() {
   const [info, setInfo] = useState(
     params.get("verified") === "1"
       ? "이메일 인증이 완료되었습니다. 로그인해 주세요."
-      : loggedOutParam
-        ? "로그아웃되었습니다. 다른 계정으로 로그인할 수 있습니다."
-        : "",
+      : params.get("reset") === "1"
+        ? "비밀번호가 변경되었습니다. 새 비밀번호로 로그인해 주세요."
+        : loggedOutParam
+          ? "로그아웃되었습니다. 다른 계정으로 로그인할 수 있습니다."
+          : "",
   );
   const [loading, setLoading] = useState(false);
   const [unverified, setUnverified] = useState(false);
@@ -214,21 +216,31 @@ function LoginForm() {
             />
           </div>
           {mode === "login" ? (
-            <label
-              className="flex cursor-pointer items-center gap-2.5 select-none"
-              style={{ color: "var(--ink)" }}
-            >
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: "var(--gold)" }}
-              />
-              <span style={{ fontSize: "0.92rem", fontWeight: 600 }}>자동 로그인</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
-                (90일간 로그인 유지)
-              </span>
-            </label>
+            <>
+              <label
+                className="flex cursor-pointer items-center gap-2.5 select-none"
+                style={{ color: "var(--ink)" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  style={{ width: 18, height: 18, accentColor: "var(--gold)" }}
+                />
+                <span style={{ fontSize: "0.92rem", fontWeight: 600 }}>자동 로그인</span>
+                <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                  (90일간 로그인 유지)
+                </span>
+              </label>
+              <div className="text-right">
+                <Link
+                  href="/forgot-password"
+                  className="text-sm text-[var(--muted)] underline-offset-2 hover:underline"
+                >
+                  비밀번호를 잊으셨나요?
+                </Link>
+              </div>
+            </>
           ) : null}
         </div>
 
