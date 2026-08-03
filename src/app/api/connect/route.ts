@@ -64,7 +64,15 @@ export async function POST(req: Request) {
     }
     const { login, password, reapply, add, accountId, displayName } = parsed.data;
     const server = FIXED_MT5_SERVER;
-    const name = (displayName ?? "").trim() || null;
+    const nameRaw = (displayName ?? "").trim();
+    // Prevent swapping MT5 login into the nickname field (caused silent wrong-login provision loops).
+    if (nameRaw && /^\d{5,15}$/.test(nameRaw)) {
+      return connectFail(
+        "계좌 별칭에는 숫자를 넣을 수 없습니다. MT5 계좌번호는 '계좌번호' 칸에만 입력하세요.",
+        400,
+      );
+    }
+    const name = nameRaw || null;
 
     const taken = await prisma.brokerAccount.findFirst({
       where: { login, NOT: { userId } },

@@ -6,7 +6,14 @@
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
-import { isRateLimitError, isTopUpOrHighReliabilityError, isMt5AuthError, isNetworkTransientError, toKoreanError } from "./ko-errors";
+import {
+  isCredentialValidationRejected,
+  isRateLimitError,
+  isTopUpOrHighReliabilityError,
+  isMt5AuthError,
+  isNetworkTransientError,
+  toKoreanError,
+} from "./ko-errors";
 
 const PROVISIONING =
   process.env.METAAPI_PROVISIONING_URL ||
@@ -613,6 +620,14 @@ async function verifyPasswordOnExistingAccount(input: {
     server: input.server,
   });
 
+  if (isCredentialValidationRejected(updated.data)) {
+    return {
+      ok: false,
+      code: "E_AUTH",
+      message: toKoreanError(updated.data, "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다."),
+    };
+  }
+
   if (updated.status === 429 || isRateLimitError(updated.data)) {
     return {
       ok: false,
@@ -973,9 +988,12 @@ async function createAndConnect(input: {
   }
 
   // Account create must survive transient 429 — retry twice with backoff.
+  // Credential lockouts also return HTTP 429 + "too many" — never burn retries on those.
   for (
     let i = 0;
-    i < 2 && (created.status === 429 || isRateLimitError(created.data));
+    i < 2 &&
+    (created.status === 429 || isRateLimitError(created.data)) &&
+    !isCredentialValidationRejected(created.data);
     i++
   ) {
     noteMetaApiRateLimit(15_000);
@@ -998,7 +1016,14 @@ async function createAndConnect(input: {
   if (created.status === 0 || created.status >= 400) {
     const found = await findMetaAccountByLogin(input.login);
     if (found?.id) return softLinkSnap(input, found.id, found.name);
-    if (created.status === 429 || isRateLimitError(created.data)) {
+    if (created.status === 429 || isRateLimitError(created.data) || isCredentialValidationRejected(created.data)) {
+      if (isCredentialValidationRejected(created.data)) {
+        return {
+          ok: false,
+          code: "E_AUTH",
+          message: toKoreanError(created.data, "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다."),
+        };
+      }
       return {
         ok: false,
         code: "RATE_LIMIT",

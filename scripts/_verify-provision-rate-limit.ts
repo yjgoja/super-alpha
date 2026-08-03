@@ -2,11 +2,20 @@
  * Offline checks for provision auth vs transient error classification.
  * Run: npx tsx scripts/_verify-provision-rate-limit.ts
  */
-import { isMt5AuthError, isNetworkTransientError, toKoreanError } from "../src/lib/ko-errors";
+import {
+  CREDENTIAL_REJECTED_KO,
+  isCredentialValidationRejected,
+  isMt5AuthError,
+  isNetworkTransientError,
+  isRateLimitError,
+  toKoreanError,
+} from "../src/lib/ko-errors";
 import {
   isProvisionAuthMessage,
   isProvisionRateLimitMessage,
   isProvisionTransientMessage,
+  PROVISION_SOFT_MAX,
+  RATE_LIMIT_ESCALATED_KO,
 } from "../src/lib/provision";
 
 let fail = 0;
@@ -61,6 +70,25 @@ const permanent = [
 for (const s of permanent) {
   check(`not rate: ${s}`, !isProvisionRateLimitMessage(s));
 }
+
+// Credential lockout looks like 429/"too many" but must be permanent auth fail.
+const credLock =
+  "Validation for trading account 209060 on server ZeroMarkets-1 has been rejected too many times recently. Please verify your trading account credentials and retry in 1 hour if account credentials are indeed valid";
+check("cred lock detected", isCredentialValidationRejected(credLock));
+check("cred lock is auth", isMt5AuthError(credLock) && isProvisionAuthMessage(credLock));
+check("cred lock NOT rate", !isRateLimitError(credLock) && !isProvisionRateLimitMessage(credLock));
+check("cred lock NOT transient", !isProvisionTransientMessage(credLock));
+check(
+  "cred lock korean",
+  toKoreanError(credLock) === CREDENTIAL_REJECTED_KO,
+);
+
+check("soft max >= 3", PROVISION_SOFT_MAX >= 3);
+check(
+  "escalated not soft rate",
+  !isProvisionRateLimitMessage(RATE_LIMIT_ESCALATED_KO) &&
+    !isProvisionTransientMessage(RATE_LIMIT_ESCALATED_KO),
+);
 
 if (fail > 0) {
   console.error(`\n${fail} check(s) failed`);

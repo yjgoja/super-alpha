@@ -18,12 +18,19 @@ export function toKoreanError(raw: unknown, fallback = "요청 처리 중 오류
   if (lower.includes("forbidden")) {
     return "권한이 없습니다.";
   }
+  // Credential validation lockout contains "too many" — must NOT look like soft rate-limit.
+  if (isCredentialValidationRejected(text)) {
+    return CREDENTIAL_REJECTED_KO;
+  }
   // Rate limit before auth keywords — MetaAPI often returns 401 + "too many …"
-  if (lower.includes("rate limit") || lower.includes("too many") || lower.includes("429")) {
+  if (isRateLimitError(text)) {
     return "요청이 너무 많습니다. 1분 후 다시 시도하세요.";
   }
   if (isMt5AuthError(text)) {
     return "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.";
+  }
+  if (lower.includes("region") && lower.includes("not available")) {
+    return "MetaAPI 리전 설정이 올바르지 않습니다. 관리자에게 문의하세요.";
   }
   if ((lower.includes("e_srv_not_found") || lower.includes("server")) && lower.includes("not found")) {
     return "MT5 서버명을 MetaAPI에서 찾지 못했습니다. ZeroMarkets-1 설정을 확인하세요.";
@@ -99,12 +106,32 @@ function extractText(raw: unknown): string {
   return String(raw);
 }
 
+/**
+ * MetaAPI rejected the login/password pair repeatedly.
+ * Message often contains "too many" — must not be treated as soft API rate-limit.
+ */
+export const CREDENTIAL_REJECTED_KO =
+  "MT5 계좌 검증이 반복 실패했습니다. 계좌번호·비밀번호를 확인한 뒤 1시간 후 다시 신청하세요.";
+
+export function isCredentialValidationRejected(raw: unknown) {
+  const t = extractText(raw).toLowerCase();
+  return (
+    t.includes("rejected too many times") ||
+    t.includes("verify your trading account credentials") ||
+    (t.includes("validation for trading account") && t.includes("rejected")) ||
+    t.includes("계좌 검증이 반복 실패") ||
+    (t.includes("계좌번호") && t.includes("1시간 후"))
+  );
+}
+
 export function isRateLimitError(raw: unknown) {
+  if (isCredentialValidationRejected(raw)) return false;
   const t = extractText(raw).toLowerCase();
   return (
     t.includes("rate limit") ||
     t.includes("rate_limit") ||
     t.includes("too many") ||
+    t.includes("toomanyrequests") ||
     t.includes("요청이 너무 많") ||
     t.includes("요청 제한") ||
     t.includes("429")
@@ -113,6 +140,7 @@ export function isRateLimitError(raw: unknown) {
 
 /** Wrong MT5 login/password — permanent until member re-enters credentials. */
 export function isMt5AuthError(raw: unknown) {
+  if (isCredentialValidationRejected(raw)) return true;
   const t = extractText(raw).toLowerCase();
   return (
     t.includes("e_auth") ||

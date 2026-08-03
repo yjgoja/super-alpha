@@ -551,6 +551,21 @@ export default function AdminPage() {
                         {a.status}
                         {a.statusMessage ? ` · ${a.statusMessage}` : ""}
                       </div>
+                      {/요청 제한|자동 재시도|TooMany|429/i.test(a.statusMessage || "") &&
+                        !/계좌 검증이 반복|비밀번호|연동을 중단/i.test(a.statusMessage || "") && (
+                          <div className="mt-1 text-[11px] text-[var(--muted)]">
+                            MetaAPI 요청 한도입니다. 계좌번호/비밀번호 오류와 다를 수 있으니 잠시 후
+                            재시도하세요.
+                          </div>
+                        )}
+                      {/계좌 검증이 반복|계좌번호 또는 비밀번호|비밀번호가 올바르지/i.test(
+                        a.statusMessage || "",
+                      ) && (
+                        <div className="mt-1 text-[11px] text-[var(--danger)]">
+                          계좌 정보 오류로 보입니다. 회원에게 계좌번호·거래 비밀번호를 다시 받아
+                          재신청하세요.
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <button

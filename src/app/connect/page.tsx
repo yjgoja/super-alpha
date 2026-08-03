@@ -89,6 +89,12 @@ function ConnectForm() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    const nick = displayName.trim();
+    if (nick && /^\d{5,15}$/.test(nick)) {
+      setError("계좌 별칭에는 숫자를 넣을 수 없습니다. MT5 계좌번호는 위 '계좌번호' 칸에만 입력하세요.");
+      setLoading(false);
+      return;
+    }
     try {
       const res = await fetch("/api/connect", {
         method: "POST",
@@ -100,7 +106,7 @@ function ConnectForm() {
           add: addMode || undefined,
           reapply: reapply || undefined,
           accountId: accountId || undefined,
-          displayName: displayName.trim() || undefined,
+          displayName: nick || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -164,16 +170,6 @@ function ConnectForm() {
         ) : (
           <div className="mt-6 space-y-4">
             <div>
-              <label className="sa-label">계좌 이름 (선택)</label>
-              <input
-                className="sa-input"
-                maxLength={40}
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="예: 메인 / 서브"
-              />
-            </div>
-            <div>
               <label className="sa-label">계좌번호 (MT5 Login)</label>
               <input
                 className="sa-input"
@@ -182,9 +178,12 @@ function ConnectForm() {
                 pattern="[0-9]{5,15}"
                 value={login}
                 onChange={(e) => setLogin(e.target.value.replace(/\D/g, ""))}
-                placeholder="실제 MT5 계좌번호"
+                placeholder="MT5에 표시된 실제 계좌번호"
                 readOnly={Boolean(reapply && accountId && login)}
               />
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                MT5 로그인 숫자만 입력하세요. 별칭/이름은 아래 칸에 넣습니다.
+              </p>
             </div>
             <div>
               <label className="sa-label">거래 비밀번호</label>
@@ -195,12 +194,25 @@ function ConnectForm() {
                 minLength={4}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="실제 거래 비밀번호"
+                placeholder="실제 거래 비밀번호 (투자자 비밀번호 아님)"
               />
             </div>
             <div>
               <label className="sa-label">서버</label>
               <input className="sa-input opacity-80" value={FIXED_MT5_SERVER} readOnly />
+            </div>
+            <div>
+              <label className="sa-label">계좌 별칭 (선택)</label>
+              <input
+                className="sa-input"
+                maxLength={40}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="예: 메인 / 서브"
+              />
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                구분용 이름입니다. 여기에 계좌번호를 넣지 마세요.
+              </p>
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>

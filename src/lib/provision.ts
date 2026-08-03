@@ -1,5 +1,7 @@
 import { prisma } from "./db";
 import {
+  CREDENTIAL_REJECTED_KO,
+  isCredentialValidationRejected,
   isMt5AuthError,
   isNetworkTransientError,
   isRateLimitError,
@@ -21,17 +23,44 @@ function sleep(ms: number) {
 
 const AUTH_FAIL_MSG = "MT5 계좌번호 또는 비밀번호가 올바르지 않습니다.";
 
-/** Transient MetaAPI provisioning / deploy rate limits — never permanent fail. */
+/** Soft API rate-limit exhausted — stop looping; not a password verdict. */
+export const RATE_LIMIT_ESCALATED_KO =
+  "MetaAPI 요청 한도가 지속되어 연동을 중단했습니다. 10분 뒤 '상태 확인/재시도'를 누르세요. (계좌번호·비밀번호 오류와 다를 수 있음)";
+
+/** Max soft rate-limit / network holds before escalating out of infinite provisioning. */
+export const PROVISION_SOFT_MAX = 5;
+
+/** Admin poll / finalize must not re-hit MetaAPI create more than once per few minutes. */
+const PROVISION_RETRY_COOLDOWN_MS = 180_000;
+
+/** Even soft rate-limit waits must eventually surface (no forever loop). */
+const PROVISION_SOFT_MAX_AGE_MS = 45 * 60 * 1000;
+
+function parseSoftAttempt(msg: string | null | undefined): number {
+  const m = String(msg || "").match(/·\s*(\d+)\s*\/\s*(\d+)\s*$/);
+  if (!m) return 0;
+  return Math.max(0, Number(m[1]) || 0);
+}
+
+function withSoftAttempt(base: string, n: number): string {
+  const cleaned = base.replace(/\s*·\s*\d+\s*\/\s*\d+\s*$/, "").trim();
+  return `${cleaned} · ${n}/${PROVISION_SOFT_MAX}`;
+}
+
+/** Transient MetaAPI provisioning / deploy rate limits — soft retry (capped). */
 export function isProvisionRateLimitMessage(msg: unknown): boolean {
+  if (isCredentialValidationRejected(msg)) return false;
   if (isRateLimitError(msg)) return true;
   const t = String(msg || "");
+  if (/연동을 중단했습니다|계좌 검증이 반복 실패/i.test(t)) return false;
   return /요청 제한|요청이 너무 많|rate\s*limit|rate_limit|too many|429/i.test(t);
 }
 
-/** Soft-retryable provision errors (not wrong password). */
+/** Soft-retryable provision errors (not wrong password / not credential lockout). */
 export function isProvisionTransientMessage(msg: unknown): boolean {
-  if (isMt5AuthError(msg)) return false;
+  if (isMt5AuthError(msg) || isCredentialValidationRejected(msg)) return false;
   const t = String(msg || "");
+  if (/연동을 중단했습니다/i.test(t)) return false;
   if (/브로커 계좌 검증 중|validation is in progress|1분 후 다시 시도/i.test(t)) {
     return true;
   }
@@ -39,11 +68,8 @@ export function isProvisionTransientMessage(msg: unknown): boolean {
 }
 
 export function isProvisionAuthMessage(msg: unknown): boolean {
-  return isMt5AuthError(msg);
+  return isMt5AuthError(msg) || isCredentialValidationRejected(msg);
 }
-
-/** Admin poll / finalize must not re-hit MetaAPI create more than once per few minutes. */
-const PROVISION_RETRY_COOLDOWN_MS = 180_000;
 
 async function markLinked(
   accountId: string,
@@ -186,6 +212,7 @@ export async function finalizeProvisionIfReady(accountId: string) {
 
 export async function finalizeAllProvisioning() {
   // Recover accounts wrongly marked failed solely due to MetaAPI 429 / network blips.
+  // Never revive credential lockouts or soft-retry escalations.
   await prisma.brokerAccount.updateMany({
     where: {
       status: "failed",
@@ -200,6 +227,9 @@ export async function finalizeAllProvisioning() {
       NOT: [
         { statusMessage: { contains: "비밀번호가 올바르지" } },
         { statusMessage: { contains: "계좌번호 또는 비밀번호" } },
+        { statusMessage: { contains: "계좌 검증이 반복 실패" } },
+        { statusMessage: { contains: "연동을 중단했습니다" } },
+        { statusMessage: { contains: "1시간 후" } },
       ],
     },
     data: {
@@ -221,7 +251,28 @@ export async function finalizeAllProvisioning() {
     settled.push({ id: a.id, ...(await finalizeProvisionIfReady(a.id)) });
   }
 
-  // Only time-out provisioning that never got a MetaAPI id (true stuck), not soft waits.
+  // Soft rate-limit / retry waits must not loop forever with null meta id.
+  await prisma.brokerAccount.updateMany({
+    where: {
+      status: "provisioning",
+      metaApiAccountId: null,
+      updatedAt: { lt: new Date(Date.now() - PROVISION_SOFT_MAX_AGE_MS) },
+      OR: [
+        { statusMessage: { contains: "요청 제한" } },
+        { statusMessage: { contains: "요청이 너무 많" } },
+        { statusMessage: { contains: "자동 재시도" } },
+        { statusMessage: { contains: "네트워크" } },
+        { statusMessage: { contains: "일시 오류" } },
+      ],
+    },
+    data: {
+      status: "failed",
+      statusMessage: RATE_LIMIT_ESCALATED_KO,
+      botEnabled: false,
+    },
+  });
+
+  // Non-soft provisioning that never got a MetaAPI id (true stuck).
   await prisma.brokerAccount.updateMany({
     where: {
       status: "provisioning",
@@ -305,20 +356,41 @@ export async function runAdminProvision(accountId: string) {
   if (!repaired || !repaired.ok) {
     const rawMsg = repaired?.message || "계좌 연동에 실패했습니다.";
     if (isProvisionAuthMessage(rawMsg)) {
+      const authMsg = isCredentialValidationRejected(rawMsg)
+        ? CREDENTIAL_REJECTED_KO
+        : AUTH_FAIL_MSG;
       await prisma.brokerAccount.update({
         where: { id: account.id },
         data: {
           status: "failed",
-          statusMessage: AUTH_FAIL_MSG,
+          statusMessage: authMsg,
           botEnabled: false,
         },
       });
-      return { ok: false as const, error: AUTH_FAIL_MSG };
+      return { ok: false as const, error: authMsg };
     }
     if (isProvisionTransientMessage(rawMsg)) {
-      const softMsg = isProvisionRateLimitMessage(rawMsg)
+      const latest = await prisma.brokerAccount.findUnique({
+        where: { id: account.id },
+        select: { statusMessage: true },
+      });
+      const prev = parseSoftAttempt(latest?.statusMessage || account.statusMessage);
+      const next = prev + 1;
+      if (next >= PROVISION_SOFT_MAX) {
+        await prisma.brokerAccount.update({
+          where: { id: account.id },
+          data: {
+            status: "failed",
+            statusMessage: RATE_LIMIT_ESCALATED_KO,
+            botEnabled: false,
+          },
+        });
+        return { ok: false as const, error: RATE_LIMIT_ESCALATED_KO };
+      }
+      const softBase = isProvisionRateLimitMessage(rawMsg)
         ? "요청 제한 · 자동 재시도 대기 중… (실패로 표시하지 않음)"
         : "네트워크 일시 오류 · 자동 재시도 대기 중… (실패로 표시하지 않음)";
+      const softMsg = withSoftAttempt(softBase, next);
       await prisma.brokerAccount.update({
         where: { id: account.id },
         data: {
