@@ -74,7 +74,7 @@ export function ConnectPrompt({
               type="button"
               className="sa-btn sa-btn-primary"
               style={{ flex: 1, borderRadius: 12, padding: "0.75rem" }}
-              onClick={() => router.push("/connect")}
+              onClick={() => router.push("/connect?add=1")}
             >
               실계좌 연결하기
             </button>

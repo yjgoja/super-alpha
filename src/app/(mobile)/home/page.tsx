@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AccountLinkBadge } from "@/components/ConnectPrompt";
 import { SharePnlSheet } from "@/components/SharePnlSheet";
@@ -57,6 +58,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [hasAccount, setHasAccount] = useState(true);
   const [displayName, setDisplayName] = useState("");
+  const [activeAccountLabel, setActiveAccountLabel] = useState("");
+  const [accountCount, setAccountCount] = useState(0);
   const [linked, setLinked] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string>("approved");
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
@@ -120,6 +123,13 @@ export default function HomePage() {
         if (stopped) return;
         applyStats(stats);
         setDisplayName(me.name || me.email || "");
+        setActiveAccountLabel(
+          me.account?.label ||
+            me.account?.displayName ||
+            (me.account?.login ? `MT5 ${me.account.login}` : "") ||
+            (stats.account?.login ? `MT5 ${stats.account.login}` : ""),
+        );
+        setAccountCount(Array.isArray(me.accounts) ? me.accounts.length : me.account ? 1 : 0);
         linkedNow = Boolean(me.linked ?? stats.account?.metaApiAccountId);
         setLinked(linkedNow);
         setApprovalStatus(me.approvalStatus || "pending");
@@ -225,6 +235,33 @@ export default function HomePage() {
           {linked ? "실계좌 연동" : "미연동"}
         </div>
       </header>
+
+      {activeAccountLabel ? (
+        <Link
+          href="/manage"
+          className="m-card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "0.65rem",
+            padding: "0.7rem 0.9rem",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>사용 중 계좌</div>
+            <div style={{ fontWeight: 700, marginTop: "0.15rem" }}>
+              {activeAccountLabel}
+              {accountCount > 1 ? (
+                <span style={{ marginLeft: "0.4rem", fontSize: "0.75rem", color: "var(--gold)" }}>
+                  {accountCount}개
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <span style={{ color: "var(--gold)", fontSize: "0.85rem" }}>계좌 관리 ›</span>
+        </Link>
+      ) : null}
 
       <section className="sa-home-today sa-rise">
         <div className="sa-home-today-main">

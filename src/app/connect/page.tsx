@@ -23,7 +23,7 @@ function ConnectForm() {
   const router = useRouter();
   const params = useSearchParams();
   const reapply = params.get("reapply") === "1";
-  const add = params.get("add") === "1";
+  const addParam = params.get("add") === "1";
   const accountId = params.get("accountId") || "";
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -33,6 +33,8 @@ function ConnectForm() {
   const [done, setDone] = useState(false);
   const [checking, setChecking] = useState(true);
   const [approvalPending, setApprovalPending] = useState(false);
+  /** True when registering an additional account (not overwriting). */
+  const [addMode, setAddMode] = useState(addParam);
 
   useEffect(() => {
     (async () => {
@@ -55,30 +57,33 @@ function ConnectForm() {
         setChecking(false);
         return;
       }
-      // Adding another account — never bounce to home
-      if (add) {
+      const list = Array.isArray(me.accounts) ? me.accounts : [];
+      // Already has accounts + not reapply → always add another account
+      if (!reapply && list.length > 0) {
+        setAddMode(true);
         setChecking(false);
         return;
       }
-      const list = Array.isArray(me.accounts) ? me.accounts : [];
+      if (addParam) {
+        setAddMode(true);
+        setChecking(false);
+        return;
+      }
       const target =
         (accountId && list.find((a: { id: string }) => a.id === accountId)) || me.account;
       const st = target?.status as string | undefined;
-      const linked = Boolean(target?.metaApiAccountId);
       const canReapply =
         reapply ||
         st === "failed" ||
         st === "pending_registration" ||
         st === "provisioning";
-      if (linked && !canReapply && list.length > 0) {
-        router.replace("/manage");
-        return;
+      if (target?.login && canReapply) {
+        setLogin(String(target.login).replace(/\D/g, ""));
+        if (target?.displayName) setDisplayName(String(target.displayName));
       }
-      if (target?.login) setLogin(String(target.login).replace(/\D/g, ""));
-      if (target?.displayName) setDisplayName(String(target.displayName));
       setChecking(false);
     })();
-  }, [router, reapply, add, accountId]);
+  }, [router, reapply, addParam, accountId]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -92,7 +97,7 @@ function ConnectForm() {
           login,
           password,
           server: FIXED_MT5_SERVER,
-          add: add || undefined,
+          add: addMode || undefined,
           reapply: reapply || undefined,
           accountId: accountId || undefined,
           displayName: displayName.trim() || undefined,
@@ -131,11 +136,11 @@ function ConnectForm() {
         </div>
 
         <h1 className="mt-6 text-2xl font-semibold">
-          {add ? "계좌 추가" : reapply ? "실계좌 다시 연결 신청" : "MT5 실계좌 연결 신청"}
+          {addMode ? "계좌 추가" : reapply ? "실계좌 다시 연결 신청" : "MT5 실계좌 연결 신청"}
         </h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          {add
-            ? "추가 MT5 계좌를 등록합니다. 관리자 승인 후 이용할 수 있습니다."
+          {addMode
+            ? "추가 MT5 계좌를 등록합니다. 기존 계좌는 그대로 두고 새 계좌가 추가됩니다. 관리자 승인 후 이용할 수 있습니다."
             : "계좌·비밀번호를 제출하면 관리자 승인 후 연동됩니다. 비밀번호가 틀리면 승인 단계에서 거절되니 정확히 입력하세요."}
         </p>
 
@@ -199,7 +204,7 @@ function ConnectForm() {
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <button className="sa-btn sa-btn-primary w-full" disabled={loading}>
-              {loading ? "신청 중…" : add ? "계좌 추가 신청" : "연동 신청하기"}
+              {loading ? "신청 중…" : addMode ? "계좌 추가 신청" : "연동 신청하기"}
             </button>
             <Link href="/manage" className="sa-btn sa-btn-ghost w-full inline-flex justify-center">
               계좌 관리로

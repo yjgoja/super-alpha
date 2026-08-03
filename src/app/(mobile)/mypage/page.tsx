@@ -9,6 +9,8 @@ export default function MyPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [login, setLogin] = useState("");
+  const [accountLabel, setAccountLabel] = useState("");
+  const [accountCount, setAccountCount] = useState(0);
   const [linked, setLinked] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string>("approved");
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
@@ -34,6 +36,8 @@ export default function MyPage() {
       setName(me.name || "");
       setEmail(me.email || "");
       setLogin(pnl.account?.login || me.account?.login || "");
+      setAccountLabel(me.account?.label || me.account?.displayName || "");
+      setAccountCount(Array.isArray(me.accounts) ? me.accounts.length : me.account ? 1 : 0);
       setLinked(Boolean(me.linked));
       setApprovalStatus(me.approvalStatus || "pending");
       setAccountStatus(me.account?.status || null);
@@ -71,7 +75,8 @@ export default function MyPage() {
         )}
         {login && (
           <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.35rem" }}>
-            활성 계좌 MT5 {login}
+            활성 계좌 {accountLabel ? `${accountLabel} · ` : ""}MT5 {login}
+            {accountCount > 1 ? ` · 총 ${accountCount}개` : ""}
           </div>
         )}
         <div
@@ -147,12 +152,32 @@ export default function MyPage() {
           alignItems: "center",
           justifyContent: "space-between",
           marginBottom: "0.55rem",
+          border: "1px solid rgba(212,175,55,0.35)",
         }}
       >
         <div>
           <div style={{ fontWeight: 700 }}>계좌 관리</div>
           <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
-            다계좌 선택 · 추가 · 삭제 · 이름 설정
+            계좌 선택 · 추가 · 삭제 · 이름 설정
+            {accountCount > 0 ? ` (등록 ${accountCount}개)` : ""}
+          </div>
+        </div>
+        <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>
+      </Link>
+      <Link
+        href="/connect?add=1"
+        className="m-card"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "0.55rem",
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 700 }}>계좌 추가</div>
+          <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+            다른 MT5 계좌를 이 이메일로 추가 등록
           </div>
         </div>
         <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>

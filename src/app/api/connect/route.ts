@@ -167,38 +167,13 @@ export async function POST(req: Request) {
       });
     }
 
-    // New login — create additional account (multi-account)
+    // New login — always create an additional account row (never overwrite another login).
     const count = await prisma.brokerAccount.count({ where: { userId } });
     if (count >= MAX_BROKER_ACCOUNTS_PER_USER) {
       return connectFail(
         `계좌는 최대 ${MAX_BROKER_ACCOUNTS_PER_USER}개까지 등록할 수 있습니다.`,
         400,
       );
-    }
-
-    // Legacy single-account overwrite path: only when not adding and user has exactly one
-    // and explicitly reapplying without accountId — still create new if add or count=0
-    if (!add && count === 1 && reapply) {
-      const only = await prisma.brokerAccount.findFirst({ where: { userId } });
-      if (only && !only.botEnabled) {
-        const account = await prisma.brokerAccount.update({
-          where: { id: only.id },
-          data: pendingData,
-        });
-        await setActiveBrokerAccount(userId, account.id);
-        return NextResponse.json({
-          ok: true,
-          pending: true,
-          message: "재연동 신청이 접수되었습니다. 관리자 승인 후 이용할 수 있습니다.",
-          account: {
-            id: account.id,
-            login: account.login,
-            server: account.server,
-            status: account.status,
-            displayName: account.displayName,
-          },
-        });
-      }
     }
 
     const account = await prisma.brokerAccount.create({
