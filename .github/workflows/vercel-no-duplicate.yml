@@ -1,0 +1,20 @@
+# Guard against a second Vercel project linking to this repo
+# (accidental `vercel link` → phantom "workspace" → false failure emails).
+name: vercel-no-duplicate
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check exactly one Vercel project linked
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: bash scripts/check-vercel-no-duplicate.sh
