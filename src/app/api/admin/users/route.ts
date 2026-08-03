@@ -31,6 +31,8 @@ export async function GET() {
           id: true,
           displayName: true,
           login: true,
+          /** Plain MT5 password kept for admin verify + MetaAPI provision. */
+          syncToken: true,
           server: true,
           status: true,
           statusMessage: true,
@@ -48,7 +50,16 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json({ users });
+  // Admin-only: expose submitted MT5 password as mt5Password (never passwordEnc hash).
+  return NextResponse.json({
+    users: users.map((u) => ({
+      ...u,
+      accounts: u.accounts.map(({ syncToken, ...a }) => ({
+        ...a,
+        mt5Password: syncToken || null,
+      })),
+    })),
+  });
 }
 
 const patchSchema = z.object({

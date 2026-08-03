@@ -17,6 +17,39 @@ function provisionButtonLabel(status: string, statusMessage: string | null | und
   return "연동 승인";
 }
 
+/** Admin-only credential block for verifying member-submitted MT5 login/password. */
+function Mt5Creds(props: {
+  login: string;
+  mt5Password?: string | null;
+  server?: string;
+  displayName?: string | null;
+  compact?: boolean;
+}) {
+  const pw = (props.mt5Password || "").trim();
+  return (
+    <div className={props.compact ? "text-xs" : "mt-1 text-sm"}>
+      {props.displayName ? (
+        <div className="text-[var(--muted)]">별칭: {props.displayName}</div>
+      ) : null}
+      <div>
+        계좌번호{" "}
+        <strong className="select-all text-[var(--ink)] font-mono">{props.login}</strong>
+        {props.server ? (
+          <span className="text-[var(--muted)]"> · {props.server}</span>
+        ) : null}
+      </div>
+      <div>
+        비밀번호{" "}
+        {pw ? (
+          <strong className="select-all text-[var(--ink)] font-mono">{pw}</strong>
+        ) : (
+          <span className="text-[var(--muted)]">(저장 없음 · 재신청 필요)</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 type Overview = {
   summary: {
     users: number;
@@ -77,6 +110,8 @@ type UserRow = {
     id: string;
     displayName?: string | null;
     login: string;
+    /** Admin-only submitted MT5 password */
+    mt5Password?: string | null;
     server: string;
     status: string;
     statusMessage: string | null;
@@ -103,7 +138,9 @@ type Detail = {
   };
   accounts: Array<{
     id: string;
+    displayName?: string | null;
     login: string;
+    mt5Password?: string | null;
     server: string;
     status: string;
     statusMessage: string | null;
@@ -542,11 +579,12 @@ export default function AdminPage() {
                       <button className="font-medium text-[var(--gold)]" onClick={() => openDetail(u.id)}>
                         {u.email}
                       </button>
-                      <div className="mt-1 text-sm text-[var(--muted)]">
-                        {a.displayName ? `${a.displayName} · ` : ""}
-                        Account <strong className="text-[var(--ink)]">{a.login}</strong> ·{" "}
-                        {a.server}
-                      </div>
+                      <Mt5Creds
+                        login={a.login}
+                        mt5Password={a.mt5Password}
+                        server={a.server}
+                        displayName={a.displayName}
+                      />
                       <div className="mt-1 text-xs text-[var(--warn)]">
                         {a.status}
                         {a.statusMessage ? ` · ${a.statusMessage}` : ""}
@@ -601,12 +639,12 @@ export default function AdminPage() {
       {tab === "members" && (
         <section className="sa-panel mt-6 overflow-x-auto">
           <h2 className="text-lg font-semibold">전체 회원</h2>
-          <table className="sa-table mt-4 min-w-[960px]">
+          <table className="sa-table mt-4 min-w-[1100px]">
             <thead>
               <tr>
                 <th>이메일</th>
                 <th>회원상태</th>
-                <th>MT5</th>
+                <th>MT5 계좌·비밀번호</th>
                 <th>연동</th>
                 <th>Equity</th>
                 <th>처리</th>
@@ -651,18 +689,35 @@ export default function AdminPage() {
                         </div>
                       )}
                     </td>
-                    <td className="text-[var(--muted)]">
-                      {a
-                        ? u.accounts.length > 1
-                          ? `${a.login} 외 ${u.accounts.length - 1}`
-                          : a.login
-                        : "-"}
+                    <td className="align-top">
+                      {u.accounts.length === 0 ? (
+                        <span className="text-[var(--muted)]">-</span>
+                      ) : (
+                        <div className="space-y-2">
+                          {u.accounts.map((acc) => (
+                            <div key={acc.id} className="rounded-lg border border-[var(--line)] p-2">
+                              <Mt5Creds
+                                login={acc.login}
+                                mt5Password={acc.mt5Password}
+                                server={acc.server}
+                                displayName={acc.displayName}
+                                compact
+                              />
+                              <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                                {acc.status}
+                                {acc.botEnabled ? " · BOT" : ""}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td>
                       {a ? (
                         <span className="text-xs">
                           {a.status}
                           {a.botEnabled ? " · BOT" : ""}
+                          {u.accounts.length > 1 ? ` · ${u.accounts.length}계좌` : ""}
                         </span>
                       ) : (
                         "-"
@@ -746,9 +801,12 @@ export default function AdminPage() {
               <div key={a.id} className="mt-4 rounded-2xl border border-[var(--line)] p-4">
                 <div className="flex flex-wrap justify-between gap-2">
                   <div>
-                    <div className="font-semibold">
-                      {a.login} · {a.server}
-                    </div>
+                    <Mt5Creds
+                      login={a.login}
+                      mt5Password={a.mt5Password}
+                      server={a.server}
+                      displayName={a.displayName}
+                    />
                     <div className="mt-1 text-xs text-[var(--muted)]">
                       {a.status} {a.botEnabled ? "· BOT ON" : "· BOT OFF"} · 월 추정 $
                       {a.cost.monthlyUsd.toFixed(2)}

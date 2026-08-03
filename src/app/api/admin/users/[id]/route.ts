@@ -34,10 +34,12 @@ export async function GET(_req: Request, ctx: Ctx) {
 
   const { passwordHash: _, ...safeUser } = user;
   const accounts = user.accounts.map((a) => {
-    const { passwordEnc: _p, syncToken: _s, ...safe } = a;
+    const { passwordEnc: _p, syncToken, ...safe } = a;
     const burning = a.metaApiAccountId && a.status === "connected";
     return {
       ...safe,
+      /** Admin verify only — submitted MT5 trade password (null after reject/purge). */
+      mt5Password: syncToken || null,
       cost: {
         burning,
         monthlyUsd: burning
