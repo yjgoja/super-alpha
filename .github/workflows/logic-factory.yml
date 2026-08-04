@@ -1,16 +1,18 @@
-# Soft backup: run one logic-factory generation when secrets exist.
-# Primary unattended loop is Render worker `super-alpha-logic-factory`.
-name: logic-factory-once
+# Logic factory — daily Telegram digest at KST noon (once/day).
+# Primary discovery loop remains Render worker `super-alpha-logic-factory`
+# (continuous invent/sim — NO per-generation Telegram).
+name: logic-factory-daily
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 */6 * * *"
+    # 03:00 UTC = 12:00 KST (Asia/Seoul, no DST)
+    - cron: "0 3 * * *"
 
 jobs:
-  factory:
+  daily-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,7 +21,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - name: Run one factory generation
+      - name: Optional one factory generation (soft backup)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
@@ -28,3 +30,15 @@ jobs:
           FACTORY_MAX_LOTS: "0.05"
           FACTORY_SYMBOLS: "GBPUSD,EURUSD"
         run: npx tsx scripts/logic-factory-run.ts --once --n 24 --stride 20
+        continue-on-error: true
+      - name: Telegram 일일보고 (KST noon, once/day)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FACTORY_TELEGRAM_DAILY: "1"
+          FACTORY_TELEGRAM_HOUR_KST: "12"
+          # Never enable per-generation / new-high spam
+          FACTORY_TELEGRAM_ON_NEW_HIGH: "0"
+        run: npx tsx scripts/logic-factory-daily-report.ts --force

@@ -90,5 +90,19 @@ services:
         value: "0.05"
       - key: FACTORY_SYMBOLS
         value: "GBPUSD,EURUSD"
+      # Telegram 일일보고: KST 12시 1회만 (세대마다/신규최고 스팸 금지)
+      - key: FACTORY_TELEGRAM_DAILY
+        value: "1"
+      - key: FACTORY_TELEGRAM_HOUR_KST
+        value: "12"
+      - key: FACTORY_TELEGRAM_ON_NEW_HIGH
+        value: "0"
+      # Keep 0: continuous worker must not Telegram; GHA noon job sends digest
+      - key: FACTORY_TELEGRAM_FROM_WORKER
+        value: "0"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
       - key: NODE_ENV
         value: production
