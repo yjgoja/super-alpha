@@ -18,13 +18,18 @@ type Payload = {
 type Props = {
   /** When set, auto-load this logic on mount */
   initialLogicId?: string;
+  /** Admin remote target account (other MT5 accounts) */
+  accountId?: string | null;
 };
 
 /**
  * Admin-only strategy table editor (mobile + desktop).
  * End users never receive full payload from GET /api/strategy-logic.
  */
-export function AdminStrategyEditor({ initialLogicId = "martin_9_65" }: Props) {
+export function AdminStrategyEditor({
+  initialLogicId = "martin_9_65",
+  accountId = null,
+}: Props) {
   const [logicId, setLogicId] = useState(initialLogicId);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [editable, setEditable] = useState<"bulk" | "levels" | null>(null);
@@ -34,11 +39,17 @@ export function AdminStrategyEditor({ initialLogicId = "martin_9_65" }: Props) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
+  const accountQs = accountId
+    ? `&accountId=${encodeURIComponent(accountId)}`
+    : "";
+
   const load = useCallback(async (id: string) => {
     setBusy(true);
     setMsg("");
     setErr("");
-    const res = await fetch(`/api/strategy-logic?logic=${encodeURIComponent(id)}`);
+    const res = await fetch(
+      `/api/strategy-logic?logic=${encodeURIComponent(id)}${accountQs}`,
+    );
     if (res.status === 401) {
       window.location.href = "/login";
       return;
@@ -75,7 +86,7 @@ export function AdminStrategyEditor({ initialLogicId = "martin_9_65" }: Props) {
           }))
         : [],
     });
-  }, []);
+  }, [accountQs]);
 
   useEffect(() => {
     void load(logicId);
@@ -88,6 +99,7 @@ export function AdminStrategyEditor({ initialLogicId = "martin_9_65" }: Props) {
     setErr("");
     const body = {
       logicId,
+      ...(accountId ? { accountId } : {}),
       payload: {
         mode: editable === "levels" ? "levels" : "bulk",
         startLots: payload.startLots,
@@ -121,7 +133,11 @@ export function AdminStrategyEditor({ initialLogicId = "martin_9_65" }: Props) {
     const res = await fetch("/api/strategy-logic", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ logicId, reset: true }),
+      body: JSON.stringify({
+        logicId,
+        reset: true,
+        ...(accountId ? { accountId } : {}),
+      }),
     });
     const data = await res.json().catch(() => ({}));
     setBusy(false);

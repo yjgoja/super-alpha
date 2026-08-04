@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser, requireAdmin } from "@/lib/access";
 import { prisma } from "@/lib/db";
-import { resolveActiveBrokerAccount } from "@/lib/account-selection";
+import { resolveEditableBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { DCA1000_DEFAULT_SL_ROI, resolveTpSlUsd } from "@/lib/dca1000";
 import { isLogicId } from "@/lib/strategies";
@@ -15,8 +15,8 @@ import {
 } from "@/lib/table-logics";
 import { resolveStrategyForAccount } from "@/lib/strategy-resolve";
 
-async function getAccount(userId: string) {
-  return resolveActiveBrokerAccount(userId);
+async function getAccount(userId: string, role: string, accountId?: string | null) {
+  return resolveEditableBrokerAccount({ userId, role, accountId });
 }
 
 const levelSchema = z.object({
@@ -27,6 +27,7 @@ const levelSchema = z.object({
 
 const putSchema = z.object({
   logicId: z.string().min(2).max(40),
+  accountId: z.string().min(1).optional(),
   name: z.string().max(80).optional(),
   reset: z.boolean().optional(),
   payload: z
@@ -55,13 +56,15 @@ export async function GET(req: Request) {
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
-  const account = await getAccount(gate.user.id);
-  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
-
-  const logicId = new URL(req.url).searchParams.get("logic") || "martin_9_65";
+  const url = new URL(req.url);
+  const logicId = url.searchParams.get("logic") || "martin_9_65";
+  const targetAccountId = url.searchParams.get("accountId");
   if (!isLogicId(logicId) && logicId !== "custom") {
     return NextResponse.json({ error: "알 수 없는 로직입니다." }, { status: 400 });
   }
+
+  const account = await getAccount(gate.user.id, gate.user.role, targetAccountId);
+  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
   const saved = await prisma.strategyLogic.findUnique({
     where: { accountId_logicId: { accountId: account.id, logicId } },
@@ -150,14 +153,14 @@ export async function PUT(req: Request) {
       { status: 403 },
     );
   }
-  const account = await getAccount(gate.user.id);
-  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
-
   const parsed = putSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: zodErrorKo(parsed.error) }, { status: 400 });
   }
   const body = parsed.data;
+  const account = await getAccount(gate.user.id, gate.user.role, body.accountId);
+  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
+
   const logicId = body.logicId;
   if (!isLogicId(logicId)) {
     return NextResponse.json({ error: "알 수 없는 로직입니다." }, { status: 400 });
@@ -304,10 +307,12 @@ export async function DELETE(req: Request) {
       { status: 403 },
     );
   }
-  const account = await getAccount(gate.user.id);
-  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
-  const logicId = new URL(req.url).searchParams.get("logic");
+  const url = new URL(req.url);
+  const logicId = url.searchParams.get("logic");
+  const targetAccountId = url.searchParams.get("accountId");
   if (!logicId) return NextResponse.json({ error: "logic 필요" }, { status: 400 });
+  const account = await getAccount(gate.user.id, gate.user.role, targetAccountId);
+  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
   await prisma.strategyLogic.deleteMany({
     where: { accountId: account.id, logicId },
   });

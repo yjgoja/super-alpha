@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser } from "@/lib/access";
 import { ensureTradingSchema, prisma } from "@/lib/db";
-import { resolveActiveBrokerAccount } from "@/lib/account-selection";
+import { resolveEditableBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { isInOpenBurstQuietPeriod, normalizeOpenBurstOnTrigger } from "@/lib/market-hours";
 import {
@@ -15,13 +15,16 @@ import { withAccountToggleLock } from "@/lib/toggle-lock";
 export const maxDuration = 90;
 export const runtime = "nodejs";
 
-async function findUserAccount(userId: string) {
-  const active = await resolveActiveBrokerAccount(userId);
+async function findUserAccount(
+  userId: string,
+  role: string,
+  accountId?: string | null,
+) {
+  const active = await resolveEditableBrokerAccount({ userId, role, accountId });
   if (!active) return null;
   return prisma.brokerAccount.findFirst({
     where: {
       id: active.id,
-      userId,
       OR: [
         {
           status: { in: ["connected", "undeployed"] },
@@ -51,6 +54,7 @@ export async function POST(req: Request) {
 
   const body = z
     .object({
+      accountId: z.string().min(1).optional(),
       enabled: z.boolean().optional(),
       skipOpenBurstEntries: z.boolean().optional(),
       openBurstOnTrigger: z.enum(["hold", "flatten"]).optional(),
@@ -64,7 +68,7 @@ export async function POST(req: Request) {
     )
     .parse(await req.json());
 
-  const account = await findUserAccount(gate.user.id);
+  const account = await findUserAccount(gate.user.id, gate.user.role, body.accountId);
   if (!account || (!account.metaApiAccountId && !account.syncToken)) {
     return NextResponse.json({ error: "연결된 계좌가 없습니다." }, { status: 400 });
   }

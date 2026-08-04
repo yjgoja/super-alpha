@@ -5,6 +5,10 @@ import { publicLogicOptions, publicLogicLabel, isPublicTimeLogic } from "@/lib/s
 import { SYMBOL_GROUPS, normalizeLogicId } from "@/lib/strategies";
 import { ConnectPrompt, isMt5Linked } from "@/components/ConnectPrompt";
 import { TradingViewSymbolChart } from "@/components/TradingViewSymbolChart";
+import {
+  AdminAccountPicker,
+  readStoredAdminEditAccountId,
+} from "@/components/AdminAccountPicker";
 
 type Bot = {
   id: string;
@@ -52,6 +56,16 @@ export default function BotPage() {
   const [promptMode, setPromptMode] = useState<"connect" | "approval">("connect");
   const [role, setRole] = useState("user");
   const [legacy, setLegacy] = useState<LegacyConfig | null>(null);
+  const [editAccountId, setEditAccountId] = useState<string | null>(null);
+
+  const accountQs = editAccountId
+    ? `accountId=${encodeURIComponent(editAccountId)}`
+    : "";
+  const withAccount = useCallback(
+    (body: Record<string, unknown>) =>
+      editAccountId ? { ...body, accountId: editAccountId } : body,
+    [editAccountId],
+  );
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
   const editingBot = useMemo(() => bots.find((b) => b.id === edit) || null, [bots, edit]);
@@ -94,9 +108,13 @@ export default function BotPage() {
 
   const load = useCallback(async () => {
     try {
+      const botsUrl = accountQs ? `/api/symbol-bots?${accountQs}` : "/api/symbol-bots";
+      const summaryUrl = accountQs
+        ? `/api/stats?summary=1&${accountQs}`
+        : "/api/stats?summary=1";
       const [botsRes, statsRes, meRes] = await Promise.all([
-        fetch("/api/symbol-bots"),
-        fetch("/api/stats?summary=1", { cache: "no-store" }),
+        fetch(botsUrl),
+        fetch(summaryUrl, { cache: "no-store" }),
         fetch("/api/me"),
       ]);
       if (botsRes.status === 401 || statsRes.status === 401 || meRes.status === 401) {
@@ -121,7 +139,10 @@ export default function BotPage() {
       setLinked(isMt5Linked(statsData.account));
       setApproved(me.role === "admin" || me.approvalStatus === "approved");
       if (nextRole === "admin") {
-        const fullRes = await fetch("/api/stats?full=1", { cache: "no-store" });
+        const fullUrl = accountQs
+          ? `/api/stats?full=1&${accountQs}`
+          : "/api/stats?full=1";
+        const fullRes = await fetch(fullUrl, { cache: "no-store" });
         const full = await fullRes.json().catch(() => ({}));
         const cfg = full.account?.config;
         if (cfg) {
@@ -148,6 +169,10 @@ export default function BotPage() {
     } finally {
       setReady(true);
     }
+  }, [accountQs]);
+
+  useEffect(() => {
+    setEditAccountId(readStoredAdminEditAccountId());
   }, []);
 
   useEffect(() => {
@@ -177,7 +202,7 @@ export default function BotPage() {
       const res = await fetch("/api/bot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !botEnabled }),
+        body: JSON.stringify(withAccount({ enabled: !botEnabled })),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -209,7 +234,7 @@ export default function BotPage() {
       const res = await fetch("/api/bot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skipOpenBurstEntries: next }),
+        body: JSON.stringify(withAccount({ skipOpenBurstEntries: next })),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -238,7 +263,7 @@ export default function BotPage() {
       const res = await fetch("/api/bot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ openBurstOnTrigger: next }),
+        body: JSON.stringify(withAccount({ openBurstOnTrigger: next })),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -267,7 +292,9 @@ export default function BotPage() {
       const res = await fetch("/api/symbol-bots", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: bot.symbol, direction: bot.direction, enabled }),
+        body: JSON.stringify(
+          withAccount({ symbol: bot.symbol, direction: bot.direction, enabled }),
+        ),
       });
       const data = await res.json().catch(() => ({}));
       const label = `${bot.symbol} ${bot.direction}`;
@@ -305,14 +332,16 @@ export default function BotPage() {
     const res = await fetch("/api/symbol-bots", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        symbol: editingBot.symbol,
-        logic,
-        direction: editingBot.direction,
-        startLots: roundLots(lots),
-        repeatEnabled: draft.repeatEnabled,
-        stopOnSl: draft.stopOnSl,
-      }),
+      body: JSON.stringify(
+        withAccount({
+          symbol: editingBot.symbol,
+          logic,
+          direction: editingBot.direction,
+          startLots: roundLots(lots),
+          repeatEnabled: draft.repeatEnabled,
+          stopOnSl: draft.stopOnSl,
+        }),
+      ),
     });
     setBusy(false);
     if (!res.ok) {
@@ -332,7 +361,7 @@ export default function BotPage() {
     const res = await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
+      body: JSON.stringify(withAccount(patch)),
     });
     setBusy(false);
     if (!res.ok) {
@@ -348,7 +377,11 @@ export default function BotPage() {
     if (role !== "admin") return;
     setBusy(true);
     setMsg("");
-    const res = await fetch("/api/stats", { method: "POST" });
+    const res = await fetch("/api/stats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(withAccount({})),
+    });
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -372,15 +405,17 @@ export default function BotPage() {
       const res = await fetch("/api/symbol-bots", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol,
-          direction,
-          enabled: false,
-          logic: "dubai_bruno_313",
-          startLots: 0.01,
-          repeatEnabled: true,
-          stopOnSl: true,
-        }),
+        body: JSON.stringify(
+          withAccount({
+            symbol,
+            direction,
+            enabled: false,
+            logic: "dubai_bruno_313",
+            startLots: 0.01,
+            repeatEnabled: true,
+            stopOnSl: true,
+          }),
+        ),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -439,6 +474,10 @@ export default function BotPage() {
         onClose={() => setShowConnect(false)}
         mode={promptMode}
       />
+
+      {role === "admin" && (
+        <AdminAccountPicker value={editAccountId} onChange={setEditAccountId} />
+      )}
 
       <section id="bot-add-symbol" className="m-card" style={{ marginBottom: "0.85rem" }}>
         <div style={{ fontWeight: 650, marginBottom: "0.35rem" }}>종목 추가</div>

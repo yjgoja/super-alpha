@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser, requireUser } from "@/lib/access";
-import { dayKeySeoul } from "@/lib/day-key";
+import { effectiveDayKey, isDemoHomeLogin } from "@/lib/demo-clock";
 import { ensureTradingSchema, prisma } from "@/lib/db";
-import { resolveActiveBrokerAccount } from "@/lib/account-selection";
+import { resolveActiveBrokerAccount, resolveEditableBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { fetchSnapshotCached, syncMt5Account } from "@/lib/metaapi";
 import { syncTodayPnlFromMt5Deals } from "@/lib/mt5-pnl-sync";
 import { publicBotStatusMessage, isAlarmStatusMessage } from "@/lib/public-status";
+import { loadOpenBurstSettings } from "@/lib/open-burst-settings";
 import { redactFillNote } from "@/lib/strategy-public";
 
 export const maxDuration = 60;
@@ -20,13 +21,20 @@ const lastPnlSyncAt = new Map<string, number>();
  * Soft equity sync only — never run trading ticks from the UI.
  * Engine (Render) owns ENTRY/DCA/TP/SL; multi-instance ticks caused soft-close storms.
  */
-export async function POST() {
+export async function POST(req: Request) {
   const gate = await requireApprovedUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
 
-  const account = await resolveActiveBrokerAccount(gate.user.id);
+  const body = await req.json().catch(() => ({}));
+  const targetAccountId =
+    typeof body?.accountId === "string" ? body.accountId : undefined;
+  const account = await resolveEditableBrokerAccount({
+    userId: gate.user.id,
+    role: gate.user.role,
+    accountId: targetAccountId,
+  });
 
   if (!account?.metaApiAccountId) {
     return NextResponse.json({
@@ -184,10 +192,19 @@ export async function GET(req: NextRequest) {
   const wantLite = req.nextUrl.searchParams.get("lite") === "1";
   const wantPnlSync = req.nextUrl.searchParams.get("pnl") === "1";
   const wantFull = req.nextUrl.searchParams.get("full") === "1";
+  const targetAccountId = req.nextUrl.searchParams.get("accountId");
+
+  const resolveTarget = () =>
+    resolveEditableBrokerAccount({
+      userId: gate.user!.id,
+      role: gate.user!.role,
+      accountId: targetAccountId,
+    });
 
   // Home hero: light query (no baskets/fills/snapshots)
   if (wantSummary && !wantLive) {
-    const _active = await resolveActiveBrokerAccount(gate.user.id);
+    const _active = await resolveTarget();
+    const asOf = effectiveDayKey(_active?.login);
     const account = _active
       ? await prisma.brokerAccount.findUnique({
           where: { id: _active.id },
@@ -209,7 +226,7 @@ export async function GET(req: NextRequest) {
             slCount: true,
             cycleCount: true,
             dailyStats: {
-              where: { date: dayKeySeoul() },
+              where: { date: asOf },
               take: 1,
               select: { date: true, pnl: true, returnPct: true },
             },
@@ -232,9 +249,12 @@ export async function GET(req: NextRequest) {
     const syncAgeSec = account.lastSyncAt
       ? Math.max(0, Math.floor((Date.now() - account.lastSyncAt.getTime()) / 1000))
       : null;
+    const burst = await loadOpenBurstSettings(account.id);
 
     return NextResponse.json({
       role: gate.user.role,
+      today: asOf,
+      demoClock: isDemoHomeLogin(account.login),
       account: {
         id: account.id,
         login: account.login,
@@ -250,7 +270,8 @@ export async function GET(req: NextRequest) {
         lastSyncAt: account.lastSyncAt,
         syncAgeSec,
         botEnabled: account.botEnabled,
-        skipOpenBurstEntries: account.skipOpenBurstEntries,
+        skipOpenBurstEntries: burst.skipOpenBurstEntries,
+        openBurstOnTrigger: burst.openBurstOnTrigger,
         balance: account.balance,
         equity: account.equity,
         startingBalance: account.startingBalance,
@@ -266,7 +287,8 @@ export async function GET(req: NextRequest) {
 
   // Lite live: MetaAPI equity/positions + open baskets only (heartbeat / home)
   if (wantLive && wantLite) {
-    const _activeLite = await resolveActiveBrokerAccount(gate.user.id);
+    const _activeLite = await resolveTarget();
+    const asOfLite = effectiveDayKey(_activeLite?.login);
     const account = _activeLite
       ? await prisma.brokerAccount.findUnique({
           where: { id: _activeLite.id },
@@ -297,7 +319,7 @@ export async function GET(req: NextRequest) {
               },
             },
             dailyStats: {
-              where: { date: dayKeySeoul() },
+              where: { date: asOfLite },
               take: 1,
               select: { date: true, pnl: true, returnPct: true },
             },
@@ -384,7 +406,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const _activeFull = await resolveActiveBrokerAccount(gate.user.id);
+  const _activeFull = await resolveTarget();
   const account = _activeFull
     ? await prisma.brokerAccount.findUnique({
         where: { id: _activeFull.id },
@@ -450,7 +472,7 @@ export async function GET(req: NextRequest) {
   const start =
     account.startingBalance > 0 ? account.startingBalance : account.balance || 1;
   const totalReturnPct = ((account.equity - start) / start) * 100;
-  const todayKey = dayKeySeoul();
+  const todayKey = effectiveDayKey(account.login);
   const today =
     account.dailyStats.find((d) => d.date === todayKey) ?? null;
   const dailyPnl = liveDailyPnl ?? today?.pnl ?? 0;

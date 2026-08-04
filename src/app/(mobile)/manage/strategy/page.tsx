@@ -2,18 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import {
+  AdminAccountPicker,
+  readStoredAdminEditAccountId,
+} from "@/components/AdminAccountPicker";
 import { AdminStrategyEditor } from "@/components/AdminStrategyEditor";
 import { publicLogicOptions, publicLogicLabel } from "@/lib/strategy-public";
 
 /**
  * End-user: locked summary (IP).
- * Admin: full table editor on phone/desktop.
+ * Admin: full table editor on phone/desktop + any-account remote target.
  */
 export default function StrategyLogicPage() {
   const [role, setRole] = useState<string | null>(null);
   const [logicId, setLogicId] = useState("martin_9_65");
+  const [editAccountId, setEditAccountId] = useState<string | null>(null);
 
   useEffect(() => {
+    setEditAccountId(readStoredAdminEditAccountId());
     (async () => {
       const res = await fetch("/api/me");
       if (res.status === 401) {
@@ -56,9 +62,13 @@ export default function StrategyLogicPage() {
             lineHeight: 1.5,
           }}
         >
-          활성 계좌의 프리셋 오버라이드입니다. 회차·익절·손절을 폰에서 바로 수정할 수 있습니다.
+          폰에서도 PC처럼 아무 계좌의 회차·익절·손절을 수정합니다.
         </p>
-        <AdminStrategyEditor />
+        <AdminAccountPicker value={editAccountId} onChange={setEditAccountId} />
+        <AdminStrategyEditor
+          key={editAccountId || "active"}
+          accountId={editAccountId}
+        />
       </div>
     );
   }

@@ -38,4 +38,4 @@ Run what applies:
 
 ## Scope
 
-One job per request. If the user asks for “everything”, split into ordered steps and finish the first with QA before expanding.
+Default: one job per request. If the user asks for “everything” / remote phone edits like PC, split into ordered slices and keep going — do not refuse multi-surface work (see `mobile-remote-ops` rule).

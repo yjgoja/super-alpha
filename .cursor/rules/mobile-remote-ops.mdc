@@ -1,0 +1,28 @@
+---
+description: Mobile/remote Cursor — full repo edit parity with desktop
+alwaysApply: true
+---
+
+# Mobile / remote Cursor ops
+
+Owner often edits from the **Cursor mobile app** while away from the PC. Treat mobile-sourced requests as **full desktop authority** over this repo.
+
+## Do
+
+- Edit any area the user names: engine, MetaAPI, protect/DCA, admin APIs, mobile UI, scripts, deploy configs, strategy tables.
+- Prefer completing the asked remote change end-to-end (code → QA → commit/push/PR) without sending them back to a PC.
+- When they say “everything / 다 / PC처럼”, cover the remaining product gaps in ordered slices, but **do not refuse** multi-surface work.
+- Use admin `accountId` targeting APIs when changing another user’s MT5 account from phone.
+
+## Still fail-closed (live money)
+
+- Cases → risks → cost before trading-engine changes.
+- Never force-close on API lag / partial orphan alone.
+- Do not change open-basket logic mid-flight unless explicitly requested.
+- No global sub-second polling of all accounts.
+
+## Product surfaces for remote edit
+
+- App: `/bot`, `/manage`, `/manage/strategy`, `/admin`, `/connect`
+- Admin account picker + `?accountId=` / body `accountId` on strategy-bots/settings/bot/stats
+- Engine/scripts under `scripts/` and `src/lib/meta-engine.ts`

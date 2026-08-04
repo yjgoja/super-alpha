@@ -194,3 +194,46 @@ export async function deleteBrokerAccountForUser(userId: string, accountId: stri
 
   return { ok: true as const };
 }
+
+/**
+ * Resolve which broker account an API call may edit.
+ * - Default: caller's active account
+ * - Optional accountId: must be owned by caller, unless role is admin (any account)
+ */
+export async function resolveEditableBrokerAccount(opts: {
+  userId: string;
+  role: string;
+  accountId?: string | null;
+}) {
+  const requested = (opts.accountId || "").trim() || null;
+  if (requested) {
+    if (opts.role === "admin") {
+      return prisma.brokerAccount.findUnique({ where: { id: requested } });
+    }
+    return prisma.brokerAccount.findFirst({
+      where: { id: requested, userId: opts.userId },
+    });
+  }
+  return resolveActiveBrokerAccount(opts.userId);
+}
+
+/** Admin remote picker — compact list of all broker accounts. */
+export async function listAllBrokerAccountsForAdmin() {
+  return prisma.brokerAccount.findMany({
+    orderBy: [{ botEnabled: "desc" }, { updatedAt: "desc" }],
+    select: {
+      id: true,
+      displayName: true,
+      login: true,
+      server: true,
+      status: true,
+      botEnabled: true,
+      balance: true,
+      equity: true,
+      userId: true,
+      user: { select: { email: true, name: true } },
+      _count: { select: { baskets: { where: { status: "open" } } } },
+    },
+    take: 200,
+  });
+}

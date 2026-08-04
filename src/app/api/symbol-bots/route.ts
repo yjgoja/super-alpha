@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApprovedUser, requireUser, requireAdmin } from "@/lib/access";
 import { ensureTradingSchema, prisma } from "@/lib/db";
-import { resolveActiveBrokerAccount } from "@/lib/account-selection";
+import { resolveEditableBrokerAccount } from "@/lib/account-selection";
 import { gateErrorKo } from "@/lib/ko-errors";
 import { DCA1000_DEFAULT_SL_ROI, resolveTpSlUsd } from "@/lib/dca1000";
 import {
@@ -31,9 +31,9 @@ export const maxDuration = 30;
 /** 알파 지속 전체 회차(L0 포함) — 표에서 파생 (하드코딩 금지) */
 const DUBAI313_LEVEL_COUNT = tableLogicMeta("dubai_bruno_313").count;
 
-async function getAccount(userId: string) {
+async function getAccount(userId: string, role: string, accountId?: string | null) {
   // Explicit select so a pending Prisma column migration cannot 500 this route
-  const active = await resolveActiveBrokerAccount(userId);
+  const active = await resolveEditableBrokerAccount({ userId, role, accountId });
   if (!active) return null;
   return prisma.brokerAccount.findUnique({
     where: { id: active.id },
@@ -52,13 +52,14 @@ async function getAccount(userId: string) {
  * Fast read path — never run multi-pass per-bot migrations here.
  * Those loops timed out on Vercel and left Bot page stuck on "불러오는 중…".
  */
-export async function GET() {
+export async function GET(req: Request) {
   await ensureTradingSchema();
   const gate = await requireUser();
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
-  const account = await getAccount(gate.user.id);
+  const targetAccountId = new URL(req.url).searchParams.get("accountId");
+  const account = await getAccount(gate.user.id, gate.user.role, targetAccountId);
   if (!account) {
     return NextResponse.json({
       bots: [],
@@ -75,7 +76,8 @@ export async function GET() {
     orderBy: [{ symbol: "asc" }, { direction: "asc" }],
   });
 
-  if (bots.length === 0) {
+  // Never auto-seed when admin is remotely editing another user's account
+  if (bots.length === 0 && account.userId === gate.user.id) {
     const sustainedSl = resolveLiveStopLossPct("dubai_bruno_313");
     const eur = resolveTpSlUsd({
       symbol: "EURUSD",
@@ -134,6 +136,7 @@ export async function GET() {
 }
 
 const upsertSchema = z.object({
+  accountId: z.string().min(1).optional(),
   symbol: z.string().min(3).max(20),
   enabled: z.boolean().optional(),
   logic: z
@@ -168,13 +171,14 @@ export async function PUT(req: Request) {
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
-  const account = await getAccount(gate.user.id);
-  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
   const parsed = upsertSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: zodErrorKo(parsed.error) }, { status: 400 });
   }
+
+  const account = await getAccount(gate.user.id, gate.user.role, parsed.data.accountId);
+  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
 
   return withAccountToggleLock(account.id, async () => {
     const body = parsed.data;
@@ -420,11 +424,12 @@ export async function DELETE(req: Request) {
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
-  const account = await getAccount(gate.user.id);
-  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
   const { searchParams } = new URL(req.url);
   const symbol = searchParams.get("symbol");
   const direction = searchParams.get("direction");
+  const targetAccountId = searchParams.get("accountId");
+  const account = await getAccount(gate.user.id, gate.user.role, targetAccountId);
+  if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
   if (!symbol) return NextResponse.json({ error: "symbol 필요" }, { status: 400 });
   await prisma.symbolBot.deleteMany({
     where: {
