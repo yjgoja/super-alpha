@@ -298,6 +298,12 @@ export async function DELETE(req: Request) {
   if (!gate.user) {
     return NextResponse.json({ error: gateErrorKo(gate.error) }, { status: gate.status });
   }
+  if (gate.user.role !== "admin") {
+    return NextResponse.json(
+      { error: "전략 세부 파라미터는 변경할 수 없습니다." },
+      { status: 403 },
+    );
+  }
   const account = await getAccount(gate.user.id);
   if (!account) return NextResponse.json({ error: "계좌가 없습니다." }, { status: 400 });
   const logicId = new URL(req.url).searchParams.get("logic");

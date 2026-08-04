@@ -10,6 +10,7 @@ export default function MyPage() {
   const [email, setEmail] = useState("");
   const [login, setLogin] = useState("");
   const [linked, setLinked] = useState(false);
+  const [role, setRole] = useState("user");
   const [approvalStatus, setApprovalStatus] = useState<string>("approved");
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
   const [totalPnl, setTotalPnl] = useState(0);
@@ -33,6 +34,7 @@ export default function MyPage() {
       const pnl = await pnlRes.json().catch(() => ({}));
       setName(me.name || "");
       setEmail(me.email || "");
+      setRole(me.role || "user");
       setLogin(pnl.account?.login || me.account?.login || "");
       setLinked(Boolean(me.linked));
       setApprovalStatus(me.approvalStatus || "pending");
@@ -157,6 +159,47 @@ export default function MyPage() {
         </div>
         <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>
       </Link>
+
+      {role === "admin" && (
+        <>
+          <Link
+            href="/admin"
+            className="m-card"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.55rem",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700 }}>관리자 콘솔</div>
+              <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+                승인 · 연동 · 비용 · 회원 (폰 지원)
+              </div>
+            </div>
+            <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>
+          </Link>
+          <Link
+            href="/manage/strategy"
+            className="m-card"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.55rem",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700 }}>전략 상세 편집</div>
+              <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+                회차 · 익절/손절 · 오버라이드
+              </div>
+            </div>
+            <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>
+          </Link>
+        </>
+      )}
 
       <button
         type="button"

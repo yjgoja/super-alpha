@@ -363,7 +363,7 @@ export default function ManagePage() {
             <Link href="/manage/strategy" className="m-card" style={{ display: "block" }}>
               <div style={{ fontWeight: 650 }}>전략로직 상세설정</div>
               <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
-                선택 계좌 기준
+                선택 계좌 기준 · 관리자는 회차/TP·SL 편집
               </div>
             </Link>
             <button

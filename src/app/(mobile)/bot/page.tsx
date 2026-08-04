@@ -18,6 +18,16 @@ type Bot = {
   logicLabel?: string;
 };
 
+type LegacyConfig = {
+  baseLots: number;
+  profitTarget: number;
+  maxDcaLevel: number;
+  devScale: number;
+  reenterAfterTp: boolean;
+  reenterAfterSl: boolean;
+  enableFinalSl: boolean;
+};
+
 const LOT_SCALES = [2, 3, 5, 10] as const;
 
 function roundLots(n: number) {
@@ -40,6 +50,8 @@ export default function BotPage() {
   const [approved, setApproved] = useState(true);
   const [showConnect, setShowConnect] = useState(false);
   const [promptMode, setPromptMode] = useState<"connect" | "approval">("connect");
+  const [role, setRole] = useState("user");
+  const [legacy, setLegacy] = useState<LegacyConfig | null>(null);
 
   const used = useMemo(() => new Set(bots.map((b) => b.symbol)), [bots]);
   const editingBot = useMemo(() => bots.find((b) => b.id === edit) || null, [bots, edit]);
@@ -98,6 +110,8 @@ export default function BotPage() {
         window.location.href = "/pending";
         return;
       }
+      const nextRole = me.role || "user";
+      setRole(nextRole);
       setBots(Array.isArray(botsData.bots) ? botsData.bots : []);
       setBotEnabled(!!statsData.account?.botEnabled);
       setSkipOpenBurst(!!statsData.account?.skipOpenBurstEntries);
@@ -106,6 +120,26 @@ export default function BotPage() {
       );
       setLinked(isMt5Linked(statsData.account));
       setApproved(me.role === "admin" || me.approvalStatus === "approved");
+      if (nextRole === "admin") {
+        const fullRes = await fetch("/api/stats?full=1", { cache: "no-store" });
+        const full = await fullRes.json().catch(() => ({}));
+        const cfg = full.account?.config;
+        if (cfg) {
+          setLegacy({
+            baseLots: Number(cfg.baseLots) || 0.01,
+            profitTarget: Number(cfg.profitTarget) || 1,
+            maxDcaLevel: Number(cfg.maxDcaLevel) || 9,
+            devScale: Number(cfg.devScale) || 1,
+            reenterAfterTp: !!cfg.reenterAfterTp,
+            reenterAfterSl: !!cfg.reenterAfterSl,
+            enableFinalSl: !!cfg.enableFinalSl,
+          });
+        } else {
+          setLegacy(null);
+        }
+      } else {
+        setLegacy(null);
+      }
       if (!botsRes.ok && !statsRes.ok) {
         setMsg("데이터를 불러오지 못했습니다. 잠시 후 다시 시도하세요.");
       }
@@ -288,6 +322,40 @@ export default function BotPage() {
     }
     setEdit(null);
     setMsg("전략 설정을 저장했습니다. 다음 틱부터 엔진에 반영됩니다.");
+    await load();
+  }
+
+  async function saveLegacy(patch: Partial<LegacyConfig>) {
+    if (role !== "admin" || !legacy) return;
+    setBusy(true);
+    setMsg("");
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMsg(data.error || "레거시 설정 저장 실패");
+      return;
+    }
+    setLegacy((prev) => (prev ? { ...prev, ...patch } : prev));
+    setMsg("레거시 전략 설정을 저장했습니다.");
+  }
+
+  async function syncNow() {
+    if (role !== "admin") return;
+    setBusy(true);
+    setMsg("");
+    const res = await fetch("/api/stats", { method: "POST" });
+    setBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMsg(data.error || "동기화 실패");
+      return;
+    }
+    setMsg("지금 동기화 요청을 보냈습니다.");
     await load();
   }
 
@@ -539,6 +607,17 @@ export default function BotPage() {
             전체 중지
           </button>
         </div>
+        {role === "admin" && (
+          <button
+            type="button"
+            className="sa-btn sa-btn-ghost"
+            style={{ width: "100%", marginTop: "0.55rem", borderRadius: 12, padding: "0.65rem" }}
+            disabled={busy || !ready}
+            onClick={() => void syncNow()}
+          >
+            지금 동기화 (관리자)
+          </button>
+        )}
         {msg && (
           <p style={{ margin: "0.75rem 0 0", fontSize: "0.85rem", color: "var(--gold)" }}>{msg}</p>
         )}
@@ -888,6 +967,131 @@ export default function BotPage() {
               );
             })}
           </div>
+
+          {role === "admin" && legacy && (
+            <section className="m-card" style={{ marginTop: "0.85rem" }}>
+              <div style={{ fontWeight: 700, marginBottom: "0.35rem" }}>레거시 전략 설정 (관리자)</div>
+              <p style={{ margin: "0 0 0.75rem", fontSize: "0.75rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                PC 대시보드와 동일한 계좌급 설정입니다. 종목별 프리셋이 우선입니다.
+              </p>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "0.55rem",
+                }}
+              >
+                <label>
+                  <span className="sa-label">Base Lots</span>
+                  <input
+                    className="sa-input"
+                    type="number"
+                    step="0.01"
+                    value={legacy.baseLots}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setLegacy((c) => (c ? { ...c, baseLots: Number(e.target.value) } : c))
+                    }
+                    onBlur={(e) => void saveLegacy({ baseLots: Number(e.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span className="sa-label">익절 목표</span>
+                  <input
+                    className="sa-input"
+                    type="number"
+                    step="1"
+                    value={legacy.profitTarget}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setLegacy((c) => (c ? { ...c, profitTarget: Number(e.target.value) } : c))
+                    }
+                    onBlur={(e) => void saveLegacy({ profitTarget: Number(e.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span className="sa-label">Max DCA</span>
+                  <input
+                    className="sa-input"
+                    type="number"
+                    min={0}
+                    max={9}
+                    value={legacy.maxDcaLevel}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setLegacy((c) => (c ? { ...c, maxDcaLevel: Number(e.target.value) } : c))
+                    }
+                    onBlur={(e) => void saveLegacy({ maxDcaLevel: Number(e.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span className="sa-label">DevScale</span>
+                  <input
+                    className="sa-input"
+                    type="number"
+                    step="0.01"
+                    value={legacy.devScale}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setLegacy((c) => (c ? { ...c, devScale: Number(e.target.value) } : c))
+                    }
+                    onBlur={(e) => void saveLegacy({ devScale: Number(e.target.value) })}
+                  />
+                </label>
+              </div>
+              <div className="m-toggle-list" style={{ marginTop: "0.75rem" }}>
+                <button
+                  type="button"
+                  className={`m-toggle-row${legacy.reenterAfterTp ? " is-on" : ""}`}
+                  disabled={busy}
+                  onClick={() => void saveLegacy({ reenterAfterTp: !legacy.reenterAfterTp })}
+                >
+                  <span>
+                    <strong>익절 후 재진입</strong>
+                    <small>레거시 계좌 설정</small>
+                  </span>
+                  <em>{legacy.reenterAfterTp ? "켜짐" : "꺼짐"}</em>
+                </button>
+                <button
+                  type="button"
+                  className={`m-toggle-row${legacy.reenterAfterSl ? " is-on" : ""}`}
+                  disabled={busy}
+                  onClick={() => void saveLegacy({ reenterAfterSl: !legacy.reenterAfterSl })}
+                >
+                  <span>
+                    <strong>손절 후 재진입</strong>
+                    <small>레거시 계좌 설정</small>
+                  </span>
+                  <em>{legacy.reenterAfterSl ? "켜짐" : "꺼짐"}</em>
+                </button>
+                <button
+                  type="button"
+                  className={`m-toggle-row${legacy.enableFinalSl ? " is-on" : ""}`}
+                  disabled={busy}
+                  onClick={() => void saveLegacy({ enableFinalSl: !legacy.enableFinalSl })}
+                >
+                  <span>
+                    <strong>최종 DCA 손절</strong>
+                    <small>레거시 계좌 설정</small>
+                  </span>
+                  <em>{legacy.enableFinalSl ? "켜짐" : "꺼짐"}</em>
+                </button>
+              </div>
+              <a
+                href="/manage/strategy"
+                className="sa-btn sa-btn-primary"
+                style={{
+                  display: "block",
+                  textAlign: "center",
+                  marginTop: "0.85rem",
+                  borderRadius: 12,
+                  textDecoration: "none",
+                }}
+              >
+                전략 상세(회차·TP/SL) 편집
+              </a>
+            </section>
+          )}
         </>
       )}
     </>

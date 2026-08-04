@@ -42,7 +42,7 @@ function ConnectForm() {
         return;
       }
       const me = await res.json().catch(() => ({}));
-      if (me.role === "admin") {
+      if (me.role === "admin" && !add && !reapply) {
         router.replace("/admin");
         return;
       }

@@ -300,15 +300,21 @@ export default function AdminPage() {
   const approveCount = pendingServers.length + pendingMembers.length;
 
   return (
-    <main className="sa-shell py-8">
+    <main className="sa-shell py-8 pb-24">
       <header className="sa-nav">
         <div>
-          <Link href="/" className="font-display text-2xl">
+          <Link href="/home" className="font-display text-2xl">
             Super Alpha
           </Link>
-          <div className="mt-1 text-sm text-[var(--muted)]">관리자 콘솔</div>
+          <div className="mt-1 text-sm text-[var(--muted)]">관리자 콘솔 · 폰 지원</div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link href="/home" className="sa-btn sa-btn-ghost text-sm py-2 px-4">
+            앱
+          </Link>
+          <Link href="/manage/strategy" className="sa-btn sa-btn-ghost text-sm py-2 px-4">
+            전략
+          </Link>
           {(
             [
               ["dashboard", "대시보드"],
@@ -584,126 +590,215 @@ export default function AdminPage() {
       )}
 
       {tab === "members" && (
-        <section className="sa-panel mt-6 overflow-x-auto">
+        <section className="sa-panel mt-6">
           <h2 className="text-lg font-semibold">전체 회원</h2>
-          <table className="sa-table mt-4 min-w-[960px]">
-            <thead>
-              <tr>
-                <th>이메일</th>
-                <th>회원상태</th>
-                <th>MT5</th>
-                <th>연동</th>
-                <th>Equity</th>
-                <th>처리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const a = u.accounts[0];
-                return (
-                  <tr key={u.id}>
-                    <td>
-                      <button className="text-[var(--gold)]" onClick={() => openDetail(u.id)}>
-                        {u.email}
-                      </button>
-                      <div className="text-xs text-[var(--muted)]">
-                        {u.role} · {new Date(u.createdAt).toLocaleDateString("ko-KR")}
-                      </div>
-                    </td>
-                    <td>
-                      <span
-                        className={`text-xs ${
-                          u.approvalStatus === "approved"
-                            ? "text-[var(--ok)]"
-                            : u.approvalStatus === "rejected"
-                              ? "text-[var(--danger)]"
-                              : "text-[var(--warn)]"
-                        }`}
+
+          {/* Phone: card list */}
+          <div className="mt-4 space-y-3 md:hidden">
+            {users.map((u) => {
+              const a = u.accounts[0];
+              return (
+                <div
+                  key={u.id}
+                  className="rounded-2xl border border-[var(--line)] p-4"
+                >
+                  <button
+                    type="button"
+                    className="text-left font-medium text-[var(--gold)]"
+                    onClick={() => openDetail(u.id)}
+                  >
+                    {u.email}
+                  </button>
+                  <div className="mt-1 text-xs text-[var(--muted)]">
+                    {u.role} · {u.approvalStatus} ·{" "}
+                    {new Date(u.createdAt).toLocaleDateString("ko-KR")}
+                  </div>
+                  <div className="mt-2 text-sm text-[var(--muted)]">
+                    {a
+                      ? `${a.login} · ${a.status}${a.botEnabled ? " · BOT" : ""} · $${a.equity.toFixed(2)}`
+                      : "계좌 없음"}
+                    {u.accounts.length > 1 ? ` · 외 ${u.accounts.length - 1}` : ""}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className="sa-btn sa-btn-ghost text-xs py-2 px-3"
+                      onClick={() => openDetail(u.id)}
+                    >
+                      상세
+                    </button>
+                    {u.approvalStatus === "pending" && u.role !== "admin" && (
+                      <button
+                        className="sa-btn sa-btn-primary text-xs py-2 px-3"
+                        disabled={busy === `ap-${u.id}`}
+                        onClick={() =>
+                          patch({ userId: u.id, approvalStatus: "approved" }, `ap-${u.id}`)
+                        }
                       >
-                        {u.approvalStatus}
-                      </span>
-                      {u.approvalStatus === "pending" && u.role !== "admin" && (
-                        <div className="mt-1 flex gap-1">
-                          <button
-                            className="sa-btn sa-btn-primary text-xs py-1 px-2"
-                            disabled={busy === `ap-${u.id}`}
-                            onClick={() =>
-                              patch({ userId: u.id, approvalStatus: "approved" }, `ap-${u.id}`)
-                            }
-                          >
-                            승인
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="text-[var(--muted)]">
-                      {a
-                        ? u.accounts.length > 1
-                          ? `${a.login} 외 ${u.accounts.length - 1}`
-                          : a.login
-                        : "-"}
-                    </td>
-                    <td>
-                      {a ? (
-                        <span className="text-xs">
-                          {a.status}
-                          {a.botEnabled ? " · BOT" : ""}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td>{a ? `$${a.equity.toFixed(2)}` : "-"}</td>
-                    <td>
-                      <div className="flex flex-wrap gap-2">
+                        승인
+                      </button>
+                    )}
+                    {a &&
+                      u.approvalStatus === "approved" &&
+                      (a.status === "pending_registration" ||
+                        a.status === "provisioning" ||
+                        a.status === "failed") && (
                         <button
-                          className="sa-btn sa-btn-ghost text-xs py-2 px-3"
-                          onClick={() => openDetail(u.id)}
+                          className="sa-btn sa-btn-primary text-xs py-2 px-3"
+                          disabled={busy === a.id}
+                          onClick={() =>
+                            patch({ accountId: a.id, action: "provision" }, a.id)
+                          }
                         >
-                          상세
+                          {provisionButtonLabel(a.status, a.statusMessage, busy === a.id)}
                         </button>
-                        {a &&
-                          u.approvalStatus === "approved" &&
-                          (a.status === "pending_registration" ||
-                            a.status === "provisioning" ||
-                            a.status === "failed") && (
+                      )}
+                    {a?.metaApiAccountId && a.status === "connected" && (
+                      <button
+                        className="sa-btn sa-btn-ghost text-xs py-2 px-3"
+                        disabled={busy === `u-${a.id}`}
+                        onClick={() =>
+                          patch({ accountId: a.id, action: "undeploy" }, `u-${a.id}`)
+                        }
+                      >
+                        클라우드 중지
+                      </button>
+                    )}
+                    {u.role !== "admin" && (
+                      <button
+                        className="sa-btn sa-btn-danger text-xs py-2 px-3"
+                        disabled={busy === `del-${u.id}`}
+                        onClick={() => deleteUser(u.id, u.email)}
+                      >
+                        삭제
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="mt-4 hidden overflow-x-auto md:block">
+            <table className="sa-table min-w-[960px]">
+              <thead>
+                <tr>
+                  <th>이메일</th>
+                  <th>회원상태</th>
+                  <th>MT5</th>
+                  <th>연동</th>
+                  <th>Equity</th>
+                  <th>처리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => {
+                  const a = u.accounts[0];
+                  return (
+                    <tr key={u.id}>
+                      <td>
+                        <button className="text-[var(--gold)]" onClick={() => openDetail(u.id)}>
+                          {u.email}
+                        </button>
+                        <div className="text-xs text-[var(--muted)]">
+                          {u.role} · {new Date(u.createdAt).toLocaleDateString("ko-KR")}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={`text-xs ${
+                            u.approvalStatus === "approved"
+                              ? "text-[var(--ok)]"
+                              : u.approvalStatus === "rejected"
+                                ? "text-[var(--danger)]"
+                                : "text-[var(--warn)]"
+                          }`}
+                        >
+                          {u.approvalStatus}
+                        </span>
+                        {u.approvalStatus === "pending" && u.role !== "admin" && (
+                          <div className="mt-1 flex gap-1">
                             <button
-                              className="sa-btn sa-btn-primary text-xs py-2 px-3"
-                              disabled={busy === a.id}
+                              className="sa-btn sa-btn-primary text-xs py-1 px-2"
+                              disabled={busy === `ap-${u.id}`}
                               onClick={() =>
-                                patch({ accountId: a.id, action: "provision" }, a.id)
+                                patch({ userId: u.id, approvalStatus: "approved" }, `ap-${u.id}`)
                               }
                             >
-                              {provisionButtonLabel(a.status, a.statusMessage, busy === a.id)}
+                              승인
                             </button>
-                          )}
-                        {a?.metaApiAccountId && a.status === "connected" && (
+                          </div>
+                        )}
+                      </td>
+                      <td className="text-[var(--muted)]">
+                        {a
+                          ? u.accounts.length > 1
+                            ? `${a.login} 외 ${u.accounts.length - 1}`
+                            : a.login
+                          : "-"}
+                      </td>
+                      <td>
+                        {a ? (
+                          <span className="text-xs">
+                            {a.status}
+                            {a.botEnabled ? " · BOT" : ""}
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td>{a ? `$${a.equity.toFixed(2)}` : "-"}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-2">
                           <button
                             className="sa-btn sa-btn-ghost text-xs py-2 px-3"
-                            disabled={busy === `u-${a.id}`}
-                            onClick={() =>
-                              patch({ accountId: a.id, action: "undeploy" }, `u-${a.id}`)
-                            }
+                            onClick={() => openDetail(u.id)}
                           >
-                            클라우드 중지
+                            상세
                           </button>
-                        )}
-                        {u.role !== "admin" && (
-                          <button
-                            className="sa-btn sa-btn-danger text-xs py-2 px-3"
-                            disabled={busy === `del-${u.id}`}
-                            onClick={() => deleteUser(u.id, u.email)}
-                          >
-                            삭제
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          {a &&
+                            u.approvalStatus === "approved" &&
+                            (a.status === "pending_registration" ||
+                              a.status === "provisioning" ||
+                              a.status === "failed") && (
+                              <button
+                                className="sa-btn sa-btn-primary text-xs py-2 px-3"
+                                disabled={busy === a.id}
+                                onClick={() =>
+                                  patch({ accountId: a.id, action: "provision" }, a.id)
+                                }
+                              >
+                                {provisionButtonLabel(a.status, a.statusMessage, busy === a.id)}
+                              </button>
+                            )}
+                          {a?.metaApiAccountId && a.status === "connected" && (
+                            <button
+                              className="sa-btn sa-btn-ghost text-xs py-2 px-3"
+                              disabled={busy === `u-${a.id}`}
+                              onClick={() =>
+                                patch({ accountId: a.id, action: "undeploy" }, `u-${a.id}`)
+                              }
+                            >
+                              클라우드 중지
+                            </button>
+                          )}
+                          {u.role !== "admin" && (
+                            <button
+                              className="sa-btn sa-btn-danger text-xs py-2 px-3"
+                              disabled={busy === `del-${u.id}`}
+                              onClick={() => deleteUser(u.id, u.email)}
+                            >
+                              삭제
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
