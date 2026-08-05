@@ -10,6 +10,7 @@ on:
       - "src/lib/metaapi.ts"
       - "src/lib/metaapi-stream.ts"
       - "src/lib/meta-engine.ts"
+      - "src/lib/bot-resolve.ts"
       - "src/lib/engine-*.ts"
       - "scripts/tick-direct.ts"
       - "scripts/stream-open-baskets.ts"
