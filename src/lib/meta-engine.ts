@@ -65,6 +65,14 @@ import {
   isH8OpenMinute,
   isInH8EntryQuiet,
 } from "./session-h8";
+import {
+  hasEnabledTraderForSide,
+  mergeNeededSide,
+  resolveEnabledFixedBotForSide,
+  resolveSymbolBotForSide,
+  shouldDisableOnSideStop,
+  type NeededSide,
+} from "./bot-resolve";
 import { syncTodayPnlFromMt5Deals } from "./mt5-pnl-sync";
 import { setAccountLiveState } from "./state-cache";
 import {
@@ -1387,18 +1395,25 @@ async function noteSessionTradeBackoff(opts: {
   });
 }
 
-/** 손절후중지 / 익절후미반복 — dualDirection 행까지 함께 끔 */
+/** 손절후중지 / 익절후미반복 — dualDirection 행까지 함께 끔 (H8 time 제외) */
 async function disableSymbolBotSide(
   accountId: string,
   symbol: string,
   direction: "BUY" | "SELL",
 ) {
-  await prisma.symbolBot.updateMany({
+  const rows = await prisma.symbolBot.findMany({
     where: {
       accountId,
       symbol,
+      enabled: true,
       OR: [{ direction }, { dualDirection: true }],
     },
+    select: { id: true, logic: true, direction: true, dualDirection: true, enabled: true, symbol: true },
+  });
+  const ids = rows.filter(shouldDisableOnSideStop).map((r) => r.id);
+  if (ids.length === 0) return;
+  await prisma.symbolBot.updateMany({
+    where: { id: { in: ids } },
     data: { enabled: false },
   });
 }
@@ -1659,16 +1674,16 @@ async function healGhostBaskets(
         where: { id: accountId },
         data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
       });
-      // Broker-side TP left DB ghost — reenter L0 immediately when bot/symbol still ON.
-      const bot = await prisma.symbolBot.findFirst({
-        where: {
-          accountId,
-          symbol: g.symbol,
-          enabled: true,
-          OR: [{ direction: dir }, { dualDirection: true }],
-        },
+      // Broker-side TP left DB ghost — reenter L0 only for enabled fixed logics (never H8 time).
+      const sideBots = await prisma.symbolBot.findMany({
+        where: { accountId, symbol: g.symbol },
       });
-      if (bot && bot.repeatEnabled !== false) {
+      const bot = resolveEnabledFixedBotForSide({
+        bots: sideBots,
+        symbol: g.symbol,
+        direction: dir,
+      });
+      if (bot && bot.repeatEnabled !== false && !isMartin9TimeLogic(bot.logic)) {
         const logic = bot.logic || "dubai_bruno_313";
         const lots = Math.max(0.01, Number(bot.startLots || 0.01));
         const tpRoi = resolveLiveTakeProfitPct(logic, bot.takeProfitPct ?? 0);
@@ -1696,12 +1711,19 @@ async function healGhostBaskets(
         where: { id: accountId },
         data: { slCount: { increment: 1 } },
       });
-      // stopOnSl: best-effort disable matching symbol bots
+      // stopOnSl: best-effort disable matching fixed symbol bots (never H8 time)
       const bots = await prisma.symbolBot.findMany({
         where: { accountId, symbol: g.symbol, stopOnSl: true },
-        select: { direction: true, dualDirection: true },
+        select: {
+          symbol: true,
+          direction: true,
+          dualDirection: true,
+          enabled: true,
+          logic: true,
+        },
       });
       for (const b of bots) {
+        if (!shouldDisableOnSideStop(b)) continue;
         if (b.dualDirection || (b.direction === "SELL" ? "SELL" : "BUY") === dir) {
           await disableSymbolBotSide(accountId, g.symbol, dir);
         }
@@ -4041,49 +4063,56 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
     manageOnly,
   });
 
-  const botByKey = new Map(
-    account.symbolBots.map((b) => [`${b.symbol}|${b.direction === "SELL" ? "SELL" : "BUY"}`, b]),
-  );
-
   // 활성 봇 + 열린 바스켓(꺼진 종목 포함) 전부 틱 대상
   const forceManageOnly = resolveForceManageOnly(opts);
-  const needed = new Map<string, { manageOnly: boolean }>();
+  const needed = new Map<string, NeededSide>();
   if (!forceManageOnly) {
     for (const b of account.symbolBots) {
       if (!b.enabled) continue;
       const logic = normalizeLogicId(b.logic);
       // H8 time: single basket per symbol (ignore dualDirection + DB direction).
-      // Do not default direction to BUY — that key-matches a disabled 313 BUY row
-      // and opens new risk under the wrong logic (seen on godcjfl).
+      // Claim side with ownerLogic so a disabled 313 BUY row cannot steal ENTRY.
       if (isMartin9TimeLogic(logic)) {
         const st = h8SessionState.get(h8StateKey(account.id, b.symbol, logic));
         const dir = st?.direction;
         if (dir === "BUY" || dir === "SELL") {
-          needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+          const key = `${b.symbol}|${dir}`;
+          needed.set(
+            key,
+            mergeNeededSide(needed.get(key), {
+              manageOnly: !masterOn,
+              ownerLogic: logic,
+            }),
+          );
         }
         continue;
       }
       const dir = b.direction === "SELL" ? "SELL" : "BUY";
-      if (b.dualDirection) {
-        needed.set(`${b.symbol}|BUY`, { manageOnly: !masterOn });
-        needed.set(`${b.symbol}|SELL`, { manageOnly: !masterOn });
-      } else {
-        needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+      const sides = b.dualDirection ? (["BUY", "SELL"] as const) : [dir];
+      for (const side of sides) {
+        const key = `${b.symbol}|${side}`;
+        needed.set(
+          key,
+          mergeNeededSide(needed.get(key), {
+            manageOnly: !masterOn,
+            ownerLogic: logic,
+          }),
+        );
       }
     }
   }
   for (const basket of openBaskets) {
-    const dir = basket.direction === "SELL" ? "SELL" : "BUY";
+    const dir = (basket.direction === "SELL" ? "SELL" : "BUY") as "BUY" | "SELL";
     const key = `${basket.symbol}|${dir}`;
-    const row = botByKey.get(key);
-    const manageOnly = forceManageOnly || !masterOn || !row?.enabled;
     const prev = needed.get(key);
-    if (!prev) {
-      needed.set(key, { manageOnly });
-    } else if (manageOnly) {
-      // 열린 바스켓이 있으면 OFF여도 manageOnly 유지
-      needed.set(key, { manageOnly: true });
-    }
+    const canTrade = hasEnabledTraderForSide(
+      account.symbolBots,
+      basket.symbol,
+      dir,
+      prev?.ownerLogic,
+    );
+    const manageOnly = forceManageOnly || !masterOn || !canTrade;
+    needed.set(key, mergeNeededSide(prev, { manageOnly, ownerLogic: prev?.ownerLogic }));
   }
 
   // MT5에만 남은 포지션(DB 바스켓 없음)도 익절·손절 관리 대상에 포함
@@ -4098,40 +4127,53 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
       }
     }
     if (matchedKey) continue;
-    const row = account.symbolBots.find(
-      (b) =>
-        symbolsMatch(b.symbol, p.symbol) &&
-        (b.dualDirection || (b.direction === "SELL" ? "SELL" : "BUY") === dir),
-    );
+    const row = resolveSymbolBotForSide({
+      bots: account.symbolBots,
+      symbol: p.symbol,
+      direction: dir,
+      manageOnly: true,
+    });
     const key = `${row?.symbol || p.symbol}|${dir}`;
-    needed.set(key, { manageOnly: true });
+    needed.set(key, mergeNeededSide(needed.get(key), { manageOnly: true }));
   }
 
   let bots: BotCfg[] = [];
-  for (const [key, { manageOnly }] of needed) {
-    const [symbol, direction] = key.split("|") as [string, string];
-    // Enabled H8 time row wins over same-symbol BUY/SELL preset rows.
-    // Otherwise botByKey("XAUUSD|BUY") picks a disabled 313 and enters as 313.
-    let row =
-      account.symbolBots.find(
-        (b) =>
-          b.enabled &&
-          symbolsMatch(b.symbol, symbol) &&
-          isMartin9TimeLogic(b.logic),
-      ) || botByKey.get(key);
-    if (!row) {
-      // dualDirection 단일 행이 BUY|SELL 둘 다 커버하는 경우
-      // 또는 H8 time 로직 (DB direction ≠ 세션 direction)
-      row = account.symbolBots.find(
-        (b) =>
-          symbolsMatch(b.symbol, symbol) &&
-          (isMartin9TimeLogic(b.logic) ||
-            (b as { dualDirection?: boolean }).dualDirection ||
-            (b.direction === "SELL" ? "SELL" : "BUY") === direction),
-      );
-    }
+  for (const [key, side] of needed) {
+    const [symbol, direction] = key.split("|") as [string, "BUY" | "SELL"];
+    const manageOnly = side.manageOnly;
+    const row = resolveSymbolBotForSide({
+      bots: account.symbolBots,
+      symbol,
+      direction,
+      manageOnly,
+      ownerLogic: side.ownerLogic,
+    });
     if (row) {
+      // Fail-closed: never map new risk onto a disabled / non-owner row.
+      if (!manageOnly && !row.enabled) {
+        console.error(
+          `[engine] refuse new-risk bind disabled bot account=${account.id} ${symbol} ${direction} logic=${row.logic}`,
+        );
+        continue;
+      }
+      if (
+        !manageOnly &&
+        side.ownerLogic &&
+        normalizeLogicId(row.logic) !== normalizeLogicId(side.ownerLogic)
+      ) {
+        console.error(
+          `[engine] refuse logic mismatch account=${account.id} ${symbol} ${direction} want=${side.ownerLogic} got=${row.logic}`,
+        );
+        continue;
+      }
       bots.push({ ...mapBotRow(row, manageOnly, direction), dualDirection: false });
+      continue;
+    }
+    if (!manageOnly) {
+      // No enabled owner row — skip ENTRY rather than invent a wrong logic.
+      console.error(
+        `[engine] refuse new-risk no owner row account=${account.id} ${symbol} ${direction} owner=${side.ownerLogic || "-"}`,
+      );
       continue;
     }
     // 바스켓만 있고 SymbolBot 행이 없으면 기본 설정으로 관리만
