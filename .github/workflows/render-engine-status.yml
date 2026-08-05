@@ -17,3 +17,9 @@ jobs:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           RENDER_SERVICE_NAME: super-alpha-engine
         run: npx tsx scripts/render-deploy.ts --status
+      - name: Recent logs + FATAL
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_SERVICE_NAME: super-alpha-engine
+        run: npx tsx scripts/_render-engine-logs.ts
