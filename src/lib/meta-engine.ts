@@ -4052,11 +4052,15 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
     for (const b of account.symbolBots) {
       if (!b.enabled) continue;
       const logic = normalizeLogicId(b.logic);
-      // H8 time: single basket per symbol (ignore dualDirection + DB direction)
+      // H8 time: single basket per symbol (ignore dualDirection + DB direction).
+      // Do not default direction to BUY — that key-matches a disabled 313 BUY row
+      // and opens new risk under the wrong logic (seen on godcjfl).
       if (isMartin9TimeLogic(logic)) {
         const st = h8SessionState.get(h8StateKey(account.id, b.symbol, logic));
-        const dir = st?.direction || "BUY";
-        needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+        const dir = st?.direction;
+        if (dir === "BUY" || dir === "SELL") {
+          needed.set(`${b.symbol}|${dir}`, { manageOnly: !masterOn });
+        }
         continue;
       }
       const dir = b.direction === "SELL" ? "SELL" : "BUY";
@@ -4106,13 +4110,21 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
   let bots: BotCfg[] = [];
   for (const [key, { manageOnly }] of needed) {
     const [symbol, direction] = key.split("|") as [string, string];
-    let row = botByKey.get(key);
+    // Enabled H8 time row wins over same-symbol BUY/SELL preset rows.
+    // Otherwise botByKey("XAUUSD|BUY") picks a disabled 313 and enters as 313.
+    let row =
+      account.symbolBots.find(
+        (b) =>
+          b.enabled &&
+          symbolsMatch(b.symbol, symbol) &&
+          isMartin9TimeLogic(b.logic),
+      ) || botByKey.get(key);
     if (!row) {
       // dualDirection 단일 행이 BUY|SELL 둘 다 커버하는 경우
       // 또는 H8 time 로직 (DB direction ≠ 세션 direction)
       row = account.symbolBots.find(
         (b) =>
-          b.symbol === symbol &&
+          symbolsMatch(b.symbol, symbol) &&
           (isMartin9TimeLogic(b.logic) ||
             (b as { dualDirection?: boolean }).dualDirection ||
             (b.direction === "SELL" ? "SELL" : "BUY") === direction),
