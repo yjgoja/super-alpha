@@ -11,10 +11,24 @@ Owner instructs from the **Cursor mobile app** (often on a private worker PC). T
 
 | Project | Path | Phone instruct examples |
 |---------|------|-------------------------|
+| **영상자동화 (롱폼 유튜브)** | `C:\Users\yjgoj\영상자동화` · repo `yjgoja/video-automation` | 영상 1편 만들어, make-daily, status |
 | Trading app / engine | `src/`, `scripts/`, MetaAPI | 봇 켜/꺼, 전략 수정, 엔진 고치기 |
 | Logic factory | `scripts/lab/`, invent24 | 팩토리 상태, invent 재시작 |
-| Naver blog SEO (콘텐츠·이미지 자동화) | `naver-blog-seo/` | 글 1건 생성, 스케줄, dry-run |
-| Ads / brand assets | `toss-ads-*.png`, scripts | 아이콘·배너 수정 |
+| Naver blog SEO | `naver-blog-seo/` | 글 1건 생성, 스케줄 |
+
+## Critical routing
+
+If the user says **영상 / 유튜브 / 롱폼 / 영상자동화**, leave Super Alpha trading and operate on:
+
+```powershell
+cd C:\Users\yjgoj\영상자동화
+python scripts/remote_ctl.py status
+python scripts/remote_ctl.py make-one
+python scripts/remote_ctl.py make-daily
+python scripts/remote_ctl.py stop
+```
+
+Do not build Super Alpha UI as a substitute for video automation.
 
 ## Do
 
