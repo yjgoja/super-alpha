@@ -6,6 +6,7 @@ import assert from "assert";
 import {
   assertTradingDatabase,
   isFatalEngineError,
+  isTransientDbError,
   isCloudColdError,
   parseDatabaseHost,
 } from "../src/lib/engine-guard";
@@ -47,7 +48,19 @@ assert.ok(
     new Error("ERROR: Your account or project has exceeded the compute time quota."),
   ),
 );
-assert.ok(isFatalEngineError(new Error("P1001: Can't reach database server")));
+// Render Postgres restart — stay alive, do not exit/email-spam
+assert.ok(
+  isTransientDbError(
+    new Error("Error querying the database: FATAL: the database system is starting up"),
+  ),
+);
+assert.ok(!isFatalEngineError(new Error("P1001: Can't reach database server")));
+assert.ok(isTransientDbError(new Error("P1001: Can't reach database server")));
+assert.ok(
+  isFatalEngineError(
+    new Error("[engine-guard] DATABASE_URL 없음 — 엔진을 시작할 수 없습니다."),
+  ),
+);
 assert.ok(isCloudColdError("계좌 정보를 가져오지 못했습니다. 클라우드가 켜져 있는지 확인하세요."));
 assert.ok(!isCloudColdError("spread too wide"));
 

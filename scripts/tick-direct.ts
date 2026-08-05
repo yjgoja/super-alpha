@@ -16,6 +16,7 @@ import { prisma } from "../src/lib/db";
 import {
   assertTradingDatabase,
   isFatalEngineError,
+  isTransientDbError,
 } from "../src/lib/engine-guard";
 import { runAllBots, runDcaTick } from "../src/lib/meta-engine";
 import { logMetaApiHttpWindow } from "../src/lib/metaapi-metrics";
@@ -67,11 +68,22 @@ const MAX_CONSECUTIVE_FAILS = Math.max(
   3,
   Number(process.env.ENGINE_MAX_CONSECUTIVE_FAILS || 8),
 );
+/** Keep process alive through Render Postgres restarts before giving up. */
+const TRANSIENT_DB_GIVE_UP_MS = Math.max(
+  30_000,
+  Number(process.env.ENGINE_DB_TRANSIENT_GIVE_UP_MS || 5 * 60_000),
+);
+const DB_BOOT_WAIT_MS = Math.max(
+  10_000,
+  Number(process.env.ENGINE_DB_BOOT_WAIT_MS || 3 * 60_000),
+);
 
 let running = false;
 let ticks = 0;
 let consecutiveFails = 0;
 let shuttingDown = false;
+/** First transient DB error timestamp in the current streak (null = healthy). */
+let transientDbSince: number | null = null;
 
 function ensureOutDir() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -149,12 +161,33 @@ async function clearStaleTickLocks() {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function preflight() {
   const { host } = assertTradingDatabase();
-  await pingDatabase();
-  await clearStaleTickLocks();
-  console.log(`[direct] DB ok host=${host}`);
-  return host;
+  const deadline = Date.now() + DB_BOOT_WAIT_MS;
+  let attempt = 0;
+  for (;;) {
+    attempt += 1;
+    try {
+      await pingDatabase();
+      await clearStaleTickLocks();
+      transientDbSince = null;
+      console.log(`[direct] DB ok host=${host}`);
+      return host;
+    } catch (e) {
+      if (!isTransientDbError(e)) throw e;
+      const left = deadline - Date.now();
+      if (left <= 0) throw e;
+      console.warn(
+        `[direct] DB not ready (attempt ${attempt}) — retry in 5s (${Math.ceil(left / 1000)}s left)`,
+        e instanceof Error ? e.message : e,
+      );
+      await sleep(Math.min(5000, left));
+    }
+  }
 }
 
 function fatalExit(reason: unknown, code = 1): never {
@@ -274,6 +307,7 @@ async function tick() {
     const results = await runAllBots();
     ticks += 1;
     consecutiveFails = 0;
+    transientDbSince = null;
     const summary = JSON.stringify(results).slice(0, 600);
     console.log(
       `[direct] #${ticks} ${Date.now() - t0}ms accounts=${results.length}`,
@@ -319,7 +353,24 @@ async function tick() {
       ok: false,
       error: String(e instanceof Error ? e.message : e),
     });
-    if (isFatalEngineError(e) || consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+    if (isFatalEngineError(e)) {
+      fatalExit(e);
+    }
+    if (isTransientDbError(e)) {
+      if (transientDbSince == null) transientDbSince = Date.now();
+      const waited = Date.now() - transientDbSince;
+      if (waited >= TRANSIENT_DB_GIVE_UP_MS) {
+        fatalExit(
+          `transient DB errors for ${Math.round(waited / 1000)}s — ${e instanceof Error ? e.message : e}`,
+        );
+      }
+      console.warn(
+        `[direct] transient DB — stay alive (${Math.round(waited / 1000)}s / ${Math.round(TRANSIENT_DB_GIVE_UP_MS / 1000)}s)`,
+      );
+      return;
+    }
+    transientDbSince = null;
+    if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
       fatalExit(e);
     }
   } finally {
@@ -337,8 +388,21 @@ function setupSignals() {
   };
   process.on("SIGINT", () => stop("SIGINT"));
   process.on("SIGTERM", () => stop("SIGTERM"));
-  process.on("uncaughtException", (e) => fatalExit(e));
-  process.on("unhandledRejection", (e) => fatalExit(e));
+  process.on("uncaughtException", (e) => {
+    if (isTransientDbError(e) && !isFatalEngineError(e)) {
+      console.error("[direct] uncaughtException transient DB — not exiting", e);
+      return;
+    }
+    fatalExit(e);
+  });
+  process.on("unhandledRejection", (e) => {
+    // MetaAPI / brief Postgres blips must not recycle the Render instance (email spam).
+    if (isTransientDbError(e) || !isFatalEngineError(e)) {
+      console.error("[direct] unhandledRejection (non-fatal)", e);
+      return;
+    }
+    fatalExit(e);
+  });
 }
 
 async function main() {

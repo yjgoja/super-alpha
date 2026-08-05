@@ -113,7 +113,22 @@ async function resolveServiceId(): Promise<string> {
   );
 }
 
+async function disableAutoDeploy(serviceId: string) {
+  // Prevent every master push from recycling the worker (exit emails).
+  const { status, data } = await api("PATCH", `/services/${serviceId}`, {
+    autoDeploy: "no",
+  });
+  if (status >= 400) {
+    console.warn(
+      `[render-deploy] autoDeploy=no PATCH HTTP ${status}: ${JSON.stringify(data).slice(0, 240)}`,
+    );
+    return;
+  }
+  console.log(`[render-deploy] autoDeploy=no ok`);
+}
+
 async function syncEnv(serviceId: string) {
+  await disableAutoDeploy(serviceId);
   // NEVER bulk-replace env-vars — that deletes DATABASE_URL / METAAPI_TOKEN.
   // Per-key PUT upserts only the keys we manage.
   for (const [key, value] of Object.entries(REQUIRED_ENV)) {

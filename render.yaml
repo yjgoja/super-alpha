@@ -10,7 +10,9 @@ services:
     plan: starter
     region: ohio
     branch: master
-    autoDeploy: true
+    # Deploys only via GitHub Actions (render-deploy.ts) — every master push
+    # used to recycle the worker and spam "Exited with status 1" emails.
+    autoDeploy: false
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -74,7 +76,7 @@ services:
     plan: starter
     region: ohio
     branch: master
-    autoDeploy: true
+    autoDeploy: false
     envVars:
       - key: DATABASE_URL
         fromDatabase:

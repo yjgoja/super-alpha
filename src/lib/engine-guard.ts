@@ -1,6 +1,10 @@
 /**
  * Live-trading engine safety: refuse serverless Neon, validate DB, classify fatal errors.
  * Neon Free quota kills the engine while positions stay open — never allow that path.
+ *
+ * Transient DB blips (Render Postgres "starting up", brief disconnects) must NOT
+ * process.exit — that spams Render "Exited with status 1" emails and opens a
+ * manage gap. Retry in-process; only hard config/quota failures exit immediately.
  */
 
 const BLOCKED_DB_HOST_RE =
@@ -54,35 +58,62 @@ export function assertTradingDatabase(env: NodeJS.ProcessEnv = process.env): {
   return { host };
 }
 
-/** Errors that mean trading must stop until env/infra is fixed (exit + supervisor restart). */
-export function isFatalEngineError(err: unknown): boolean {
-  const msg = String(
+function errorText(err: unknown): string {
+  return String(
     err instanceof Error ? `${err.name} ${err.message}` : err ?? "",
   ).toLowerCase();
+}
+
+/**
+ * Brief Postgres / network blips — keep process alive and retry.
+ * Includes Render DB restarts: "FATAL: the database system is starting up".
+ */
+export function isTransientDbError(err: unknown): boolean {
+  const msg = errorText(err);
+  const needles = [
+    "the database system is starting up",
+    "can't reach database server",
+    "cannot reach database server",
+    "connection terminated",
+    "server closed the connection",
+    "connection reset",
+    "econnreset",
+    "econnrefused",
+    "enotfound",
+    "etimedout",
+    "timed out",
+    "p1001",
+    "p1002",
+    "p1008",
+    "p1017",
+    "too many connections",
+    "remaining connection slots",
+    "connection pool timeout",
+    "timed out fetching a new connection",
+  ];
+  return needles.some((n) => msg.includes(n));
+}
+
+/**
+ * Hard failures that need human/env fix — process should exit.
+ * Transient DB/network errors are NOT fatal (see isTransientDbError).
+ */
+export function isFatalEngineError(err: unknown): boolean {
+  if (isTransientDbError(err)) return false;
+  const msg = errorText(err);
 
   const needles = [
     "exceeded the compute time quota",
     "compute time quota",
-    "neon",
-    "can't reach database server",
-    "cannot reach database server",
     "password authentication failed",
     "authentication failed against database",
-    "too many connections",
-    "remaining connection slots",
-    "connection terminated",
-    "server closed the connection",
-    "econnrefused",
-    "enotfound",
-    "etimedout",
-    "p1001",
-    "p1002",
-    "p1003",
-    "p1008",
-    "p1017",
     "engine-guard",
     "database_url",
   ];
+  // Neon quota / serverless path — only when not already classified transient
+  if (msg.includes("neon") && (msg.includes("quota") || msg.includes("compute"))) {
+    return true;
+  }
   return needles.some((n) => msg.includes(n));
 }
 
