@@ -1,18 +1,42 @@
 ---
-description: Mobile/remote Cursor — full repo edit parity with desktop
+description: Mobile/remote Cursor — all projects full authority like PC
 alwaysApply: true
 ---
 
-# Mobile / remote Cursor ops
+# Mobile / remote Cursor ops (all projects)
 
-Owner often edits from the **Cursor mobile app** while away from the PC. Treat mobile-sourced requests as **full desktop authority** over this repo.
+Owner instructs from the **Cursor mobile app** (often on a private worker PC). Treat requests as **full desktop authority** across every project in this workspace.
+
+## Projects in scope
+
+| Project | Path | Phone instruct examples |
+|---------|------|-------------------------|
+| Trading app / engine | `src/`, `scripts/`, MetaAPI | 봇 켜/꺼, 전략 수정, 엔진 고치기 |
+| Logic factory | `scripts/lab/`, invent24 | 팩토리 상태, invent 재시작 |
+| Naver blog SEO (콘텐츠·이미지 자동화) | `naver-blog-seo/` | 글 1건 생성, 스케줄, dry-run |
+| Ads / brand assets | `toss-ads-*.png`, scripts | 아이콘·배너 수정 |
 
 ## Do
 
-- Edit any area the user names: engine, MetaAPI, protect/DCA, admin APIs, mobile UI, scripts, deploy configs, strategy tables.
-- Prefer completing the asked remote change end-to-end (code → QA → commit/push/PR) without sending them back to a PC.
-- When they say “everything / 다 / PC처럼”, cover the remaining product gaps in ordered slices, but **do not refuse** multi-surface work.
-- Use admin `accountId` targeting APIs when changing another user’s MT5 account from phone.
+- Edit **any** named area end-to-end (code → QA → commit/push/PR). Do not send them back to a PC GUI.
+- When they say “모든 프로젝트 / 다 / 영상·자동화 / PC처럼”, cover remaining slices in order — **do not refuse**.
+- Prefer private-worker shell for local automation (`naver-blog-seo`, factory supervise).
+- Trading: use admin `accountId` targeting when editing another MT5 account.
+
+## Local automation commands (private worker)
+
+```bash
+# Blog / content images (naver-blog-seo)
+cd naver-blog-seo
+python scripts/remote_ctl.py status
+python scripts/remote_ctl.py dry-run --count 1
+python scripts/remote_ctl.py once --count 1
+python scripts/remote_ctl.py schedule
+python scripts/remote_ctl.py stop
+
+# Logic factory invent
+powershell -ExecutionPolicy Bypass -File scripts/start-factory-invent.ps1
+```
 
 ## Still fail-closed (live money)
 
@@ -20,9 +44,9 @@ Owner often edits from the **Cursor mobile app** while away from the PC. Treat m
 - Never force-close on API lag / partial orphan alone.
 - Do not change open-basket logic mid-flight unless explicitly requested.
 - No global sub-second polling of all accounts.
+- Naver: prefer `AUTO_PUBLISH=false` unless user explicitly asks to publish.
 
-## Product surfaces for remote edit
+## App surfaces
 
-- App: `/bot`, `/manage`, `/manage/strategy`, `/admin`, `/connect`
-- Admin account picker + `?accountId=` / body `accountId` on strategy-bots/settings/bot/stats
-- Engine/scripts under `scripts/` and `src/lib/meta-engine.ts`
+- `/manage/remote` — phone command center (admin)
+- `/bot`, `/manage/strategy`, `/admin`, `/connect`

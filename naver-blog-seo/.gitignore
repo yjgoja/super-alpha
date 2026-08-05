@@ -1,0 +1,14 @@
+# Local / secrets — never commit
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+output/
+dist/
+*.zip
+naver_cookies.json
+*.log
+.chrome-profile/
+build/

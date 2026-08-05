@@ -1,0 +1,51 @@
+posts_per_day: 4
+post_times:
+  - "09:30"
+  - "12:30"
+  - "15:30"
+  - "19:00"
+
+keywords:
+  - "해외선물 수수료"
+  - "해외선물 하는 법"
+  - "해외선물 증거금"
+  - "해외선물 거래"
+  - "나스닥 선물"
+  - "골드 선물"
+  - "해외선물 초보"
+  - "메타트레이더5"
+
+# 비워두면 필수문구 강제 삽입 안 함 (이거다 등 금지 문구도 넣지 않음)
+required_phrases: []
+
+# 글 하단에 반드시 첨부
+footer_link: "https://minestock.kr"
+
+body_image_count: 8
+
+openai:
+  text_model: "gpt-4o"
+  # 썸네일(한글 문구): gpt-image-2 필수. mini는 한글 깨짐
+  image_model: "gpt-image-2"
+  image_quality: "medium"
+  # 본문(글자 없는 주제 그림): 저비용
+  body_image_model: "gpt-image-1-mini"
+  body_image_quality: "low"
+
+content:
+  min_sections: 7
+  min_chars: 2400
+  include_faq: true
+  include_cta: true
+  brand_name: "올브릿지 노트"
+  style: "informational"
+
+publish:
+  confirm_dialog: true
+  delay_between_posts_sec: 90
+
+images:
+  width: 1200
+  height: 675
+  thumb_width: 1280
+  thumb_height: 720

@@ -163,6 +163,24 @@ export default function MyPage() {
       {role === "admin" && (
         <>
           <Link
+            href="/manage/remote"
+            className="m-card"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.55rem",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700 }}>원격 지시 센터</div>
+              <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginTop: "0.25rem" }}>
+                트레이딩 · 블로그/이미지 · 팩토리 · 엔진 (폰)
+              </div>
+            </div>
+            <span style={{ color: "var(--gold)", fontSize: "1.2rem" }}>›</span>
+          </Link>
+          <Link
             href="/admin"
             className="m-card"
             style={{

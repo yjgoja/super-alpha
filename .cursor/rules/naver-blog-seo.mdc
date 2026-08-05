@@ -1,0 +1,32 @@
+---
+description: Naver blog SEO content automation — phone/remote control
+globs: naver-blog-seo/**
+alwaysApply: false
+---
+
+# Naver blog SEO (콘텐츠·이미지 자동화)
+
+Phone / Cursor remote control lives in `naver-blog-seo/scripts/remote_ctl.py`.
+
+## Commands
+
+```bash
+cd naver-blog-seo
+python scripts/remote_ctl.py status
+python scripts/remote_ctl.py dry-run --count 1   # no browser
+python scripts/remote_ctl.py once --count 1      # Selenium write
+python scripts/remote_ctl.py schedule            # daily post_times
+python scripts/remote_ctl.py stop
+```
+
+## Safety
+
+- Do not commit `.env`, `output/naver_cookies.json`, or `dist/`.
+- Default: `AUTO_PUBLISH=false` (draft for manual review).
+- Only set publish true when the user explicitly asks.
+- Captcha / 2FA needs a human on the PC once.
+
+## Config
+
+- Keywords / schedule: `config.yaml`
+- Credentials: `.env` (`NAVER_ID`, `NAVER_PW`, `OPENAI_API_KEY`)
