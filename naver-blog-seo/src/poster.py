@@ -27,6 +27,7 @@ def prepare_post(
     out_dir = cfg.root / "assets" / "generated"
     section_count = max(cfg.body_image_count, 4)
 
+    min_chars = int(cfg.content.get("min_chars") or 2400)
     _log("[AI] 원고 생성 시작")
     data = generate_structured_article(
         client,
@@ -36,6 +37,7 @@ def prepare_post(
         footer_link=cfg.footer_link,
         model=cfg.text_model,
         section_count=section_count,
+        min_chars=min_chars,
         log=_log,
     )
     thumb_text = str(data.get("thumb_text") or f"{keyword} 핵심 정리")

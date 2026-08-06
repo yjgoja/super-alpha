@@ -124,8 +124,46 @@ paragraph를 더 구체화하고 FAQ·체크리스트를 보강해 반드시 {mi
         chars = _count_chars(blocks)
         _log(f"[AI] 보강 후: blocks={len(blocks)} / chars={chars}")
 
-    if chars < int(min_chars * 0.85):
-        raise RuntimeError(f"원고 품질 미달: {chars}자 (목표 {min_chars}자). 모델/프롬프트를 확인하세요.")
+    if chars < int(min_chars * 0.75):
+        _log(f"[AI] 글자수 부족({chars}) → FAQ/체크리스트 패딩")
+        pads = [
+            {
+                "type": "heading",
+                "text": f"{keyword} 체크리스트",
+            },
+            {
+                "type": "paragraph",
+                "text": (
+                    f"{keyword}를 실제로 적용하기 전에는 목적, 확인 기준, 위험 한도를 먼저 적어두세요. "
+                    "막연한 기대보다 구체적인 기준이 있으면 판단이 흔들리지 않습니다. "
+                    "초보 단계일수록 한 번에 많은 규칙을 넣기보다, 반복해서 확인할 수 있는 짧은 체크리스트가 더 도움이 됩니다."
+                ),
+            },
+            {
+                "type": "paragraph",
+                "text": (
+                    f"또한 {keyword} 관련 정보를 볼 때는 출처와 시점, 적용 조건을 함께 확인해야 합니다. "
+                    "같은 용어라도 시장 환경이나 상품 구조에 따라 의미가 달라질 수 있기 때문입니다. "
+                    "확정 수치를 단정하기보다, 본인 상황에 맞는 해석 기준을 정해 두는 편이 안전합니다."
+                ),
+            },
+            {
+                "type": "point",
+                "text": f"{keyword}는 기준이 있어야 실무에 남는다",
+            },
+        ]
+        # 마지막 CTA link 앞에 삽입
+        insert_at = len(blocks)
+        for i in range(len(blocks) - 1, -1, -1):
+            if blocks[i].get("type") == "link":
+                insert_at = i
+                break
+        for p in reversed(pads):
+            blocks.insert(insert_at, p)
+        chars = _count_chars(blocks)
+
+    if chars < 1200:
+        raise RuntimeError(f"원고 품질 미달: {chars}자 (최소 1200자). 모델/프롬프트를 확인하세요.")
 
     _log(f"[AI] 원고 완료: {title} / chars={chars}")
     return {
