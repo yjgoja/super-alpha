@@ -88,7 +88,7 @@ const softCloseCooldown = new Map<
   { until: number; reason: string; loggedAt: number }
 >();
 
-/** H8 time-logic session state (process memory — fail-closed on restart). */
+/** H8 time-logic session state (memory + DB — survives Render restarts). */
 type H8SessionState = {
   sessionKey: string;
   barOpen: number | null;
@@ -101,13 +101,100 @@ function h8StateKey(accountId: string, symbol: string, logic: string) {
   return `${accountId}|${symbol}|${normalizeLogicId(logic)}`;
 }
 
+function h8PersistSlot(symbol: string, logic: string) {
+  return `${symbol}|${normalizeLogicId(logic)}`;
+}
+
 function softCloseKey(accountId: string, symbol: string, direction: string) {
   return `${accountId}|${symbol}|${direction}`;
 }
 
+function parseH8State(raw: unknown): H8SessionState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const sessionKey = String(o.sessionKey || "");
+  if (!sessionKey) return null;
+  const dir = o.direction === "BUY" || o.direction === "SELL" ? o.direction : null;
+  const barOpen =
+    typeof o.barOpen === "number" && Number.isFinite(o.barOpen) && o.barOpen > 0
+      ? o.barOpen
+      : null;
+  return {
+    sessionKey,
+    barOpen,
+    entered: !!o.entered,
+    direction: dir,
+  };
+}
+
+async function loadH8StateFromDb(
+  accountId: string,
+  symbol: string,
+  logic: string,
+): Promise<H8SessionState | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ h8SessionState: unknown }>>(
+      `SELECT "h8SessionState" FROM "BrokerAccount" WHERE id = $1 LIMIT 1`,
+      accountId,
+    );
+    const map = rows[0]?.h8SessionState;
+    if (!map || typeof map !== "object" || Array.isArray(map)) return null;
+    return parseH8State((map as Record<string, unknown>)[h8PersistSlot(symbol, logic)]);
+  } catch (e) {
+    console.warn(
+      `[engine] h8 load failed account=${accountId}`,
+      e instanceof Error ? e.message : e,
+    );
+    return null;
+  }
+}
+
+async function saveH8StateToDb(
+  accountId: string,
+  symbol: string,
+  logic: string,
+  state: H8SessionState,
+) {
+  try {
+    const slot = h8PersistSlot(symbol, logic);
+    await prisma.$executeRawUnsafe(
+      `UPDATE "BrokerAccount"
+       SET "h8SessionState" = COALESCE("h8SessionState", '{}'::jsonb) || $1::jsonb
+       WHERE id = $2`,
+      JSON.stringify({ [slot]: state }),
+      accountId,
+    );
+  } catch (e) {
+    console.warn(
+      `[engine] h8 save failed account=${accountId}`,
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+async function rememberH8State(
+  accountId: string,
+  symbol: string,
+  logic: string,
+  state: H8SessionState,
+) {
+  const sk = h8StateKey(accountId, symbol, logic);
+  h8SessionState.set(sk, state);
+  await saveH8StateToDb(accountId, symbol, logic, state);
+}
+
+async function snapH8BarOpen(metaId: string, symbol: string): Promise<number | null> {
+  const price = await getSymbolPrice(metaId, symbol);
+  if (price && price.bid > 0 && price.ask > 0) {
+    return (price.bid + price.ask) / 2;
+  }
+  return null;
+}
+
 /**
- * H8 time logic: on new bar flatten both sides + snap barOpen (open minute only).
- * Restart mid-bar with open book → adopt (no flatten). Missed open → no ENTRY this bar.
+ * H8 time logic: flatten on new bar + snap barOpen.
+ * Persisted so Render redeploys do not wipe the session.
+ * Cold start during open quiet (0–15m) may still snap barOpen from live mid.
  */
 async function syncH8TimeSession(opts: {
   accountId: string;
@@ -125,7 +212,14 @@ async function syncH8TimeSession(opts: {
   const logic = normalizeLogicId(opts.logic);
   const sk = h8StateKey(opts.accountId, opts.symbol, logic);
   const sessionKey = h8SessionKey();
-  const prev = h8SessionState.get(sk);
+  let prev = h8SessionState.get(sk);
+  if (!prev) {
+    const fromDb = await loadH8StateFromDb(opts.accountId, opts.symbol, logic);
+    if (fromDb) {
+      prev = fromDb;
+      h8SessionState.set(sk, fromDb);
+    }
+  }
   let positions = opts.positions;
   let baskets = opts.baskets;
   let closed = false;
@@ -139,7 +233,10 @@ async function syncH8TimeSession(opts: {
   const closeBothSides = async () => {
     for (const dir of ["BUY", "SELL"] as const) {
       const sidePos = ourPos.filter((p) => p.direction === dir);
-      if (sidePos.length === 0 && !ourBaskets.some((b) => (b.direction === "SELL" ? "SELL" : "BUY") === dir)) {
+      if (
+        sidePos.length === 0 &&
+        !ourBaskets.some((b) => (b.direction === "SELL" ? "SELL" : "BUY") === dir)
+      ) {
         continue;
       }
       let closeRes = await closePositionsBySymbolDirection(opts.metaId, opts.symbol, dir);
@@ -150,7 +247,9 @@ async function syncH8TimeSession(opts: {
           direction: dir,
         });
       }
-      for (const b of ourBaskets.filter((x) => (x.direction === "SELL" ? "SELL" : "BUY") === dir)) {
+      for (const b of ourBaskets.filter(
+        (x) => (x.direction === "SELL" ? "SELL" : "BUY") === dir,
+      )) {
         await prisma.basket.update({
           where: { id: b.id },
           data: {
@@ -159,7 +258,7 @@ async function syncH8TimeSession(opts: {
             unrealizedPnl: 0,
           },
         });
-        await prisma.fill.create({
+        await prisma.fills.create({
           data: {
             accountId: opts.accountId,
             symbol: opts.symbol,
@@ -191,46 +290,50 @@ async function syncH8TimeSession(opts: {
         entered: true,
         direction: dir,
       };
-      h8SessionState.set(sk, state);
+      await rememberH8State(opts.accountId, opts.symbol, logic, state);
       return { state, closed: false, positions, baskets };
     }
-    if (isH8OpenMinute()) {
-      const price = await getSymbolPrice(opts.metaId, opts.symbol);
-      const mid =
-        price && price.bid > 0 && price.ask > 0 ? (price.bid + price.ask) / 2 : null;
+    if (isH8OpenMinute() || isInH8EntryQuiet() || canH8Enter()) {
+      const mid = await snapH8BarOpen(opts.metaId, opts.symbol);
+      const degraded = canH8Enter() && !isInH8EntryQuiet() && !isH8OpenMinute();
+      if (degraded) {
+        console.warn(
+          `[engine] h8 degraded barOpen=live mid (missed open) account=${opts.accountId} ${opts.symbol} ${logic} session=${sessionKey}`,
+        );
+      }
       const state: H8SessionState = {
         sessionKey,
         barOpen: mid,
         entered: false,
         direction: null,
       };
-      h8SessionState.set(sk, state);
+      await rememberH8State(opts.accountId, opts.symbol, logic, state);
       return { state, closed: false, positions, baskets };
     }
-    // Cold start mid-bar flat — fail-closed (no ENTRY this H8)
     const state: H8SessionState = {
       sessionKey,
       barOpen: null,
       entered: true,
       direction: null,
     };
-    h8SessionState.set(sk, state);
+    await rememberH8State(opts.accountId, opts.symbol, logic, state);
+    console.warn(
+      `[engine] h8 fail-closed mid-session account=${opts.accountId} ${opts.symbol} ${logic} session=${sessionKey}`,
+    );
     return { state, closed: false, positions, baskets };
   }
 
   if (prev.sessionKey !== sessionKey) {
     if (hasOpen) await closeBothSides();
-    if (isH8OpenMinute()) {
-      const price = await getSymbolPrice(opts.metaId, opts.symbol);
-      const mid =
-        price && price.bid > 0 && price.ask > 0 ? (price.bid + price.ask) / 2 : null;
+    if (isH8OpenMinute() || isInH8EntryQuiet() || canH8Enter()) {
+      const mid = await snapH8BarOpen(opts.metaId, opts.symbol);
       const state: H8SessionState = {
         sessionKey,
         barOpen: mid,
         entered: false,
         direction: null,
       };
-      h8SessionState.set(sk, state);
+      await rememberH8State(opts.accountId, opts.symbol, logic, state);
       return { state, closed, positions, baskets };
     }
     const state: H8SessionState = {
@@ -239,16 +342,37 @@ async function syncH8TimeSession(opts: {
       entered: true,
       direction: null,
     };
-    h8SessionState.set(sk, state);
+    await rememberH8State(opts.accountId, opts.symbol, logic, state);
     return { state, closed, positions, baskets };
   }
 
-  // Same session: capture barOpen if we are on open minute and missing it
-  if (prev.barOpen == null && isH8OpenMinute() && !prev.entered) {
-    const price = await getSymbolPrice(opts.metaId, opts.symbol);
-    if (price && price.bid > 0 && price.ask > 0) {
-      prev.barOpen = (price.bid + price.ask) / 2;
-      h8SessionState.set(sk, prev);
+  if (prev.barOpen == null && !prev.entered && (isH8OpenMinute() || isInH8EntryQuiet())) {
+    const mid = await snapH8BarOpen(opts.metaId, opts.symbol);
+    if (mid != null) {
+      prev = { ...prev, barOpen: mid };
+      await rememberH8State(opts.accountId, opts.symbol, logic, prev);
+    }
+  }
+
+  // Prior deploy left fail-closed (entered + no barOpen) while flat — unlock degraded.
+  if (
+    prev.entered &&
+    prev.barOpen == null &&
+    !hasOpen &&
+    canH8Enter()
+  ) {
+    const mid = await snapH8BarOpen(opts.metaId, opts.symbol);
+    if (mid != null) {
+      console.warn(
+        `[engine] h8 unlock fail-closed → degraded barOpen account=${opts.accountId} ${opts.symbol} ${logic}`,
+      );
+      prev = {
+        sessionKey,
+        barOpen: mid,
+        entered: false,
+        direction: null,
+      };
+      await rememberH8State(opts.accountId, opts.symbol, logic, prev);
     }
   }
 
@@ -2147,7 +2271,7 @@ async function runSymbolTableDca(
       if (h8) {
         h8.direction = direction;
         h8.entered = true;
-        h8SessionState.set(h8Sk, h8);
+        await rememberH8State(accountId, symbol, logic, h8);
       }
     }
   }
@@ -2160,7 +2284,7 @@ async function runSymbolTableDca(
       if (h8) {
         h8.direction = direction;
         h8.entered = true;
-        h8SessionState.set(h8Sk, h8);
+        await rememberH8State(accountId, symbol, logic, h8);
       }
     }
   }
@@ -2287,7 +2411,7 @@ async function runSymbolTableDca(
       }
       direction = dir;
       h8.direction = dir;
-      h8SessionState.set(h8Sk, h8);
+      await rememberH8State(accountId, symbol, logic, h8);
     }
     if (!(await canOpenNewRisk(accountId, symbol, direction))) {
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
@@ -2381,6 +2505,14 @@ async function runSymbolTableDca(
       console.warn(
         `[engine] entry order ok but volume missing account=${accountId} ${symbol} ${direction} liveLots=${entryConfirm.afterLots}`,
       );
+      // Stop trade-credit burn / tick spam when broker ACK without a live fill.
+      await noteSessionTradeBackoff({
+        accountId,
+        symbol,
+        direction,
+        reason: "entry_ok_but_not_on_book",
+        ms: 3 * 60_000,
+      });
       return {
         ok: false as const,
         error: "entry_ok_but_not_on_book",
@@ -2427,7 +2559,7 @@ async function runSymbolTableDca(
       if (st) {
         st.entered = true;
         st.direction = direction;
-        h8SessionState.set(h8Sk, st);
+        await rememberH8State(accountId, symbol, logic, st);
       }
     }
     if (!protectRes.ok && protectRes.reason !== "disabled") {

@@ -55,6 +55,16 @@ export function ensureTradingSchema() {
           e instanceof Error ? e.message : e,
         );
       }
+      try {
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "BrokerAccount" ADD COLUMN IF NOT EXISTS "h8SessionState" JSONB`,
+        );
+      } catch (e) {
+        console.warn(
+          "[db] ensureTradingSchema h8SessionState",
+          e instanceof Error ? e.message : e,
+        );
+      }
     })();
   }
   return globalForPrisma.saSchemaReady;

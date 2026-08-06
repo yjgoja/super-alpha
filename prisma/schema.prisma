@@ -64,6 +64,8 @@ model BrokerAccount {
   /// Engine-written live snapshot for UI (positions/margin). Web reads this instead of MetaAPI.
   liveState        Json?
   liveStateAt      DateTime?
+  /// H8 time-logic session map: { "XAUUSD|martin_9_068_time": { sessionKey, barOpen, entered, direction } }
+  h8SessionState   Json?
   tpCount          Int       @default(0)
   slCount          Int       @default(0)
   cycleCount       Int       @default(0)
