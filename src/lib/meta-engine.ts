@@ -4,6 +4,7 @@ import {
   mt5FloatingRoiPct,
   mt5PnlForTakeProfit,
   mt5ProfitPct,
+  mt5UsedMargin,
   shouldTriggerDcaRoi,
   shouldTriggerStopLossUsd,
   shouldTriggerTakeProfit,
@@ -258,7 +259,7 @@ async function syncH8TimeSession(opts: {
             unrealizedPnl: 0,
           },
         });
-        await prisma.fills.create({
+        await prisma.fill.create({
           data: {
             accountId: opts.accountId,
             symbol: opts.symbol,
@@ -1519,6 +1520,45 @@ async function noteSessionTradeBackoff(opts: {
   });
 }
 
+/**
+ * Fail-closed L0 gate: skip market entry when equity cannot cover estimated MT5 margin.
+ * Uses contract-size–aware mt5UsedMargin (XAU 0.01 ≈ $8–9 at 1:500) — never price*lots/lev alone.
+ */
+async function skipEntryIfMarginInsufficient(opts: {
+  accountId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  lots: number;
+  fillPrice: number;
+  brokerLeverage?: number;
+}): Promise<{ skip: true; note: string; estMargin: number; equity: number } | { skip: false }> {
+  const estMargin = mt5UsedMargin({
+    symbol: opts.symbol,
+    lots: opts.lots,
+    avgPrice: opts.fillPrice,
+    brokerLeverage: opts.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT,
+  });
+  const eqRow = await prisma.brokerAccount.findUnique({
+    where: { id: opts.accountId },
+    select: { equity: true },
+  });
+  const equity = Number(eqRow?.equity || 0);
+  if (equity > 0 && estMargin > 0 && equity < estMargin * 1.15) {
+    console.warn(
+      `[engine] skip entry margin account=${opts.accountId} ${opts.symbol} equity=${equity.toFixed(2)} need~${estMargin.toFixed(2)} lots=${opts.lots}`,
+    );
+    await noteSessionTradeBackoff({
+      accountId: opts.accountId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+      reason: "margin_insufficient_for_lots",
+      ms: 30 * 60_000,
+    });
+    return { skip: true, note: "margin_insufficient_skip", estMargin, equity };
+  }
+  return { skip: false };
+}
+
 /** 손절후중지 / 익절후미반복 — dualDirection 행까지 함께 끔 (H8 time 제외) */
 async function disableSymbolBotSide(
   accountId: string,
@@ -1798,7 +1838,7 @@ async function healGhostBaskets(
         where: { id: accountId },
         data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
       });
-      // Broker-side TP left DB ghost — reenter L0 only for enabled fixed logics (never H8 time).
+      // Broker-side TP left DB ghost — reenter L0 for fixed logics + H8 time (same bar).
       const sideBots = await prisma.symbolBot.findMany({
         where: { accountId, symbol: g.symbol },
       });
@@ -1828,6 +1868,51 @@ async function healGhostBaskets(
           console.warn(
             `[engine] broker-TP reentry skip account=${accountId} ${g.symbol} ${dir}: ${re.error}`,
           );
+        }
+      } else {
+        // H8 time: keep trading session direction until next bar flatten.
+        const timeBot = sideBots.find(
+          (b) =>
+            b.enabled &&
+            isMartin9TimeLogic(b.logic) &&
+            symbolsMatch(b.symbol, g.symbol),
+        );
+        if (timeBot && timeBot.repeatEnabled !== false && canH8Enter() && !isInH8EntryQuiet()) {
+          const logic = normalizeLogicId(timeBot.logic);
+          const h8Sk = h8StateKey(accountId, g.symbol, logic);
+          let st = h8SessionState.get(h8Sk);
+          if (!st) {
+            st = (await loadH8StateFromDb(accountId, g.symbol, logic)) ?? undefined;
+            if (st) h8SessionState.set(h8Sk, st);
+          }
+          const reDir =
+            st?.direction === "BUY" || st?.direction === "SELL" ? st.direction : dir;
+          if (st?.barOpen != null) {
+            const lots = Math.max(0.01, Number(timeBot.startLots || 0.01));
+            const tpRoi = resolveLiveTakeProfitPct(logic, timeBot.takeProfitPct ?? 0);
+            const slPct = resolveLiveStopLossPct(logic, timeBot.stopLossPct ?? 0);
+            const re = await placeTpReentry({
+              accountId,
+              metaId,
+              symbol: g.symbol,
+              direction: reDir,
+              logic,
+              reentryLots: lots,
+              tpRoi,
+              stopLossPct: slPct,
+              stopLossEnabled: timeBot.stopLossEnabled ?? true,
+              noteTag: "reentry_after_broker_tp_h8",
+            });
+            if (!re.ok) {
+              console.warn(
+                `[engine] H8 broker-TP reentry skip account=${accountId} ${g.symbol} ${reDir}: ${re.error}`,
+              );
+            } else if (st) {
+              st.entered = true;
+              st.direction = reDir;
+              await rememberH8State(accountId, g.symbol, logic, st);
+            }
+          }
         }
       }
     } else if (kind === "SL") {
@@ -1884,8 +1969,10 @@ async function gateNewRiskOrder(opts: {
     symbol: opts.symbol,
     direction: opts.direction,
   });
-  if (sessionCool && isSessionTradeBackoffReason(sessionCool.reason)) {
-    return { ok: false, note: sessionCool.reason };
+  // Any shared backoff blocks new risk (margin / ACK-without-fill / session closed).
+  // Previously only session_closed matched — tiny XAU accounts burned credits every tick.
+  if (sessionCool) {
+    return { ok: false, note: sessionCool.reason || "soft_close_cd" };
   }
   await syncTradeCreditPauseFromDb();
   if (metaApiTradeCreditBlocked()) {
@@ -1943,6 +2030,12 @@ async function placeTpReentry(opts: {
   if (!(await canOpenNewRisk(accountId, symbol, direction))) {
     return { ok: false, error: "reentry_blocked_toggle" };
   }
+  {
+    const cool = await getSoftCloseCooldownShared({ accountId, symbol, direction });
+    if (cool) {
+      return { ok: false, error: `reentry_soft_close_cd|${cool.reason}` };
+    }
+  }
   await syncTradeCreditPauseFromDb();
   if (metaApiTradeCreditBlocked()) {
     return { ok: false, error: "reentry_blocked_trade_credit" };
@@ -1970,6 +2063,19 @@ async function placeTpReentry(opts: {
 
   const lots = Math.max(0.01, Math.round(reentryLots * 100) / 100);
   const fillPrice = mt5EntryQuote(direction, bid, ask);
+  {
+    const marginGate = await skipEntryIfMarginInsufficient({
+      accountId,
+      symbol,
+      direction,
+      lots,
+      fillPrice,
+      brokerLeverage,
+    });
+    if (marginGate.skip) {
+      return { ok: false, error: marginGate.note };
+    }
+  }
   const reentryTpPct = tpRoi > 0 ? tpRoi : 20;
   const reentrySlPct =
     stopLossPct != null && stopLossPct > 0 ? stopLossPct : DCA1000_DEFAULT_SL_ROI;
@@ -2030,15 +2136,37 @@ async function placeTpReentry(opts: {
     });
     return { ok: false, error: order.message || "익절 후 재진입 주문 실패" };
   }
+  const reentryConfirm = await confirmLiveVolumeIncreased({
+    metaId,
+    symbol,
+    direction,
+    beforeLots: 0,
+    expectedAdd: lots,
+  });
+  if (!reentryConfirm.ok) {
+    console.warn(
+      `[engine] reentry order ok but volume missing account=${accountId} ${symbol} ${direction} liveLots=${reentryConfirm.afterLots}`,
+    );
+    await noteSessionTradeBackoff({
+      accountId,
+      symbol,
+      direction,
+      reason: "entry_ok_but_not_on_book",
+      ms: 3 * 60_000,
+    });
+    return { ok: false, error: "entry_ok_but_not_on_book" };
+  }
+  const confirmedReentryPx =
+    reentryConfirm.fillPrice > 0 ? reentryConfirm.fillPrice : fillPrice;
   await prisma.basket.create({
     data: {
       accountId,
       symbol,
       direction,
       filledLevel: 0,
-      firstEntryPrice: fillPrice,
+      firstEntryPrice: confirmedReentryPx,
       status: "open",
-      legs: { create: [{ level: 0, lots, price: fillPrice }] },
+      legs: { create: [{ level: 0, lots, price: confirmedReentryPx }] },
     },
   });
   await prisma.fill.create({
@@ -2047,10 +2175,10 @@ async function placeTpReentry(opts: {
       symbol,
       side: direction,
       lots,
-      price: fillPrice,
+      price: confirmedReentryPx,
       kind: "ENTRY",
       level: 0,
-      note: `${logic}|${noteTag}|brokerTP=${reentryPx.takeProfit ?? "-"}`,
+      note: `${logic}|${noteTag}|brokerTP=${reentryPx.takeProfit ?? "-"}|confirmed`,
     },
   });
   await refreshAndProtectBasket({
@@ -2205,11 +2333,11 @@ async function runSymbolTableDca(
   const h8Sk = timeLogic ? h8StateKey(accountId, symbol, logic) : "";
   let h8 = timeLogic ? h8SessionState.get(h8Sk) : undefined;
 
-  // H8: resolve session direction before ENTRY; one L0 per bar (no TP reentry)
+  // H8: lock session direction from barOpen; keep trading that side until next bar flatten.
+  // Quiet window (open~+15m): no new ENTRY while flat (open books still managed below).
   if (timeLogic && h8) {
     if (h8.direction) direction = h8.direction;
-    if (isInH8EntryQuiet() && (!h8.entered || !h8.direction)) {
-      // Quiet window with no open book yet — skip entirely
+    if (isInH8EntryQuiet() && (!h8.direction || !h8.entered)) {
       const hasBook =
         baskets.some(
           (b) => symbolsMatch(b.symbol, symbol) && b.legs.length > 0,
@@ -2343,7 +2471,7 @@ async function runSymbolTableDca(
         stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: cfg.brokerLeverage,
-        allowReentry: !cfg.manageOnly && !timeLogic,
+        allowReentry: !cfg.manageOnly,
         repeatEnabled: cfg.repeatEnabled,
         reentryLots: levelLots(0),
       });
@@ -2395,23 +2523,31 @@ async function runSymbolTableDca(
     if (cfg.manageOnly) {
       return { ok: true as const, note: "manage_only_no_entry", symbol };
     }
-    // H8 time: only after +15m, with barOpen snap, once per session
+    // H8 time: after +15m with barOpen — lock direction once, then re-enter L0
+    // on every flat until the next H8 bar flatten (sessionKey rollover).
     if (timeLogic) {
       h8 = h8SessionState.get(h8Sk);
-      if (!h8 || h8.entered) {
-        return { ok: true as const, note: "h8_already_entered_or_skip", symbol };
+      if (!h8) {
+        return { ok: true as const, note: "h8_no_session_state", symbol };
+      }
+      if (isInH8EntryQuiet()) {
+        return { ok: true as const, note: "h8_entry_quiet", symbol };
       }
       if (!canH8Enter() || h8.barOpen == null) {
         return { ok: true as const, note: "h8_wait_or_no_bar_open", symbol };
       }
-      const mid = (price.bid + price.ask) / 2;
-      const dir = h8DirectionFromOpen(mid, h8.barOpen);
-      if (!dir) {
-        return { ok: true as const, note: "h8_flat_no_direction", symbol };
+      if (h8.direction === "BUY" || h8.direction === "SELL") {
+        direction = h8.direction;
+      } else {
+        const mid = (price.bid + price.ask) / 2;
+        const dir = h8DirectionFromOpen(mid, h8.barOpen);
+        if (!dir) {
+          return { ok: true as const, note: "h8_flat_no_direction", symbol };
+        }
+        direction = dir;
+        h8.direction = dir;
+        await rememberH8State(accountId, symbol, logic, h8);
       }
-      direction = dir;
-      h8.direction = dir;
-      await rememberH8State(accountId, symbol, logic, h8);
     }
     if (!(await canOpenNewRisk(accountId, symbol, direction))) {
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
@@ -2436,27 +2572,17 @@ async function runSymbolTableDca(
       : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
     const entrySlPct = resolveLiveStopLossPct(logic, cfg.stopLossPct);
     const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
-    // Fail-closed: tiny equity cannot open XAU — avoids ACK-without-fill credit burn.
     {
-      const lev = Math.max(1, cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT);
-      const estMargin = (fillPrice * lots) / lev;
-      const eqRow = await prisma.brokerAccount.findUnique({
-        where: { id: accountId },
-        select: { equity: true },
+      const marginGate = await skipEntryIfMarginInsufficient({
+        accountId,
+        symbol,
+        direction,
+        lots,
+        fillPrice,
+        brokerLeverage: cfg.brokerLeverage,
       });
-      const equity = Number(eqRow?.equity || 0);
-      if (equity > 0 && estMargin > 0 && equity < estMargin * 1.15) {
-        console.warn(
-          `[engine] skip entry margin account=${accountId} ${symbol} equity=${equity.toFixed(2)} need~${estMargin.toFixed(2)} lots=${lots}`,
-        );
-        await noteSessionTradeBackoff({
-          accountId,
-          symbol,
-          direction,
-          reason: "margin_insufficient_for_lots",
-          ms: 30 * 60_000,
-        });
-        return { ok: true as const, note: "margin_insufficient_skip", symbol };
+      if (marginGate.skip) {
+        return { ok: true as const, note: marginGate.note, symbol };
       }
     }
     const entryLive = liveBasketTpSlUsd({
@@ -2781,7 +2907,7 @@ async function runSymbolTableDca(
       floatingRoi: tpDecision.floatingRoi,
       pnlSum: tpPnl.apiProfit,
       pnlForGuard: tpPnl.pnl,
-      allowReentry: !cfg.manageOnly && !timeLogic,
+      allowReentry: !cfg.manageOnly,
       stopLossPct: liveUsd.stopLossPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: brokerLev,
@@ -3262,6 +3388,19 @@ async function runSymbolDca(
     const entryTpPct = resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
     const entrySlPct = resolveLiveStopLossPct(logic, cfg.stopLossPct);
     const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
+    {
+      const marginGate = await skipEntryIfMarginInsufficient({
+        accountId,
+        symbol,
+        direction,
+        lots,
+        fillPrice,
+        brokerLeverage: cfg.brokerLeverage,
+      });
+      if (marginGate.skip) {
+        return { ok: true as const, note: marginGate.note, symbol };
+      }
+    }
     const entryLive = liveBasketTpSlUsd({
       symbol,
       lots,
@@ -3329,6 +3468,13 @@ async function runSymbolDca(
       console.warn(
         `[engine] entry order ok but volume missing account=${accountId} ${symbol} liveLots=${entryConfirm2.afterLots}`,
       );
+      await noteSessionTradeBackoff({
+        accountId,
+        symbol,
+        direction,
+        reason: "entry_ok_but_not_on_book",
+        ms: 3 * 60_000,
+      });
       return { ok: false as const, error: "entry_ok_but_not_on_book", symbol };
     }
     const confirmedPx2 =
