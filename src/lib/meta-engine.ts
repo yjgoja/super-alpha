@@ -234,23 +234,25 @@ async function syncH8TimeSession(opts: {
   const closeBothSides = async () => {
     for (const dir of ["BUY", "SELL"] as const) {
       const sidePos = ourPos.filter((p) => p.direction === dir);
-      if (
-        sidePos.length === 0 &&
-        !ourBaskets.some((b) => (b.direction === "SELL" ? "SELL" : "BUY") === dir)
-      ) {
+      const sideBaskets = ourBaskets.filter(
+        (b) => (b.direction === "SELL" ? "SELL" : "BUY") === dir,
+      );
+      if (sidePos.length === 0 && sideBaskets.length === 0) {
         continue;
       }
-      let closeRes = await closePositionsBySymbolDirection(opts.metaId, opts.symbol, dir);
-      if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
-        closeRes = await forceCloseRemainder({
-          metaId: opts.metaId,
-          symbol: opts.symbol,
-          direction: dir,
-        });
+      const closeRes = await closeSideFailClosed({
+        metaId: opts.metaId,
+        symbol: opts.symbol,
+        direction: dir,
+        expectedPositions: sidePos.length,
+      });
+      if (!closeRes.ok) {
+        console.error(
+          `[engine] h8 flatten FAIL account=${opts.accountId} ${opts.symbol} ${dir}: ${closeRes.message} — leave baskets open`,
+        );
+        continue;
       }
-      for (const b of ourBaskets.filter(
-        (x) => (x.direction === "SELL" ? "SELL" : "BUY") === dir,
-      )) {
+      for (const b of sideBaskets) {
         await prisma.basket.update({
           where: { id: b.id },
           data: {
@@ -356,6 +358,7 @@ async function syncH8TimeSession(opts: {
   }
 
   // Prior deploy left fail-closed (entered + no barOpen) while flat — unlock degraded.
+  // Keep a known locked direction when present (restart mid-bar after broker TP).
   if (
     prev.entered &&
     prev.barOpen == null &&
@@ -371,7 +374,10 @@ async function syncH8TimeSession(opts: {
         sessionKey,
         barOpen: mid,
         entered: false,
-        direction: null,
+        direction:
+          prev.direction === "BUY" || prev.direction === "SELL"
+            ? prev.direction
+            : null,
       };
       await rememberH8State(opts.accountId, opts.symbol, logic, prev);
     }
@@ -1029,6 +1035,80 @@ async function forceCloseRemainder(opts: {
 }
 
 /**
+ * Fail-closed side close: never treat first-look empty snapshot as success when we
+ * expected live positions (API lag → orphan DB close + false reentry).
+ */
+async function closeSideFailClosed(opts: {
+  metaId: string;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  expectedPositions: number;
+}): Promise<
+  | { ok: true; closed: number }
+  | {
+      ok: false;
+      message: string;
+      remaining?: number;
+      unverifiedEmpty?: boolean;
+    }
+> {
+  let closeRes = await closePositionsBySymbolDirection(
+    opts.metaId,
+    opts.symbol,
+    opts.direction,
+  );
+  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+    closeRes = await forceCloseRemainder({
+      metaId: opts.metaId,
+      symbol: opts.symbol,
+      direction: opts.direction,
+    });
+  }
+  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+    return {
+      ok: false,
+      message:
+        ("message" in closeRes && closeRes.message) ||
+        `${opts.symbol} ${opts.direction} 청산 실패(잔여 ${"remaining" in closeRes ? closeRes.remaining : "?"})`,
+      remaining: "remaining" in closeRes ? closeRes.remaining : undefined,
+    };
+  }
+
+  const emptyUnverified =
+    (closeRes as { emptyWithoutClose?: boolean }).emptyWithoutClose === true &&
+    (closeRes.closed ?? 0) === 0;
+
+  if (emptyUnverified && opts.expectedPositions > 0) {
+    const verify = await fetchSnapshot(opts.metaId, {
+      allowStaleMs: 0,
+      allowStaleOnRateLimit: false,
+    });
+    if (!verify.ok) {
+      return {
+        ok: false,
+        message: "close_unverified_empty_snap_fail",
+        unverifiedEmpty: true,
+      };
+    }
+    const still = positionsForSymbol(
+      verify.positions,
+      opts.symbol,
+      opts.direction,
+    );
+    if (still.length > 0) {
+      return {
+        ok: false,
+        message: "close_unverified_snap_lag",
+        remaining: still.length,
+        unverifiedEmpty: true,
+      };
+    }
+  }
+
+  return { ok: true, closed: closeRes.closed ?? 0 };
+}
+
+/**
  * Soft SL market-close with session backoff (mirrors soft TP).
  * Never force-closes through a closed session — broker SL remains the real protection.
  */
@@ -1062,22 +1142,14 @@ async function runSoftSlCloseAttempt(opts: {
     return { ok: true, awaitSession: true, note: "fx_market_closed" };
   }
 
-  let slClose = await closePositionsBySymbolDirection(
-    opts.metaId,
-    opts.symbol,
-    opts.direction,
-  );
-  if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
-    slClose = await forceCloseRemainder({
-      metaId: opts.metaId,
-      symbol: opts.symbol,
-      direction: opts.direction,
-    });
-  }
-  if (!slClose.ok || (slClose.remaining ?? 0) > 0) {
-    const message =
-      ("message" in slClose && slClose.message) ||
-      `${opts.symbol} 손절 청산 실패(잔여 ${"remaining" in slClose ? slClose.remaining : "?"})`;
+  let slClose = await closeSideFailClosed({
+    metaId: opts.metaId,
+    symbol: opts.symbol,
+    direction: opts.direction,
+    expectedPositions: 1,
+  });
+  if (!slClose.ok) {
+    const message = slClose.message;
     if (isMarketSessionBlockedError(message)) {
       await noteSessionTradeBackoff({
         accountId: opts.accountId,
@@ -1091,7 +1163,7 @@ async function runSoftSlCloseAttempt(opts: {
     return {
       ok: false,
       message,
-      remaining: "remaining" in slClose ? slClose.remaining : undefined,
+      remaining: slClose.remaining,
     };
   }
   return { ok: true, closed: true };
@@ -1540,12 +1612,19 @@ async function skipEntryIfMarginInsufficient(opts: {
   });
   const eqRow = await prisma.brokerAccount.findUnique({
     where: { id: opts.accountId },
-    select: { equity: true },
+    select: { equity: true, liveState: true },
   });
   const equity = Number(eqRow?.equity || 0);
-  if (equity > 0 && estMargin > 0 && equity < estMargin * 1.15) {
+  const live = (eqRow?.liveState || {}) as { freeMargin?: number; margin?: number };
+  const freeMargin =
+    typeof live.freeMargin === "number" && Number.isFinite(live.freeMargin)
+      ? live.freeMargin
+      : null;
+  // Prefer freeMargin when known; else equity. Buffer 15%.
+  const budget = freeMargin != null && freeMargin >= 0 ? freeMargin : equity;
+  if (budget > 0 && estMargin > 0 && budget < estMargin * 1.15) {
     console.warn(
-      `[engine] skip entry margin account=${opts.accountId} ${opts.symbol} equity=${equity.toFixed(2)} need~${estMargin.toFixed(2)} lots=${opts.lots}`,
+      `[engine] skip entry margin account=${opts.accountId} ${opts.symbol} budget=${budget.toFixed(2)} (free=${freeMargin ?? "n/a"} eq=${equity.toFixed(2)}) need~${estMargin.toFixed(2)} lots=${opts.lots}`,
     );
     await noteSessionTradeBackoff({
       accountId: opts.accountId,
@@ -1753,14 +1832,31 @@ async function healGhostBaskets(
   let healed = 0;
   for (const g of stillGhost) {
     const dir = g.direction === "SELL" ? "SELL" : "BUY";
-    const symDeals = deals.filter(
+    // OUT deal that closes a BUY basket is typically DEAL_TYPE_SELL (and vice versa).
+    const closeDealType = dir === "BUY" ? "DEAL_TYPE_SELL" : "DEAL_TYPE_BUY";
+    const dirDeals = deals.filter(
       (d) =>
         symbolsMatch(d.symbol || "", g.symbol) &&
-        String(d.entryType || "").includes("OUT"),
+        String(d.entryType || "").includes("OUT") &&
+        String(d.type || "") === closeDealType,
     );
-    const last = symDeals.sort(
-      (a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime(),
-    )[0];
+    const symDeals =
+      dirDeals.length > 0
+        ? dirDeals
+        : deals.filter(
+            (d) =>
+              symbolsMatch(d.symbol || "", g.symbol) &&
+              String(d.entryType || "").includes("OUT"),
+          );
+    const basketCreatedMs = g.createdAt ? new Date(g.createdAt).getTime() : 0;
+    const last = symDeals
+      .filter((d) => {
+        const t = new Date(d.time || 0).getTime();
+        return !basketCreatedMs || !Number.isFinite(t) || t >= basketCreatedMs - 5_000;
+      })
+      .sort(
+        (a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime(),
+      )[0];
     const hasOut = !!last;
     const sideEmpty = true;
     const otherPositionsExist = again.positions.some(
@@ -2243,17 +2339,17 @@ async function closeBasketTp(opts: {
     brokerLeverage,
   } = opts;
 
-  let closeRes = await closePositionsBySymbolDirection(metaId, symbol, direction);
-  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
-    closeRes = await forceCloseRemainder({ metaId, symbol, direction });
-  }
-  if (!closeRes.ok || (closeRes.remaining ?? 0) > 0) {
+  let closeRes = await closeSideFailClosed({
+    metaId,
+    symbol,
+    direction,
+    expectedPositions: opts.ourPositions.length,
+  });
+  if (!closeRes.ok) {
     return {
       closed: false as const,
       reentered: false as const,
-      error:
-        ("message" in closeRes && closeRes.message) ||
-        `${symbol} 익절 청산 실패(잔여 ${"remaining" in closeRes ? closeRes.remaining : "?"})`,
+      error: closeRes.message || `${symbol} 익절 청산 실패`,
     };
   }
 
@@ -3102,6 +3198,27 @@ async function runSymbolTableDca(
         };
       }
     }
+    {
+      const marginGate = await skipEntryIfMarginInsufficient({
+        accountId,
+        symbol,
+        direction,
+        lots,
+        fillPrice: estFill,
+        brokerLeverage: cfg.brokerLeverage,
+      });
+      if (marginGate.skip) {
+        return {
+          ok: true as const,
+          action: "hold",
+          symbol,
+          note: marginGate.note,
+          filled,
+          actions,
+          spreadPct: spr,
+        };
+      }
+    }
     let order = await placeMarketOrder({
       metaApiAccountId: metaId,
       symbol,
@@ -3854,6 +3971,28 @@ async function runSymbolDca(
         stopLossUsd: projLive.stopLossUsd,
         stopLossEnabled: cfg.stopLossEnabled,
       });
+      {
+        const marginGate = await skipEntryIfMarginInsufficient({
+          accountId,
+          symbol,
+          direction,
+          lots,
+          fillPrice: estFill,
+          brokerLeverage: cfg.brokerLeverage,
+        });
+        if (marginGate.skip) {
+          return {
+            ok: true as const,
+            action: "hold",
+            symbol,
+            note: marginGate.note,
+            profit,
+            floatingRoi,
+            tpMoney: liveUsd.takeProfitUsd,
+            stopLossUsd: liveUsd.stopLossUsd,
+          };
+        }
+      }
       let order = await placeMarketOrder({
         metaApiAccountId: metaId,
         symbol,

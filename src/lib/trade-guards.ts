@@ -38,9 +38,22 @@ export async function assertLevelNotAlreadyOpen(opts: {
       level: opts.level,
       createdAt: { gte: new Date(Date.now() - 90_000) },
     },
-    select: { id: true },
+    select: { id: true, createdAt: true },
   });
   if (recent) {
+    // L0: allow immediate reentry after TP/SL/SESSION closed that cycle (H8 in-bar).
+    if (opts.level === 0) {
+      const closedAfter = await prisma.fill.findFirst({
+        where: {
+          accountId: opts.accountId,
+          symbol: opts.symbol,
+          kind: { in: ["TP", "SL", "SESSION"] },
+          createdAt: { gte: recent.createdAt },
+        },
+        select: { id: true },
+      });
+      if (closedAfter) return { ok: true };
+    }
     return { ok: false, reason: "recent_fill_idempotent" };
   }
   return { ok: true };
