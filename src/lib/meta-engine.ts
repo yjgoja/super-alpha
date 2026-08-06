@@ -2436,6 +2436,29 @@ async function runSymbolTableDca(
       : resolveLiveTakeProfitPct(logic, cfg.takeProfitPct);
     const entrySlPct = resolveLiveStopLossPct(logic, cfg.stopLossPct);
     const fillPrice = mt5EntryQuote(direction, price.bid, price.ask);
+    // Fail-closed: tiny equity cannot open XAU — avoids ACK-without-fill credit burn.
+    {
+      const lev = Math.max(1, cfg.brokerLeverage || MT5_BROKER_LEVERAGE_DEFAULT);
+      const estMargin = (fillPrice * lots) / lev;
+      const eqRow = await prisma.brokerAccount.findUnique({
+        where: { id: accountId },
+        select: { equity: true },
+      });
+      const equity = Number(eqRow?.equity || 0);
+      if (equity > 0 && estMargin > 0 && equity < estMargin * 1.15) {
+        console.warn(
+          `[engine] skip entry margin account=${accountId} ${symbol} equity=${equity.toFixed(2)} need~${estMargin.toFixed(2)} lots=${lots}`,
+        );
+        await noteSessionTradeBackoff({
+          accountId,
+          symbol,
+          direction,
+          reason: "margin_insufficient_for_lots",
+          ms: 30 * 60_000,
+        });
+        return { ok: true as const, note: "margin_insufficient_skip", symbol };
+      }
+    }
     const entryLive = liveBasketTpSlUsd({
       symbol,
       lots,
