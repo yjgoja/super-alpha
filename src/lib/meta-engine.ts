@@ -1838,7 +1838,7 @@ async function healGhostBaskets(
         where: { id: accountId },
         data: { tpCount: { increment: 1 }, cycleCount: { increment: 1 } },
       });
-      // Broker-side TP left DB ghost — reenter L0 only for enabled fixed logics (never H8 time).
+      // Broker-side TP left DB ghost — reenter L0 for fixed logics + H8 time (same bar).
       const sideBots = await prisma.symbolBot.findMany({
         where: { accountId, symbol: g.symbol },
       });
@@ -1868,6 +1868,51 @@ async function healGhostBaskets(
           console.warn(
             `[engine] broker-TP reentry skip account=${accountId} ${g.symbol} ${dir}: ${re.error}`,
           );
+        }
+      } else {
+        // H8 time: keep trading session direction until next bar flatten.
+        const timeBot = sideBots.find(
+          (b) =>
+            b.enabled &&
+            isMartin9TimeLogic(b.logic) &&
+            symbolsMatch(b.symbol, g.symbol),
+        );
+        if (timeBot && timeBot.repeatEnabled !== false && canH8Enter() && !isInH8EntryQuiet()) {
+          const logic = normalizeLogicId(timeBot.logic);
+          const h8Sk = h8StateKey(accountId, g.symbol, logic);
+          let st = h8SessionState.get(h8Sk);
+          if (!st) {
+            st = (await loadH8StateFromDb(accountId, g.symbol, logic)) ?? undefined;
+            if (st) h8SessionState.set(h8Sk, st);
+          }
+          const reDir =
+            st?.direction === "BUY" || st?.direction === "SELL" ? st.direction : dir;
+          if (st?.barOpen != null) {
+            const lots = Math.max(0.01, Number(timeBot.startLots || 0.01));
+            const tpRoi = resolveLiveTakeProfitPct(logic, timeBot.takeProfitPct ?? 0);
+            const slPct = resolveLiveStopLossPct(logic, timeBot.stopLossPct ?? 0);
+            const re = await placeTpReentry({
+              accountId,
+              metaId,
+              symbol: g.symbol,
+              direction: reDir,
+              logic,
+              reentryLots: lots,
+              tpRoi,
+              stopLossPct: slPct,
+              stopLossEnabled: timeBot.stopLossEnabled ?? true,
+              noteTag: "reentry_after_broker_tp_h8",
+            });
+            if (!re.ok) {
+              console.warn(
+                `[engine] H8 broker-TP reentry skip account=${accountId} ${g.symbol} ${reDir}: ${re.error}`,
+              );
+            } else if (st) {
+              st.entered = true;
+              st.direction = reDir;
+              await rememberH8State(accountId, g.symbol, logic, st);
+            }
+          }
         }
       }
     } else if (kind === "SL") {
@@ -2288,11 +2333,11 @@ async function runSymbolTableDca(
   const h8Sk = timeLogic ? h8StateKey(accountId, symbol, logic) : "";
   let h8 = timeLogic ? h8SessionState.get(h8Sk) : undefined;
 
-  // H8: resolve session direction before ENTRY; one L0 per bar (no TP reentry)
+  // H8: lock session direction from barOpen; keep trading that side until next bar flatten.
+  // Quiet window (open~+15m): no new ENTRY while flat (open books still managed below).
   if (timeLogic && h8) {
     if (h8.direction) direction = h8.direction;
-    if (isInH8EntryQuiet() && (!h8.entered || !h8.direction)) {
-      // Quiet window with no open book yet — skip entirely
+    if (isInH8EntryQuiet() && (!h8.direction || !h8.entered)) {
       const hasBook =
         baskets.some(
           (b) => symbolsMatch(b.symbol, symbol) && b.legs.length > 0,
@@ -2426,7 +2471,7 @@ async function runSymbolTableDca(
         stopLossPct: resolveLiveStopLossPct(logic, cfg.stopLossPct),
         stopLossEnabled: cfg.stopLossEnabled,
         brokerLeverage: cfg.brokerLeverage,
-        allowReentry: !cfg.manageOnly && !timeLogic,
+        allowReentry: !cfg.manageOnly,
         repeatEnabled: cfg.repeatEnabled,
         reentryLots: levelLots(0),
       });
@@ -2478,23 +2523,31 @@ async function runSymbolTableDca(
     if (cfg.manageOnly) {
       return { ok: true as const, note: "manage_only_no_entry", symbol };
     }
-    // H8 time: only after +15m, with barOpen snap, once per session
+    // H8 time: after +15m with barOpen — lock direction once, then re-enter L0
+    // on every flat until the next H8 bar flatten (sessionKey rollover).
     if (timeLogic) {
       h8 = h8SessionState.get(h8Sk);
-      if (!h8 || h8.entered) {
-        return { ok: true as const, note: "h8_already_entered_or_skip", symbol };
+      if (!h8) {
+        return { ok: true as const, note: "h8_no_session_state", symbol };
+      }
+      if (isInH8EntryQuiet()) {
+        return { ok: true as const, note: "h8_entry_quiet", symbol };
       }
       if (!canH8Enter() || h8.barOpen == null) {
         return { ok: true as const, note: "h8_wait_or_no_bar_open", symbol };
       }
-      const mid = (price.bid + price.ask) / 2;
-      const dir = h8DirectionFromOpen(mid, h8.barOpen);
-      if (!dir) {
-        return { ok: true as const, note: "h8_flat_no_direction", symbol };
+      if (h8.direction === "BUY" || h8.direction === "SELL") {
+        direction = h8.direction;
+      } else {
+        const mid = (price.bid + price.ask) / 2;
+        const dir = h8DirectionFromOpen(mid, h8.barOpen);
+        if (!dir) {
+          return { ok: true as const, note: "h8_flat_no_direction", symbol };
+        }
+        direction = dir;
+        h8.direction = dir;
+        await rememberH8State(accountId, symbol, logic, h8);
       }
-      direction = dir;
-      h8.direction = dir;
-      await rememberH8State(accountId, symbol, logic, h8);
     }
     if (!(await canOpenNewRisk(accountId, symbol, direction))) {
       return { ok: true as const, note: "toggle_off_no_entry", symbol };
@@ -2854,7 +2907,7 @@ async function runSymbolTableDca(
       floatingRoi: tpDecision.floatingRoi,
       pnlSum: tpPnl.apiProfit,
       pnlForGuard: tpPnl.pnl,
-      allowReentry: !cfg.manageOnly && !timeLogic,
+      allowReentry: !cfg.manageOnly,
       stopLossPct: liveUsd.stopLossPct,
       stopLossEnabled: cfg.stopLossEnabled,
       brokerLeverage: brokerLev,

@@ -793,7 +793,7 @@ export default function BotPage() {
                         ) : null}
                         <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>
                           {isTimeDraft
-                            ? "제로마켓 H8(00/08/16) 새 봉에 전량 청산 → 15분 후 시가 대비 상승=BUY·하락=SELL. 봇 고정 방향은 무시됩니다."
+                            ? "제로마켓 H8(00/08/16) 새 봉에 전량 청산 → 15분 대기 후 시가 대비 상승=BUY·하락=SELL. 같은 봉 안에서는 익절 후에도 같은 방향으로 계속 재진입합니다. 봇 고정 방향은 무시됩니다."
                             : "BUY봇·SELL봇은 별도로 설정합니다."}
                         </p>
                       </div>
