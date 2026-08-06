@@ -1,0 +1,74 @@
+posts_per_day: 4
+# 매일 00:00에 4건 일괄 발행 (건당 delay_between_posts_sec 간격)
+post_times:
+  - "00:00"
+
+# 네이버 자동완성/검색수요 신호 기준으로 선별
+# 카테고리: 외환 · MT5 · 주식 · 지표 (순환)
+keywords:
+  # 외환
+  - "원달러 환율"
+  - "달러 환율 전망"
+  - "엔화 환율"
+  - "환전 수수료"
+  - "외환시장 시간"
+  - "해외선물 수수료"
+  - "해외선물 증거금"
+  - "해외선물 거래"
+  # MT5 / 자동매매
+  - "MT5 사용법"
+  - "메타트레이더5"
+  - "MT5 자동매매"
+  - "메타트레이더5 자동매매"
+  - "EA 자동매매"
+  - "해외선물 차트"
+  # 주식
+  - "주식 차트 보는법"
+  - "미국주식 사는법"
+  - "나스닥 선물"
+  - "배당주"
+  - "레버리지 ETF"
+  - "주식 용어"
+  - "골드 선물"
+  - "선물옵션"
+  # 지표 / 차트분석
+  - "RSI 지표"
+  - "이동평균선"
+  - "볼린저밴드"
+  - "MACD 지표"
+  - "스토캐스틱"
+  - "골든크로스"
+  - "기술적 분석"
+  - "차트 분석"
+
+# 비워두면 필수문구 강제 삽입 안 함
+required_phrases: []
+
+footer_link: "https://minestock.kr"
+
+body_image_count: 8
+
+openai:
+  text_model: "gpt-4o"
+  image_model: "gpt-image-2"
+  image_quality: "medium"
+  body_image_model: "gpt-image-1-mini"
+  body_image_quality: "low"
+
+content:
+  min_sections: 7
+  min_chars: 2400
+  include_faq: true
+  include_cta: true
+  brand_name: "올브릿지 노트"
+  style: "informational"
+
+publish:
+  confirm_dialog: true
+  delay_between_posts_sec: 90
+
+images:
+  width: 1200
+  height: 675
+  thumb_width: 1280
+  thumb_height: 720
