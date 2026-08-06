@@ -174,6 +174,8 @@ def run_one_keyword(
     pause: PauseFn | None = None,
     auto_publish: bool | None = None,
     category_no: int = 2,
+    profile_dir: Path | None = None,
+    forbidden_titles: set[str] | None = None,
 ) -> dict:
     """단일 키워드 작성(+선택 발행). E2E 검증용."""
     from .browser import create_driver
@@ -182,7 +184,7 @@ def run_one_keyword(
 
     _log = log or print
     do_publish = cfg.auto_publish if auto_publish is None else auto_publish
-    profile = cfg.root / ".chrome-profile"
+    profile = profile_dir or (cfg.root / ".chrome-profile-once")
     driver = create_driver(headless=cfg.headless, profile_dir=profile)
     result = {"keyword": keyword, "ok": False, "url": None, "title": None, "error": None}
     try:
@@ -196,6 +198,13 @@ def run_one_keyword(
             prefer_cookies=True,
         )
         post, thumb, bodies = prepare_post(cfg, keyword, log=_log)
+        banned = forbidden_titles or set()
+        if post.title.strip() in banned:
+            _log(f"[AI] 제목 중복 → 재생성: {post.title}")
+            post, thumb, bodies = prepare_post(cfg, keyword, log=_log)
+            if post.title.strip() in banned:
+                post.title = f"{keyword} 실무 가이드 {datetime.now():%m%d%H%M}"
+                _log(f"[AI] 제목 강제 유니크: {post.title}")
         result["title"] = post.title
         _log(f"글쓰기 창 진입 categoryNo={category_no}")
         open_write_page(driver, cfg.naver_id, category_no=category_no)
@@ -228,7 +237,10 @@ def run_one_keyword(
                 pause("종료하려면 확인")
             except Exception:
                 pass
-        driver.quit()
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
 def run_live_batch(
@@ -238,15 +250,46 @@ def run_live_batch(
     reuse_login: bool = True,
     log: LogFn | None = None,
     pause: PauseFn | None = None,
-) -> None:
+    keywords: list[str] | None = None,
+) -> list[dict]:
+    """성공한 건만 키워드 커서를 전진. 제목 중복 금지."""
     _log = log or print
     n = count or cfg.posts_per_day
     queue = KeywordQueue(cfg.keywords, cfg.root / "output" / "keyword_state.json")
-    batch = queue.next_batch(n)
     delay = int(cfg.publish.get("delay_between_posts_sec", 90))
+    used_titles: set[str] = set()
+    results: list[dict] = []
 
-    for i, kw in enumerate(batch, start=1):
+    for i in range(1, n + 1):
+        if keywords is not None:
+            if i - 1 >= len(keywords):
+                break
+            kw = keywords[i - 1]
+        else:
+            kw = queue.peek_one()
         _log(f"=== [{i}/{n}] 키워드: {kw} ===")
-        run_one_keyword(cfg, kw, log=_log, pause=pause, auto_publish=cfg.auto_publish)
+        try:
+            result = run_one_keyword(
+                cfg,
+                kw,
+                log=_log,
+                pause=pause,
+                auto_publish=cfg.auto_publish,
+                forbidden_titles=used_titles,
+            )
+        except Exception as e:  # noqa: BLE001
+            results.append({"keyword": kw, "ok": False, "error": str(e)})
+            _log(f"[BATCH] 실패로 중단: {kw} / {e}")
+            break
+        if result.get("title"):
+            used_titles.add(str(result["title"]).strip())
+        if result.get("ok") and keywords is None:
+            queue.commit_one(kw)
+        results.append(result)
         if i < n and cfg.auto_publish:
             time.sleep(delay)
+
+    out = cfg.root / "output" / f"batch_{datetime.now():%Y%m%d_%H%M%S}.json"
+    out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    _log(f"[BATCH] 결과 저장: {out}")
+    return results
