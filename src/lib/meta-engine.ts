@@ -4216,6 +4216,18 @@ async function runDcaTickInner(accountId: string, opts?: RunDcaTickOpts) {
               ownerLogic: logic,
             }),
           );
+        } else if (!st?.entered) {
+          // Direction chosen inside runSymbolTableDca — must still schedule a tick
+          // or H8 never resolves (godcjfl flat-with-barOpen regression).
+          const placeholder = b.direction === "SELL" ? "SELL" : "BUY";
+          const key = `${b.symbol}|${placeholder}`;
+          needed.set(
+            key,
+            mergeNeededSide(needed.get(key), {
+              manageOnly: !masterOn,
+              ownerLogic: logic,
+            }),
+          );
         }
         continue;
       }
