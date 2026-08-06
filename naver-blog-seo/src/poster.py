@@ -3,15 +3,12 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from openai import OpenAI
-
 from .ai_openai import generate_ai_images, generate_structured_article, make_client
 from .config_loader import AppConfig
-from .content import BlogPost, ContentBlock, build_seo_post_ai
+from .content import BlogPost, ContentBlock
 from .keyword_queue import KeywordQueue
 
 LogFn = Callable[[str], None]
@@ -24,58 +21,36 @@ def prepare_post(
     *,
     log: LogFn | None = None,
 ) -> tuple[BlogPost, Path, list[Path]]:
-    """원고 + 이미지를 병렬로 빠르게 생성."""
+    """원고 먼저 → 이미지 순차 생성 (OpenAI 모듈 데드락 방지)."""
     _log = log or print
     client = make_client(cfg.openai_api_key)
     out_dir = cfg.root / "assets" / "generated"
     section_count = max(cfg.body_image_count, 4)
 
-    def _text():
-        return generate_structured_article(
-            client,
-            keyword=keyword,
-            required_phrases=cfg.required_phrases,
-            brand_name=str(cfg.content.get("brand_name", "올브릿지 노트")),
-            footer_link=cfg.footer_link,
-            model=cfg.text_model,
-            section_count=section_count,
-            log=_log,
-        )
+    _log("[AI] 원고 생성 시작")
+    data = generate_structured_article(
+        client,
+        keyword=keyword,
+        required_phrases=cfg.required_phrases,
+        brand_name=str(cfg.content.get("brand_name", "올브릿지 노트")),
+        footer_link=cfg.footer_link,
+        model=cfg.text_model,
+        section_count=section_count,
+        log=_log,
+    )
+    thumb_text = str(data.get("thumb_text") or f"{keyword} 핵심 정리")
 
-    # 1차: 원고 먼저 짧게 받아서 thumb_text 확보 후 이미지 병렬도 가능하지만
-    # 속도를 위해 thumb_text 기본값으로 이미지와 원고을 동시에 시작
-    default_thumb = f"{keyword} 핵심 정리"
-
-    def _images(thumb_text: str = default_thumb):
-        return generate_ai_images(
-            client,
-            keyword=keyword,
-            out_dir=out_dir,
-            body_count=cfg.body_image_count,
-            image_model=cfg.image_model,
-            thumb_text=thumb_text,
-            api_key=cfg.openai_api_key,
-            log=_log,
-        )
-
-    _log("[AI] 원고·이미지 병렬 생성 시작")
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        fut_text = pool.submit(_text)
-        fut_imgs = pool.submit(_images, default_thumb)
-        data = fut_text.result()
-        thumb, bodies = fut_imgs.result()
-
-    # thumb_text가 기본과 다르면 오버레이 문구만 다시 적용(이미지 재생성 없음)
-    from .thumb_text import overlay_keyword_on_thumbnail
-
-    thumb_text = str(data.get("thumb_text") or default_thumb)
-    if thumb_text != default_thumb and thumb.exists():
-        thumb = overlay_keyword_on_thumbnail(
-            thumb,
-            thumb.parent / "thumb_final.jpg",
-            keyword=keyword,
-            subtitle=thumb_text,
-        )
+    _log("[AI] 이미지 생성 시작")
+    thumb, bodies = generate_ai_images(
+        client,
+        keyword=keyword,
+        out_dir=out_dir,
+        body_count=cfg.body_image_count,
+        image_model=cfg.image_model,
+        thumb_text=thumb_text,
+        api_key=cfg.openai_api_key,
+        log=_log,
+    )
 
     blocks = [
         ContentBlock(type=b["type"], text=b.get("text") or "", url=str(b.get("url") or ""))
