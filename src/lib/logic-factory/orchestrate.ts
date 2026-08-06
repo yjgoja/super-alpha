@@ -8,6 +8,7 @@ import {
 import { promoteWinner } from "./promote";
 import { simulateCandidate } from "./simulate";
 import { appendAudit, factoryOutDir, persistEpoch } from "./store";
+import { maybeSendFactoryDailyTelegram } from "./telegram";
 import type {
   FactoryCandidate,
   FactoryConfig,
@@ -181,6 +182,27 @@ export async function runFactoryLoop(cfg: FactoryConfig) {
         .slice(0, cfg.eliteCount)
         .map((c) => c.meta.genome as StrategyGenomeV1)
         .filter(Boolean);
+    }
+
+    // Continuous discovery never Telegram-spams.
+    // Daily digest is GHA `logic-factory-daily` at KST 12:00 only
+    // (`scripts/logic-factory-daily-report.ts --force`).
+    // Opt-in: FACTORY_TELEGRAM_FROM_WORKER=1 enables noon gate inside the loop.
+    if (process.env.FACTORY_TELEGRAM_FROM_WORKER === "1") {
+      try {
+        const tg = await maybeSendFactoryDailyTelegram();
+        if (tg.sent) {
+          console.log(`   📬 telegram daily ok ${tg.dayKey}`);
+        } else if (
+          tg.reason &&
+          !tg.reason.startsWith("outside") &&
+          tg.reason !== "telegram not configured"
+        ) {
+          console.log(`   📬 telegram skip: ${tg.reason}`);
+        }
+      } catch (e) {
+        appendAudit(`TELEGRAM_DAILY_ERR ${(e as Error).message}`);
+      }
     }
 
     generation += 1;
