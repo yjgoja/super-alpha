@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "Agent(*)",
+      "Skill(*)",
+      "mcp__*"
+    ],
+    "defaultMode": "auto"
+  },
+  "attribution": {
+    "commit": "Co-Authored-By: 슈퍼알파 자동화 <noreply@superalpha.kr>"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | { read -r f; if [[ \"$f\" == *.ts || \"$f\" == *.tsx || \"$f\" == *.js || \"$f\" == *.jsx ]]; then echo \"🔍 타입 검사: $f\" && npx tsc --noEmit || exit 1; fi }",
+            "statusMessage": "타입스크립트 검사 중...",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "skillOverrides": {
+    "alpha-deploy": "user-invocable-only",
+    "alpha-safe": "user-invocable-only",
+    "alpha-engine": "user-invocable-only"
+  }
+}

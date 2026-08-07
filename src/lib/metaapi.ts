@@ -1358,8 +1358,9 @@ function isTradeCreditExhausted(data: unknown): boolean {
       : data && typeof data === "object"
         ? JSON.stringify(data)
         : "";
-  return /cpu credits per 6h|trade API allows|ws:trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(
-    raw,
+  return (
+    /cpu credits per 6h|trade API allows|ws:trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(raw) ||
+    /429|rate.?limit|too.?many.?requests/i.test(raw)
   );
 }
 

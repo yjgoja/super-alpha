@@ -1852,7 +1852,7 @@ async function healGhostBaskets(
     const last = symDeals
       .filter((d) => {
         const t = new Date(d.time || 0).getTime();
-        return !basketCreatedMs || !Number.isFinite(t) || t >= basketCreatedMs - 5_000;
+        return !basketCreatedMs || !Number.isFinite(t) || t >= basketCreatedMs - 60_000;
       })
       .sort(
         (a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime(),
@@ -2471,7 +2471,8 @@ async function runSymbolTableDca(
     if (levelIndex === 0 && cfg.startLots > 0) {
       return Math.max(0.01, Math.round(cfg.startLots * 100) / 100);
     }
-    const row = levels[levelIndex] || levels[0];
+    const levelIdx = Math.max(0, Math.min(levelIndex, levels.length - 1));
+    const row = levels[levelIdx];
     return lotsForLogicLevel(
       logic,
       levelIndex,
@@ -3146,7 +3147,7 @@ async function runSymbolTableDca(
       takeProfitPct: dcaTpPct,
       stopLossPct: slRoiFallback,
       brokerLeverage: brokerLev,
-      brokerMarginSum: null,
+      brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
     });
     let stopsLevelPoints = 0;
     try {

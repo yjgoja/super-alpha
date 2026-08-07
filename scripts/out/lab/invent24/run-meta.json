@@ -1,0 +1,119 @@
+{
+  "runId": "invent24",
+  "startedAtMs": 1785326838591,
+  "updatedAtMs": 1786094070065,
+  "cpus": 32,
+  "workers": 14,
+  "symbols": [
+    "XAUUSD",
+    "GBPUSD"
+  ],
+  "seeds": [
+    1000,
+    2000,
+    3000,
+    5000,
+    10000,
+    30000
+  ],
+  "screenSeed": 1000,
+  "windows": {
+    "full": {
+      "fromMs": 1780272000000,
+      "toMs": 1785196800000
+    },
+    "stage2": {
+      "fromMs": 1780272000000,
+      "toMs": 1781395200000
+    }
+  },
+  "deepWindow": {
+    "fromMs": 1767312000000,
+    "toMs": 1785196800000
+  },
+  "stage3Bar": {
+    "maxTotalLiq": 2,
+    "maxMddPctPeak": 50
+  },
+  "stage2Bar": {
+    "maxTotalLiq": 2,
+    "maxMddPctPeak": 50
+  },
+  "walkForwardPolicy": {
+    "trainMonths": 2,
+    "testMonths": 1,
+    "stepMonths": 1,
+    "minPassingFolds": 3,
+    "maxMddPctPeak": 50,
+    "maxTotalLiq": 2,
+    "note": "Broker server time (UTC getters on stored ms). Default 2m train / 1m test / step 1 → 5 folds on Jan–Jul; require ≥3 passing. Product owner may override."
+  },
+  "genetic": {
+    "seedBase": 101,
+    "populationSize": 96,
+    "mutationRate": 0.2,
+    "crossoverRate": 0.7,
+    "eliteCount": 6,
+    "tournamentSize": 3,
+    "immigrantRate": 0.25,
+    "stagnationGenerations": 5,
+    "stagnationAction": "both",
+    "mutationWidenFactor": 2,
+    "neighbourRadius": 2,
+    "maxFeasibilityAttempts": 400,
+    "generationsPerEpoch": 50,
+    "epochStagnationGenerations": 12,
+    "note": "Maxed for solo invent on this PC (live24 not co-running)."
+  },
+  "deep": {
+    "maxPerGeneration": 12,
+    "probePerGeneration": 2,
+    "probeEveryGenerations": 3,
+    "probeMinStage": 2,
+    "hallOfFameSize": 60,
+    "note": "More deep slots so Grok proposals hit ranking/Telegram faster."
+  },
+  "genomeAxes": 28,
+  "searchSpace": {
+    "perAxis": {
+      "symbol": 2,
+      "direction": 3,
+      "defenseBandPct": 11,
+      "accountLossPctAtBand": 9,
+      "levelCount": 5,
+      "spacing": 9,
+      "takeProfitUsd": 4,
+      "ladderMode": 3,
+      "equityBasis": 3,
+      "lotMode": 3,
+      "lotStartLot": 6,
+      "lotMultiplier": 6,
+      "lotTableStartLots": 3,
+      "lotSeedScaling": 2,
+      "signalFamily": 5,
+      "signalTimeframe": 3,
+      "signalDirection": 6,
+      "signalGates": 3,
+      "cooldownAfterTpMs": 7,
+      "cooldownAfterDefenseMs": 7,
+      "weekendPolicy": 2,
+      "noEntryBeforeCloseH": 5,
+      "openBurstBlock": 2,
+      "strategyFamily": 5,
+      "maxHoldMs": 4,
+      "trailStopPct": 5,
+      "hedgeTriggerPctSeed": 4,
+      "hedgeLotRatio": 3
+    },
+    "raw": 197991958348800000
+  },
+  "epoch": 184,
+  "generation": 5,
+  "candidatesEvaluated": 207191,
+  "deepEvaluated": 26517,
+  "candidatesPerSec": 0.297,
+  "bytesPerCandidateRow": 735,
+  "candidatesJsonlBytes": 74954,
+  "projected24hBytes": 18859862,
+  "rssMB": 4286
+}

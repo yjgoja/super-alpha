@@ -559,7 +559,7 @@ export function liveBasketTpSlUsd(opts: {
  * (동치) pnl ≥ takeProfitUsd (= margin×TP%/100).
  */
 /** ROI% 비교 허용오차 — float (pnl/margin*100) 경계 미달 방지 */
-const ROI_CMP_EPS = 1e-6;
+const ROI_CMP_EPS = 1e-9;
 
 export function shouldTriggerTakeProfit(opts: {
   /** 심볼 합산 미실현 손익($) = BasketProfit */
@@ -581,7 +581,7 @@ export function shouldTriggerTakeProfit(opts: {
   const floatingRoi = mt5FloatingRoiPct(opts.pnl, margin);
   // 마진 ROI와 $ 목표 동치 (반올림·float 오차 흡수: 둘 중 하나면 히트)
   const hitRoi = margin > 0 && tpRoi > 0 && floatingRoi + ROI_CMP_EPS >= tpRoi;
-  const hitUsd = tpMoney > 0 && opts.pnl + 1e-9 >= tpMoney;
+  const hitUsd = tpMoney > 0 && opts.pnl + ROI_CMP_EPS >= tpMoney;
   return { hit: hitRoi || hitUsd, floatingRoi, tpMoney, tpRoi };
 }
 
@@ -603,8 +603,8 @@ export function shouldTriggerStopLossUsd(opts: {
     sl = roiPctToUsd(margin, slRoi);
   }
   const floatingRoi = mt5FloatingRoiPct(opts.pnl, margin);
-  const hitRoi = margin > 0 && slRoi > 0 && floatingRoi - ROI_CMP_EPS <= -slRoi;
-  const hitUsd = sl > 0 && opts.pnl - 1e-9 <= -sl;
+  const hitRoi = margin > 0 && slRoi > 0 && floatingRoi <= -slRoi + ROI_CMP_EPS;
+  const hitUsd = sl > 0 && opts.pnl <= -sl + ROI_CMP_EPS;
   return {
     hit: hitRoi || hitUsd,
     stopLossUsd: sl,
