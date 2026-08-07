@@ -1,0 +1,83 @@
+name: Render Factory Deploy
+
+# Deploys the continuous logic-factory worker `super-alpha-logic-factory`.
+# It is defined in render.yaml with autoDeploy:false and previously had NO deploy
+# path at all — the Blueprint described a worker that was never shipped, so the
+# "primary unattended factory" never actually ran.
+#
+# Requires repo secret: RENDER_API_KEY
+# Optional: RENDER_FACTORY_SERVICE_ID (srv-...) if name lookup is ambiguous.
+#
+# NOTE: RENDER_SERVICE_ID is deliberately NOT passed here — that secret points at
+# super-alpha-engine, and render-deploy.ts prefers the id over the name, so
+# passing it would redeploy the trading engine instead of the factory.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/lib/logic-factory/**"
+      - "src/lib/strategy-inventor*"
+      - "scripts/logic-factory-run.ts"
+      - "render.yaml"
+      - "Dockerfile.engine"
+      - ".github/workflows/render-factory-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit SHA to deploy (empty = this workflow SHA)"
+        required: false
+        default: ""
+      status_only:
+        description: "Only report status, do not deploy"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+
+concurrency:
+  group: render-factory-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Require RENDER_API_KEY
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::RENDER_API_KEY secret missing."
+            exit 1
+          fi
+
+      - name: Status — super-alpha-logic-factory
+        continue-on-error: true
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_FACTORY_SERVICE_ID }}
+          RENDER_SERVICE_NAME: super-alpha-logic-factory
+        run: npx tsx scripts/render-deploy.ts --status
+
+      - name: Deploy super-alpha-logic-factory
+        if: ${{ inputs.status_only != 'true' }}
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_FACTORY_SERVICE_ID }}
+          RENDER_SERVICE_NAME: super-alpha-logic-factory
+          RENDER_COMMIT: ${{ inputs.commit || github.sha }}
+          RENDER_WAIT: "1"
+        run: npx tsx scripts/render-deploy.ts --wait

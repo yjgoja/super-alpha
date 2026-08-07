@@ -152,12 +152,28 @@ async function pingDatabase() {
   await prisma.$queryRaw`SELECT 1`;
 }
 
+/**
+ * Release locks orphaned by a crashed engine — and ONLY those.
+ *
+ * This used to be an unfiltered updateMany, so every boot wiped the locks a
+ * *live* Render worker was holding mid-tick, defeating the cross-instance mutex
+ * in meta-engine (`tryAcquireTickLock`) and letting two engines trade the same
+ * account. Stay in sync with ENGINE_TICK_LOCK_STALE_MS there.
+ */
 async function clearStaleTickLocks() {
+  const staleMs = Math.max(
+    90_000,
+    Number(process.env.ENGINE_TICK_LOCK_STALE_MS || 180_000),
+  );
+  const staleBefore = new Date(Date.now() - staleMs);
   const r = await prisma.brokerAccount.updateMany({
+    where: { tickLockedAt: { lt: staleBefore } },
     data: { tickLockedAt: null },
   });
   if (r.count > 0) {
-    console.log(`[direct] cleared tick locks on ${r.count} account(s)`);
+    console.log(
+      `[direct] cleared ${r.count} stale tick lock(s) (older than ${Math.round(staleMs / 1000)}s)`,
+    );
   }
 }
 

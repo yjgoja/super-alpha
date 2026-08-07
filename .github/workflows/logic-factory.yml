@@ -1,5 +1,7 @@
-# Soft backup: run one logic-factory generation when secrets exist.
-# Primary unattended loop is Render worker `super-alpha-logic-factory`.
+# SMOKE TEST ONLY — runs one dry generation to prove the factory pipeline works.
+# It never persists and never promotes (no DATABASE_URL secret, and --dry-promote).
+# The real unattended factory is the Render worker `super-alpha-logic-factory`
+# (see render.yaml + .github/workflows/render-factory-deploy.yml).
 name: logic-factory-once
 
 on:
@@ -19,24 +21,28 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      # Without DATABASE_URL the run still simulates and prints a winner, but the
-      # epoch row and the promotion are dropped — the job went green for months
-      # while producing nothing usable. Fail loudly instead.
-      - name: Preflight — require DB secrets
+      # This job is a SMOKE TEST, not the factory. secrets.DATABASE_URL is not
+      # set, so nothing here can persist an epoch or promote a logic — it only
+      # proves the pipeline still compiles and produces a ranked winner.
+      # The real factory is the Render worker `super-alpha-logic-factory`,
+      # which gets DATABASE_URL from the Blueprint (fromDatabase).
+      - name: Note run mode
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::error::secrets.DATABASE_URL 이 비어 있습니다. 이 상태로 돌리면 결과가 DB에 저장되지 않고 승격도 되지 않습니다."
-            echo "::error::리포지토리 Settings > Secrets and variables > Actions 에서 DATABASE_URL (필요시 DIRECT_URL) 을 추가하세요."
-            exit 1
+            echo "::warning::DATABASE_URL 미설정 — 스모크 테스트로만 실행합니다(저장/승격 없음). 실제 공장은 Render worker super-alpha-logic-factory 입니다."
+          else
+            echo "DATABASE_URL 있음 — 결과가 DB에 저장됩니다."
           fi
-      - name: Run one factory generation
+      - name: Run one factory generation (dry)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           METAAPI_TOKEN: ${{ secrets.METAAPI_TOKEN }}
-          FACTORY_AUTO_PROMOTE: ${{ secrets.FACTORY_AUTO_PROMOTE || '1' }}
           FACTORY_MAX_LOTS: "0.05"
           FACTORY_SYMBOLS: "GBPUSD,EURUSD"
-        run: npx tsx scripts/logic-factory-run.ts --once --n 24 --stride 20
+        # --dry-promote is deliberate and must stay: a CI runner must never push
+        # a freshly invented logic onto live accounts. Promotion belongs to the
+        # Render worker, which runs continuously and can gate on open baskets.
+        run: npx tsx scripts/logic-factory-run.ts --once --n 24 --stride 20 --dry-promote
