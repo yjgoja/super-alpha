@@ -5,7 +5,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci && npx prisma generate
+RUN npm ci --prefer-offline --no-audit && npx prisma generate
 
 COPY scripts ./scripts
 COPY src ./src
