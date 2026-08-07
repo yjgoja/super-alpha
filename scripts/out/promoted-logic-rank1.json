@@ -1,0 +1,119 @@
+{
+  "id": "martin_9_65",
+  "name": "알파 코어 로직 - 6.5%",
+  "chartPct": 6.5,
+  "slRoi": 2191.7,
+  "profitRoi": 10,
+  "levels": [
+    {
+      "level": 0,
+      "lotsThis": 0.01,
+      "lotsCum": 0.01,
+      "drop": 0,
+      "profitRoi": 10,
+      "nextDcaRoi": 97,
+      "margin": 8.16,
+      "tpUsd": 0.82,
+      "slUsd": 178.84,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 1,
+      "lotsThis": 0.02,
+      "lotsCum": 0.03,
+      "drop": 97,
+      "profitRoi": 10,
+      "nextDcaRoi": 195,
+      "margin": 24.48,
+      "tpUsd": 2.45,
+      "slUsd": 536.53,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 2,
+      "lotsThis": 0.04,
+      "lotsCum": 0.07,
+      "drop": 195,
+      "profitRoi": 10,
+      "nextDcaRoi": 195,
+      "margin": 57.12,
+      "tpUsd": 5.71,
+      "slUsd": 1251.9,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 3,
+      "lotsThis": 0.08,
+      "lotsCum": 0.15,
+      "drop": 195,
+      "profitRoi": 10,
+      "nextDcaRoi": 292,
+      "margin": 122.4,
+      "tpUsd": 12.24,
+      "slUsd": 2682.64,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 4,
+      "lotsThis": 0.16,
+      "lotsCum": 0.31,
+      "drop": 292,
+      "profitRoi": 10,
+      "nextDcaRoi": 292,
+      "margin": 252.96,
+      "tpUsd": 25.3,
+      "slUsd": 5544.12,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 5,
+      "lotsThis": 0.32,
+      "lotsCum": 0.63,
+      "drop": 292,
+      "profitRoi": 10,
+      "nextDcaRoi": 292,
+      "margin": 514.08,
+      "tpUsd": 51.41,
+      "slUsd": 11267.09,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 6,
+      "lotsThis": 0.64,
+      "lotsCum": 1.27,
+      "drop": 292,
+      "profitRoi": 10,
+      "nextDcaRoi": 390,
+      "margin": 1036.32,
+      "tpUsd": 103.63,
+      "slUsd": 22713.03,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 7,
+      "lotsThis": 1.28,
+      "lotsCum": 2.55,
+      "drop": 390,
+      "profitRoi": 10,
+      "nextDcaRoi": 390,
+      "margin": 2080.8,
+      "tpUsd": 208.08,
+      "slUsd": 45604.89,
+      "slRoi": 2191.7
+    },
+    {
+      "level": 8,
+      "lotsThis": 2.56,
+      "lotsCum": 5.11,
+      "drop": 390,
+      "profitRoi": 10,
+      "nextDcaRoi": null,
+      "margin": 4169.76,
+      "tpUsd": 416.98,
+      "slUsd": 91388.63,
+      "slRoi": 2191.7
+    }
+  ],
+  "promotedAt": "2026-08-07T18:15:04.834Z",
+  "rank": 1
+}
