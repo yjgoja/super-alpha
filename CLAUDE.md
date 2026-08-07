@@ -121,11 +121,17 @@ git push origin master
 
 ## 🏗️ 실행 위치 (2026-08-07 정리)
 
+**셋은 서로 완전히 별개다.** 하나가 죽어도 나머지는 영향받지 않는다.
+
 | 무엇 | 어디서 | 자동시작 | 비고 |
 |---|---|---|---|
 | **거래 엔진** | Render `super-alpha-engine` | GH Actions (master push) | **PC에서 돌리지 말 것** |
 | **로직공장** | 내 PC `scripts/start-factory.ps1` | 시작프로그램 `LogicFactoryInvent.lnk` | dry-promote(발굴만) |
+| **감시 알림** | 내 PC `scripts/start-monitor.ps1` | 시작프로그램 `SuperAlphaMonitor.lnk` | 텔레그램, 관측만 |
 | 공장 스모크테스트 | GH Actions 6시간마다 | cron | 저장·승격 안 함 |
+
+감시는 DB만 읽고 텔레그램으로 알린다. 엔진·공장을 제어하지 않는다.
+PC가 꺼져 있으면 공장과 감시는 멈춘다(엔진은 계속 돈다).
 
 ### ⛔ 로컬 엔진을 켜지 말 것
 `scripts/start-engine.ps1`은 남겨뒀지만 시작프로그램에서 **비활성화**했다
