@@ -33,7 +33,8 @@
     "verify:bot-resolve": "tsx scripts/_verify-bot-resolve.ts",
     "verify:session-h8": "tsx scripts/_verify-session-h8.ts",
     "render:deploy": "tsx scripts/render-deploy.ts --sync-env --wait",
-    "render:status": "tsx scripts/render-deploy.ts --status"
+    "render:status": "tsx scripts/render-deploy.ts --status",
+    "verify:lot-divergence": "tsx scripts/_verify-lot-divergence.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

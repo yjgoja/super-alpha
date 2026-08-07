@@ -1437,6 +1437,27 @@ function sleepMs(ms: number) {
 }
 
 /** DB legs ahead of live volume — real mismatch (not 1-tick snapshot lag). */
+/**
+ * Fail-closed guard: is the broker already holding more than the ladder says?
+ *
+ * confirmLiveVolumeIncreased() can time out while the order still lands at the
+ * broker a moment later. The leg is then never written, basket.filledLevel stays
+ * put, and the next tick re-orders the same rung — silently doubling the
+ * position. Observed 2026-08-08 on a live GBPUSD basket: DB 10.16 lots vs broker
+ * 31.28 lots, -5,936 unrealized.
+ *
+ * 10% tolerance (min 0.02 lots) absorbs partial fills and rounding without
+ * letting a whole extra rung through.
+ */
+export function shouldBlockDcaForLotDivergence(opts: {
+  ladderLots: number;
+  brokerLots: number;
+}) {
+  if (!(opts.ladderLots > 0)) return false;
+  const tolerance = Math.max(0.02, opts.ladderLots * 0.1);
+  return opts.brokerLots > opts.ladderLots + tolerance;
+}
+
 export function shouldSoftReconcileLegLag(opts: {
   dbLegCount: number;
   livePosCount: number;
@@ -2821,6 +2842,24 @@ async function runSymbolTableDca(
   }
 
   let legs = basket.legs.sort((a, b) => a.level - b.level);
+
+  // 반대 방향 괴리: 브로커가 DB보다 많이 들고 있는 경우.
+  // shouldSoftReconcileLegLag 는 dbLegCount <= livePosCount 에서 즉시 false 라
+  // 이 방향은 재동기화도, 경고도 없었다. 2026-08-08 실계좌에서 DB 10.16 lots /
+  // 브로커 31.28 lots 까지 벌어지도록 아무 신호가 없었다.
+  //
+  // 위로 재동기화하지 않는다: filledLevel 을 올리면 더 큰 물타기 회차가 풀려서
+  // 오히려 위험하다. 여기서는 드러내기만 하고, 실제 차단은 아래 DCA 가드가 한다.
+  if (ourPositions.length > legs.length && legs.length > 0) {
+    const dbLots = legs.reduce((s, l) => s + l.lots, 0);
+    const liveLots = ourPositions.reduce((s, p) => s + p.lots, 0);
+    if (liveLots > dbLots + Math.max(0.02, dbLots * 0.1)) {
+      console.error(
+        `[engine] LOT DIVERGENCE account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} dbLots=${dbLots.toFixed(2)} liveLots=${liveLots.toFixed(2)} — broker ahead of DB, DCA blocked until resolved`,
+      );
+    }
+  }
+
   // DB 레그 > 라이브 포지션: 스냅샷 지연일 수도, phantom DCA일 수도 있음.
   // 강제청산 금지. 볼륨이 크게 앞서면 live로 soft reconcile 후 계속.
   // 소폭 지연(방금 체결)이면 이번 틱 DCA만 막고 hold.
@@ -3131,6 +3170,34 @@ async function runSymbolTableDca(
     }
 
     const lots = levelLots(next);
+
+    // Fail-closed: refuse to add risk while the broker holds more than the
+    // ladder accounts for.
+    //
+    // When confirmLiveVolumeIncreased() times out, the DCA leg is never written
+    // and basket.filledLevel stays put — but the order can still land at the
+    // broker moments later. The next tick then re-orders the same level, and the
+    // position silently doubles. Observed 2026-08-08 on a live GBPUSD basket:
+    // DB said 10.16 lots, the broker held 31.28.
+    {
+      let ladderLots = 0;
+      for (let i = 0; i <= filled; i++) ladderLots += levelLots(i);
+      if (shouldBlockDcaForLotDivergence({ ladderLots, brokerLots: posVol })) {
+        console.error(
+          `[engine] DCA BLOCKED account=${accountId} ${symbol} ${direction} L${next} — broker=${posVol.toFixed(2)} lots > ladder=${ladderLots.toFixed(2)} (filledLevel=${filled}). Lot divergence; refusing to add.`,
+        );
+        return {
+          ok: true as const,
+          action: "hold",
+          symbol,
+          note: `dca_blocked_lot_divergence broker=${posVol.toFixed(2)} ladder=${ladderLots.toFixed(2)}`,
+          filled,
+          actions,
+          spreadPct: spr,
+        };
+      }
+    }
+
     const estFill = mt5EntryQuote(direction, price.bid, price.ask);
     const projLots = posVol + lots;
     const projAvg =
@@ -3882,6 +3949,27 @@ async function runSymbolDca(
   if (nextLevel < maxLevels) {
     // 순수 바스켓 마진 ROI ≤ -needRoi% (가격 로직 없음)
     const lots = lotsAtLevel(cfg.startLots, cfg.entryMultiplier, nextLevel, logic);
+
+    // Same fail-closed lot-divergence guard as the ladder path above: never add
+    // risk while the broker already holds more than the ladder accounts for.
+    {
+      let ladderLots = 0;
+      for (let i = 0; i <= basket.filledLevel; i++) {
+        ladderLots += lotsAtLevel(cfg.startLots, cfg.entryMultiplier, i, logic);
+      }
+      if (shouldBlockDcaForLotDivergence({ ladderLots, brokerLots: posVol })) {
+        console.error(
+          `[engine] DCA BLOCKED account=${accountId} ${symbol} ${direction} L${nextLevel} — broker=${posVol.toFixed(2)} lots > ladder=${ladderLots.toFixed(2)} (filledLevel=${basket.filledLevel}). Lot divergence; refusing to add.`,
+        );
+        return {
+          ok: true as const,
+          action: "hold",
+          symbol,
+          note: `dca_blocked_lot_divergence broker=${posVol.toFixed(2)} ladder=${ladderLots.toFixed(2)}`,
+        };
+      }
+    }
+
     const needRoi = (cfg.entryIntervalPct || 5) * nextLevel;
     const dcaHit = shouldTriggerDcaRoi({
       pnl: tpPnl.pnl,
