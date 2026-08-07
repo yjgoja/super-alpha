@@ -119,6 +119,24 @@ git push origin master
 
 ---
 
+## 🏗️ 실행 위치 (2026-08-07 정리)
+
+| 무엇 | 어디서 | 자동시작 | 비고 |
+|---|---|---|---|
+| **거래 엔진** | Render `super-alpha-engine` | GH Actions (master push) | **PC에서 돌리지 말 것** |
+| **로직공장** | 내 PC `scripts/start-factory.ps1` | 시작프로그램 `LogicFactoryInvent.lnk` | dry-promote(발굴만) |
+| 공장 스모크테스트 | GH Actions 6시간마다 | cron | 저장·승격 안 함 |
+
+### ⛔ 로컬 엔진을 켜지 말 것
+`scripts/start-engine.ps1`은 남겨뒀지만 시작프로그램에서 **비활성화**했다
+(`SuperAlphaEngine.lnk.disabled`). Render 엔진과 같은 DB를 쓰기 때문에 동시에 켜면
+같은 계좌를 두 엔진이 틱한다. 교차 인스턴스 뮤텍스는 `BrokerAccount.tickLockedAt`이며
+`meta-engine.tryAcquireTickLock`이 관리한다 — 이걸 무조건 초기화하는 코드를 절대 넣지 말 것.
+
+### 공장 승격을 실계좌에 반영하려면
+기본은 `--dry-promote`(발굴만). 자동 승격을 켜려면 `FACTORY_ALLOW_PROMOTE=1`.
+켜기 전에 사람이 후보를 확인할 것.
+
 ## 🔍 모니터링
 
 ### 배포 후 검증
