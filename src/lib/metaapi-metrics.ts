@@ -54,7 +54,9 @@ export function recordMetaApiHttp(opts: {
   if (opts.status >= 400 || opts.status === 0) {
     totals.errors += 1;
     window.errors += 1;
-    const detailKey = `${opts.status}:${key}`;
+    // 심볼까지 붙여야 "어느 종목이 404인지"가 보인다. 계좌 id/URL 은 남기지 않는다.
+    const sym = opts.pathName.match(/\/symbols\/([^/?]+)/)?.[1];
+    const detailKey = sym ? `${opts.status}:${key}:${decodeURIComponent(sym)}` : `${opts.status}:${key}`;
     errorDetail.set(detailKey, (errorDetail.get(detailKey) ?? 0) + 1);
   }
 }
