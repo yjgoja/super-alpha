@@ -24,6 +24,16 @@ const totals: Bucket = {
 let windowStart = Date.now();
 const window: Bucket = { ...totals };
 
+/**
+ * Per-status × category error breakdown.
+ *
+ * The aggregate `err=` counter told us 8-14 MetaAPI calls a minute were failing
+ * but not which ones, so the cause stayed unknown. Key is `${status}:${category}`
+ * (e.g. "429:price", "0:snapshot") — enough to separate rate limits from
+ * network drops from genuine 4xx without logging account ids or URLs.
+ */
+const errorDetail = new Map<string, number>();
+
 function classify(pathName: string, method: string): keyof Bucket {
   const p = pathName.toLowerCase();
   if (p.includes("account-information") || p.includes("/positions")) return "snapshot";
@@ -44,7 +54,14 @@ export function recordMetaApiHttp(opts: {
   if (opts.status >= 400 || opts.status === 0) {
     totals.errors += 1;
     window.errors += 1;
+    const detailKey = `${opts.status}:${key}`;
+    errorDetail.set(detailKey, (errorDetail.get(detailKey) ?? 0) + 1);
   }
+}
+
+/** Error breakdown for the current window, busiest first. */
+export function peekMetaApiErrorDetail() {
+  return [...errorDetail.entries()].sort((a, b) => b[1] - a[1]);
 }
 
 export function peekMetaApiHttpWindow() {
@@ -76,13 +93,20 @@ export function resetMetaApiHttpWindow() {
   window.trade = 0;
   window.other = 0;
   window.errors = 0;
+  errorDetail.clear();
 }
 
 export function logMetaApiHttpWindow(tag = "metaapi-http") {
   const snap = peekMetaApiHttpWindow();
+  const detail = peekMetaApiErrorDetail();
   console.log(
     `[${tag}] perMin total=${snap.perMinute.total} snap=${snap.perMinute.snapshot} price=${snap.perMinute.price} hist=${snap.perMinute.history} trade=${snap.perMinute.trade} err=${snap.perMinute.errors} windowSec=${Math.round(snap.elapsedMs / 1000)}`,
   );
+  if (detail.length > 0) {
+    console.log(
+      `[${tag}-err] ${detail.map(([k, n]) => `${k}=${n}`).join(" ")}`,
+    );
+  }
   resetMetaApiHttpWindow();
   return snap;
 }

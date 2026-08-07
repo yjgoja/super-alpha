@@ -1499,8 +1499,14 @@ async function confirmLiveVolumeIncreased(opts: {
   const need = opts.beforeLots + Math.max(0.01, opts.expectedAdd) * 0.85;
   let afterLots = opts.beforeLots;
   let fillPrice = 0;
-  for (let i = 0; i < 5; i++) {
-    await sleepMs(i === 0 ? 350 : 700);
+  // 기존 5회/약 3.4초는 브로커가 붐빌 때 늦은 체결을 놓쳤다. 놓치면 레그가
+  // 기록되지 않은 채 주문만 체결돼 DB/브로커 물량이 영구히 어긋난다
+  // (2026-08-08 실계좌 10.16 vs 31.28 lots). 창을 넓혀 고아 레그를 줄인다.
+  // DCA/진입 때만 도는 경로라 틱 예산(ENGINE_BUDGET_MS 600s)에 여유가 있다.
+  const attempts = Math.max(5, Number(process.env.METAAPI_CONFIRM_ATTEMPTS || 8));
+  const stepMs = Math.max(300, Number(process.env.METAAPI_CONFIRM_STEP_MS || 900));
+  for (let i = 0; i < attempts; i++) {
+    await sleepMs(i === 0 ? 350 : stepMs);
     const snap = await fetchSnapshot(opts.metaId, {
       allowStaleMs: 0,
       allowStaleOnRateLimit: false,
@@ -3334,8 +3340,8 @@ async function runSymbolTableDca(
       expectedAdd: lots,
     });
     if (!dcaConfirm.ok) {
-      console.warn(
-        `[engine] dca order ok but volume missing account=${accountId} ${symbol} L${next} before=${posVol} after=${dcaConfirm.afterLots}`,
+      console.error(
+        `[engine] ORPHAN FILL RISK: dca order ok but volume missing account=${accountId} ${symbol} L${next} before=${posVol} after=${dcaConfirm.afterLots} — 레그 미기록. 늦게 체결되면 DB/브로커 물량이 어긋난다.`,
       );
       return {
         ok: false as const,
@@ -4122,8 +4128,8 @@ async function runSymbolDca(
         expectedAdd: lots,
       });
       if (!dcaConfirm.ok) {
-        console.warn(
-          `[engine] dca order ok but volume missing account=${accountId} ${symbol} L${nextLevel} after=${dcaConfirm.afterLots}`,
+        console.error(
+          `[engine] ORPHAN FILL RISK: dca order ok but volume missing account=${accountId} ${symbol} L${nextLevel} after=${dcaConfirm.afterLots} — 레그 미기록. 늦게 체결되면 DB/브로커 물량이 어긋난다.`,
         );
         return { ok: false as const, error: "dca_ok_but_not_on_book", symbol };
       }
