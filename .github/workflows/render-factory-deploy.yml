@@ -11,16 +11,11 @@ name: Render Factory Deploy
 # NOTE: RENDER_SERVICE_ID is deliberately NOT passed here — that secret points at
 # super-alpha-engine, and render-deploy.ts prefers the id over the name, so
 # passing it would redeploy the trading engine instead of the factory.
+# MANUAL ONLY. The factory currently runs on the owner's PC
+# (scripts/start-factory.ps1), not on Render, and the Render service does not
+# exist yet — an automatic push trigger would fail on every commit.
+# Create the paid worker first, then run this by hand if you ever move it to Render.
 on:
-  push:
-    branches: [master]
-    paths:
-      - "src/lib/logic-factory/**"
-      - "src/lib/strategy-inventor*"
-      - "scripts/logic-factory-run.ts"
-      - "render.yaml"
-      - "Dockerfile.engine"
-      - ".github/workflows/render-factory-deploy.yml"
   workflow_dispatch:
     inputs:
       commit:

@@ -111,7 +111,7 @@ while ($true) {
       $stale = ($null -eq $age) -or ($age -gt $StaleLimitSec)
       if ($stale) {
         $shown = if ($null -eq $age) { "none" } else { "$([int]$age)s" }
-        Write-Host "[supervisor] WATCHDOG heartbeat=$shown > ${StaleLimitSec}s — force restart"
+        Write-Host "[supervisor] WATCHDOG heartbeat=$shown > ${StaleLimitSec}s - force restart"
         Stop-Tree $proc.Id
         $killedByWatchdog = $true
         break
@@ -128,7 +128,7 @@ while ($true) {
   $failStreak++
   $backoff = [Math]::Min(30, 2 + $failStreak)
   $why = if ($killedByWatchdog) { "watchdog-kill" } else { "exit code=$code" }
-  Write-Host "[supervisor] engine stopped ($why) — restart in ${backoff}s (streak=$failStreak)"
+  Write-Host "[supervisor] engine stopped ($why) - restart in ${backoff}s (streak=$failStreak)"
   if ($code -eq 0 -and -not $killedByWatchdog) { $failStreak = 0; $backoff = 2 }
   Start-Sleep -Seconds $backoff
 }
