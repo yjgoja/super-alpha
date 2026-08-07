@@ -37,7 +37,8 @@
     "verify:lot-divergence": "tsx scripts/_verify-lot-divergence.ts",
     "monitor": "tsx --env-file=.env scripts/monitor-alert.ts",
     "monitor:loop": "tsx --env-file=.env scripts/monitor-alert.ts --loop",
-    "monitor:test": "tsx --env-file=.env scripts/monitor-alert.ts --test"
+    "monitor:test": "tsx --env-file=.env scripts/monitor-alert.ts --test",
+    "docs:logics": "tsx scripts/gen-logic-reference.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
