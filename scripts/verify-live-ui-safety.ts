@@ -61,7 +61,13 @@ assertIncludes(cron, "runAllBots", "cron still runs runAllBots");
 // UI stats live path uses cache helper only for MetaAPI reads
 assertIncludes(stats, "fetchSnapshotCached", "stats live uses fetchSnapshotCached");
 assertNotIncludes(stats, "ensureCloudLive", "stats UI must not cold-wake MetaAPI");
-assertIncludes(stats, "never wake MetaAPI cloud here", "stats documents no UI cloud wake");
+// 실제 안전 속성은 바로 위 assertNotIncludes(ensureCloudLive) 가 검사한다.
+// 이 줄은 의도가 코드에 적혀 있는지만 본다. 문구를 정확히 일치시키던 탓에
+// 주석을 다듬자 스위트가 빨개졌고, 그 뒤로 아무도 보지 않게 됐다.
+assert.ok(
+  /never wake (MetaAPI )?cloud/i.test(stats),
+  "stats documents no UI cloud wake",
+);
 assertIncludes(heartbeat, "void fetch(\"/api/stats\", { method: \"POST\" })", "heartbeat does not await soft tick");
 // Admin list GET must not call finalizeAllProvisioning (only check_provision PATCH)
 {
@@ -97,9 +103,12 @@ assertNotIncludes(home, "stats?live=1", "home no longer polls live MetaAPI direc
 assertIncludes(market, "subscribeLive", "market subscribes to live bus");
 assertIncludes(stream, "Does not call MetaAPI", "SSE is DB-only");
 
-// POST tick assist unchanged contract
-assertIncludes(stats, "export async function POST", "stats POST tick assist still present");
-assertIncludes(stats, "runDcaTick", "stats POST still can run user tick");
+// UI 는 거래를 트리거하지 않는다.
+// 4280e35 "Fail-close trading risks: ... no UI ticks" 가 stats POST 에서
+// 엔진 틱을 일부러 걷어냈는데, 이 테스트는 여전히 runDcaTick 이 있기를 요구해
+// 의도와 정반대를 검사하고 있었다. 실제 계약대로 뒤집는다.
+assertIncludes(stats, "export async function POST", "stats POST still present");
+assertNotIncludes(stats, "runDcaTick", "stats POST must not run engine ticks");
 
 console.log("PASS: static trading/UI isolation");
 
