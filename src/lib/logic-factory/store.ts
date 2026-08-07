@@ -8,7 +8,7 @@ export function factoryOutDir(runId: string) {
   return dir;
 }
 
-export function persistEpoch(result: FactoryEpochResult) {
+export async function persistEpoch(result: FactoryEpochResult) {
   const dir = result.outDir || factoryOutDir(result.runId);
   fs.mkdirSync(dir, { recursive: true });
   const epochPath = path.join(
@@ -46,9 +46,21 @@ export function persistEpoch(result: FactoryEpochResult) {
     JSON.stringify({ ...board, outDir: dir }, null, 2),
   );
 
-  void persistEpochToDb(result, board).catch((e) => {
-    appendAudit(`DB_PERSIST_SKIP ${(e as Error).message}`);
-  });
+  // Must be awaited: a floating promise never settles before a `--once` run
+  // (GitHub Actions) exits, so every epoch's DB row was silently dropped.
+  if (!process.env.DATABASE_URL) {
+    appendAudit("DB_PERSIST_SKIP no DATABASE_URL — results stay file-only");
+    console.warn(
+      "⚠️ DATABASE_URL 없음 — 이 세대 결과는 DB에 저장되지 않고 승격도 되지 않습니다.",
+    );
+  } else {
+    try {
+      await persistEpochToDb(result, board);
+    } catch (e) {
+      appendAudit(`DB_PERSIST_FAIL ${(e as Error).message}`);
+      console.error(`🔴 공장 결과 DB 저장 실패: ${(e as Error).message}`);
+    }
+  }
 
   return { epochPath, board };
 }

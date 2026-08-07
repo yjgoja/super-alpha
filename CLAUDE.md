@@ -123,14 +123,17 @@ git push origin master
 
 ### 배포 후 검증
 ```bash
-npm run render:status          # 배포 상태
-npm run verify:engine-guard    # 엔진 상태
-npm run lab:daily-report       # 일일 리포트
+npm run render:status          # 배포 상태 (RENDER_API_KEY 필요)
+npm run engine:verify-guard    # 엔진 가드 검증
 ```
+
+### 엔진 살아있는지 확인 (가장 빠름)
+`scripts/out/engine-heartbeat.json` 의 **파일 수정시각**을 본다.
+`ok: true` 는 죽어도 그대로 남으므로 신뢰하지 말 것. 갱신이 멈췄으면 죽은 것이다.
 
 ### 긴급 상황
 ```bash
-# 엔진 즉시 중단
+# 엔진 supervisor 시작 (중단 아님 — 중단은 프로세스를 kill 해야 함)
 npm run engine:supervise
 
 # 실계좌 손절

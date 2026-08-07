@@ -19,6 +19,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      # Without DATABASE_URL the run still simulates and prints a winner, but the
+      # epoch row and the promotion are dropped — the job went green for months
+      # while producing nothing usable. Fail loudly instead.
+      - name: Preflight — require DB secrets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::secrets.DATABASE_URL 이 비어 있습니다. 이 상태로 돌리면 결과가 DB에 저장되지 않고 승격도 되지 않습니다."
+            echo "::error::리포지토리 Settings > Secrets and variables > Actions 에서 DATABASE_URL (필요시 DIRECT_URL) 을 추가하세요."
+            exit 1
+          fi
       - name: Run one factory generation
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

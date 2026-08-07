@@ -119,7 +119,7 @@ export async function runFactoryGeneration(opts: {
     top,
     outDir,
   };
-  persistEpoch(result);
+  await persistEpoch(result);
 
   // Persist sketches summary
   const fs = await import("fs");
