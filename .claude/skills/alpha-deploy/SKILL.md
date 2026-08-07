@@ -3,6 +3,7 @@ name: alpha-deploy
 description: 슈퍼알파 배포 (Vercel + Prisma migrate + env 체크)
 model: opus
 effort: high
+disable-model-invocation: true
 ---
 
 # 슈퍼알파 배포 절차

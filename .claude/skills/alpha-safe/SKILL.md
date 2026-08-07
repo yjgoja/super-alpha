@@ -3,6 +3,7 @@ name: alpha-safe
 description: 실계좌 보안 검증 (fail-closed). MetaAPI/force-close/실거래 항상 확인
 model: opus
 effort: high
+disable-model-invocation: true
 ---
 
 # 슈퍼알파 안전 검증
