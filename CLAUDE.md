@@ -144,9 +144,20 @@ git revert HEAD && /alpha-deploy
 
 ## 📚 참고
 
-- `.claude/skills/` - 모든 스킬 정의
-- `.claude/settings.json` - 권한 및 훅 설정
+### 전역 (모든 프로젝트 공통)
+- `~/.claude/CLAUDE.md` - **모델 라우팅 규칙 + 안전 규칙** (실제 동작하는 지시)
+- `~/.claude/skills/<이름>/SKILL.md` - plan-review, cheap-exec, qa-gate, cost-router, full-auto
+- `~/.claude/hooks/tsc-check.mjs` - TS 자동 타입 검사 훅
+- `~/.claude/settings.json` - 권한 + 훅 등록
+
+### 이 프로젝트 전용
+- `.claude/skills/<이름>/SKILL.md` - alpha-safe, alpha-engine, alpha-deploy
+  (이 repo의 npm 스크립트·MetaAPI·Render에 의존하므로 전역에 두지 않음)
+- `.claude/settings.json` - 권한만 (훅은 전역에서 처리)
 - `AGENTS.md` - 에이전트 정의 (Next.js 특수사항)
+
+> 스킬 파일은 반드시 `<이름>/SKILL.md` 폴더 구조여야 인식된다.
+> 평평한 `<이름>.md`는 스캔되지 않는다.
 
 ---
 
