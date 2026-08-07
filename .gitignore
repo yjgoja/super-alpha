@@ -44,3 +44,4 @@ prisma/dev.db-journal
 *.zip
 scripts/out/logic-factory/
 .metaapi/
+/scripts/out/factory-supervisor.log
