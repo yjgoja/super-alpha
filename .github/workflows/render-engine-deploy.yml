@@ -7,8 +7,11 @@ on:
   push:
     branches: [master]
     paths:
-      - "src/lib/metaapi.ts"
-      - "src/lib/metaapi-stream.ts"
+      # metaapi-* 를 통째로 잡는다. metaapi-metrics.ts 가 목록에 없어서
+      # 계측 수정이 조용히 배포되지 않았다 (2026-08-08).
+      - "src/lib/metaapi*.ts"
+      - "src/lib/dca1000.ts"
+      - "src/lib/cost-optimize.ts"
       - "src/lib/meta-engine.ts"
       - "src/lib/bot-resolve.ts"
       - "src/lib/engine-guard.ts"
