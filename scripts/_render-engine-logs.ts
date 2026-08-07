@@ -98,15 +98,20 @@ async function main() {
   });
   q.append("resource", svc.id);
   q.append("text", "*FATAL*");
-  // Also pull unfiltered recent app logs
+  // Also pull recent app logs.
+  // 80 lines covered only a couple of minutes on a busy engine, so once-a-minute
+  // lines like [engine-http] fell outside the window. RENDER_LOG_LIMIT widens it
+  // and RENDER_LOG_TEXT filters server-side (e.g. "*engine-http*").
   const qAll = new URLSearchParams({
     ownerId,
-    limit: "80",
+    limit: String(Math.min(500, Math.max(20, Number(process.env.RENDER_LOG_LIMIT || 80)))),
     direction: "backward",
     startTime: start.toISOString(),
     endTime: end.toISOString(),
   });
   qAll.append("resource", svc.id);
+  const logText = (process.env.RENDER_LOG_TEXT || "").trim();
+  if (logText) qAll.append("text", logText);
 
   const fatal = await api(`/logs?${q.toString()}`);
   const recent = await api(`/logs?${qAll.toString()}`);

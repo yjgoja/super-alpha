@@ -1,6 +1,15 @@
 ﻿name: Render Engine Status
 on:
   workflow_dispatch:
+    inputs:
+      log_text:
+        description: 'Server-side log filter, e.g. "*engine-http*" (empty = all)'
+        required: false
+        default: ""
+      log_limit:
+        description: "Recent log lines to pull (20-500)"
+        required: false
+        default: "80"
 jobs:
   status:
     runs-on: ubuntu-latest
@@ -22,4 +31,6 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           RENDER_SERVICE_NAME: super-alpha-engine
+          RENDER_LOG_TEXT: ${{ inputs.log_text }}
+          RENDER_LOG_LIMIT: ${{ inputs.log_limit }}
         run: npx tsx scripts/_render-engine-logs.ts
