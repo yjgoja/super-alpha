@@ -45,3 +45,5 @@ prisma/dev.db-journal
 scripts/out/logic-factory/
 .metaapi/
 /scripts/out/factory-supervisor.log
+/scripts/out/monitor-supervisor.log
+/scripts/out/monitor-state.json
