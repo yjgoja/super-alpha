@@ -1,0 +1,27 @@
+# 매일 밤 12시(한국시간)에 일일 요약 텔레그램 전송
+name: Daily Summary
+
+on:
+  schedule:
+    - cron: "0 3 * * *"  # UTC 3시 = 한국시간 12시
+  workflow_dispatch:
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Generate and Send Daily Summary
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          METAAPI_TOKEN: ${{ secrets.METAAPI_TOKEN }}
+        run: npx tsx scripts/monitor-alert.ts
