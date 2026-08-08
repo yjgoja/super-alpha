@@ -8,7 +8,7 @@ import {
   shouldTriggerTakeProfit,
 } from "@/lib/dca1000";
 import { scaleLevelsToSeed } from "./param-search";
-import { rebateUsd, spreadInPrice } from "./costs";
+import { rebateUsd, spreadInPrice, STOPOUT_LEVEL_PCT } from "./costs";
 import type { FactoryBar } from "./bars";
 import type {
   FactoryCandidate,
@@ -129,6 +129,8 @@ function simulateOneSide(opts: {
   const monthly = new Map<string, MonthTrades>();
   // 리베이트는 체결 로트 합계에 붙는다. 진입·물타기마다 로트를 적립한다.
   let lotsTraded = 0;
+  /** 강제청산 횟수 — 실계좌에서 계좌가 날아간 횟수다. */
+  let stoppedOutCount = 0;
   const bumpMonthLots = (t: string, lots: number) => {
     const k = monthKey(t);
     const row = monthly.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0, lots: 0 };
@@ -168,6 +170,30 @@ function simulateOneSide(opts: {
 
     const pnl = basketPnl(opts.symbol, opts.direction, legs, bid, ask);
     const margin = basketMargin(opts.symbol, legs);
+
+    // 강제청산(스톱아웃) — 실계좌에는 있고 시뮬에는 없던 것.
+    //
+    // 없을 때는 순자산이 마이너스로 내려가도 시뮬이 태연히 버티다 회복해서,
+    // 낙폭 128% 같은 현실에 없는 결과가 나왔다. MT5 는 마진레벨
+    // (순자산 / 사용증거금 × 100)이 스톱아웃선 밑으로 가면 강제청산한다.
+    {
+      const equity = cash + pnl;
+      const marginLevel = margin > 0 ? (equity / margin) * 100 : Infinity;
+      if (marginLevel < STOPOUT_LEVEL_PCT) {
+        cash = Math.max(0, equity);
+        slCount += 1;
+        slUsd += Math.max(0, -pnl);
+        bumpMonth(bar.time, "sl", pnl);
+        stoppedOutCount += 1;
+        legs = [];
+        nextLevel = 0;
+        // 잔고가 남았으면 다시 시작할 수 있지만, 0 이면 계좌가 끝난 것이다.
+        allowEntry = opts.repeatEnabled && cash > 0;
+        equityCurve.push({ t: bar.time, equity: cash });
+        if (cash <= 0) break;
+        continue;
+      }
+    }
 
     const tp = shouldTriggerTakeProfit({
       pnl,
@@ -230,7 +256,7 @@ function simulateOneSide(opts: {
     cash += basketPnl(opts.symbol, opts.direction, legs, bid, ask);
   }
 
-  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, lotsTraded, finalEquity: cash };
+  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, lotsTraded, stoppedOutCount, finalEquity: cash };
 }
 
 function metricsFromCurve(
@@ -239,6 +265,7 @@ function metricsFromCurve(
   counts: { tpCount: number; slCount: number; tpUsd: number; slUsd: number },
   monthly?: Map<string, MonthTrades>,
   lotsTraded = 0,
+  stoppedOutCount = 0,
 ): SimMetrics {
   if (!curve.length) {
     return {
@@ -250,6 +277,7 @@ function metricsFromCurve(
       maxDrawdownPct: 0,
       lotsTraded: 0,
       rebateUsd: 0,
+      stoppedOutCount: 0,
       seeds: [],
       ...counts,
       months: [],
@@ -315,6 +343,7 @@ function metricsFromCurve(
     maxDrawdownPct: maxDd,
     lotsTraded,
     rebateUsd: rebateUsd(lotsTraded),
+    stoppedOutCount,
     seeds: [],
     ...counts,
     months,
@@ -368,6 +397,7 @@ export function simulateCandidate(
       months: [],
       lotsTraded: 0,
       rebateUsd: 0,
+      stoppedOutCount: 0,
       seeds: [],
       score: -1e9,
     };
@@ -410,6 +440,7 @@ export function simulateCandidate(
           },
           mergeMonthly(buy.monthly, sell.monthly),
           buy.lotsTraded + sell.lotsTraded,
+          buy.stoppedOutCount + sell.stoppedOutCount,
         ),
       );
     } else {
@@ -435,6 +466,7 @@ export function simulateCandidate(
           },
           sim.monthly,
           sim.lotsTraded,
+          sim.stoppedOutCount,
         ),
       );
     }
@@ -464,6 +496,8 @@ export function simulateCandidate(
     maxDrawdownPct: Math.max(...perSeed.map((m) => m.maxDrawdownPct)),
     lotsTraded: primary.lotsTraded,
     rebateUsd: primary.rebateUsd,
+    // 시드 하나라도 강제청산됐으면 그 후보는 위험하다. 최악값을 쓴다.
+    stoppedOutCount: Math.max(...perSeed.map((m) => m.stoppedOutCount)),
     seeds: seedFacts,
     tpCount: primary.tpCount,
     slCount: primary.slCount,

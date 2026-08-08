@@ -85,6 +85,8 @@ export type SimMetrics = {
   lotsTraded: number;
   /** 리베이트($) — 손익에 더하지 않고 따로 본다 */
   rebateUsd: number;
+  /** 강제청산(스톱아웃) 횟수. 0 이 아니면 실계좌에서 계좌가 날아간 것이다. */
+  stoppedOutCount: number;
   /** 시드별 요약 (1000·2000·3000·5000·10000·30000) */
   seeds: SeedFact[];
   /** composite score used for ranking */

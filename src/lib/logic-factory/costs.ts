@@ -20,6 +20,15 @@ export const SPREAD_USD_PER_LOT_XAU = Number(process.env.FACTORY_SPREAD_XAU_USD 
 /** 1랏당 리베이트($). 종목 공통. */
 export const REBATE_USD_PER_LOT = Number(process.env.FACTORY_REBATE_USD || 20);
 
+/**
+ * 강제청산(스톱아웃) 마진레벨 %. MT5 는 순자산/사용증거금×100 이 이 값 밑으로
+ * 내려가면 포지션을 강제로 닫는다. 브로커별로 20~50% 이며 기본은 보수적으로 20.
+ *
+ * 시뮬에 이게 없어서 순자산이 마이너스로 내려가도 버티다 회복하는, 실계좌에는
+ * 있을 수 없는 결과(낙폭 128% 등)가 나왔다.
+ */
+export const STOPOUT_LEVEL_PCT = Number(process.env.FACTORY_STOPOUT_LEVEL_PCT || 20);
+
 function isGold(symbol: string) {
   const s = (symbol || "").toUpperCase();
   return s.startsWith("XAU") || s === "GOLD";

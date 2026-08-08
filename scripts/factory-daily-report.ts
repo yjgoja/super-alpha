@@ -55,6 +55,7 @@ type Metrics = {
   months: MonthStat[];
   lotsTraded?: number;
   rebateUsd?: number;
+  stoppedOutCount?: number;
   seeds?: SeedFact[];
   score: number;
 };
@@ -157,10 +158,12 @@ function saveState(s: State) {
   fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2));
 }
 
-/** 관문: 낙폭 상한, 최소 1회 거래, 월별 데이터 존재 */
+/** 관문: 강제청산 없음, 낙폭 상한, 최소 1회 거래, 월별 데이터 존재 */
 function passesGate(c: Cand): boolean {
   const m = c.metrics;
   if (!m || !Array.isArray(m.months) || m.months.length === 0) return false;
+  // 강제청산은 실계좌에서 계좌가 날아간 것이다. 수익률이 아무리 좋아도 탈락.
+  if ((m.stoppedOutCount ?? 0) > 0) return false;
   if (m.maxDrawdownPct > GATE_MAX_DD) return false;
   if (m.tpCount + m.slCount <= 0) return false;
   if (!Number.isFinite(m.score)) return false;
