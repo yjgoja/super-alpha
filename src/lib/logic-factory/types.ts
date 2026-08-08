@@ -42,6 +42,29 @@ export type MonthStat = {
   slCount: number;
   tpUsd: number;
   slUsd: number;
+  /** 그 달 체결 로트 합계 */
+  lots: number;
+  /** 그 달 리베이트($) — 손익에는 포함하지 않고 따로 본다 */
+  rebateUsd: number;
+};
+
+/**
+ * 시드별 요약 — 옛 보고서의 "시드별 요약" 표에 쓰던 것.
+ * 월별 상세는 일부러 뺐다. 에폭 파일이 이미 65KB×6천개라 시드마다 월 배열을
+ * 넣으면 산출물이 몇 배로 불어난다.
+ */
+export type SeedFact = {
+  seed: number;
+  medianMonthReturnPct: number;
+  consistency: number;
+  maxDrawdownPct: number;
+  tpCount: number;
+  slCount: number;
+  tpUsd: number;
+  slUsd: number;
+  lotsTraded: number;
+  rebateUsd: number;
+  finalEquity: number;
 };
 
 export type SimMetrics = {
@@ -58,6 +81,12 @@ export type SimMetrics = {
   tpUsd: number;
   slUsd: number;
   months: MonthStat[];
+  /** 체결 로트 합계 (최저 시드 기준) */
+  lotsTraded: number;
+  /** 리베이트($) — 손익에 더하지 않고 따로 본다 */
+  rebateUsd: number;
+  /** 시드별 요약 (1000·2000·3000·5000·10000·30000) */
+  seeds: SeedFact[];
   /** composite score used for ranking */
   score: number;
 };

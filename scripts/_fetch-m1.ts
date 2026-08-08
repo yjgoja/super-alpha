@@ -72,7 +72,9 @@ async function main() {
   const outDir = path.join(process.cwd(), "scripts", "out");
   fs.mkdirSync(outDir, { recursive: true });
 
-  for (const symbol of ["EURUSD", "XAUUSD"] as const) {
+  // 공장이 실제로 거래하는 4종목 전부. EURUSD/XAUUSD 만 받으면 나머지는
+  // 합성 데이터로 떨어진다 (bars.ts getBarsForSymbol 폴백).
+  for (const symbol of ["EURUSD", "GBPUSD", "AUDUSD", "XAUUSD"] as const) {
     console.log(`\nFetching ${symbol} 1m (region=${REGION})...`);
     let bars = await fetchAll(acc.metaApiAccountId, symbol);
     if (!bars.length && symbol === "XAUUSD") {

@@ -53,7 +53,7 @@ async function main() {
     dryPromote,
     barStride: Number(arg("--stride", "20")) || 20,
     sleepMs: Number(arg("--sleep-ms", "8000")) || 8000,
-    seeds: (arg("--seeds", "1000,2000") || "1000,2000")
+    seeds: (arg("--seeds", "1000,2000,3000,5000,10000,30000") || "1000,2000,3000,5000,10000,30000")
       .split(",")
       .map((x) => Number(x))
       .filter((x) => x > 0),

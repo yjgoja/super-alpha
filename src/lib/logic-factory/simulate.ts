@@ -8,12 +8,26 @@ import {
   shouldTriggerTakeProfit,
 } from "@/lib/dca1000";
 import { scaleLevelsToSeed } from "./param-search";
+import { rebateUsd, spreadInPrice } from "./costs";
 import type { FactoryBar } from "./bars";
-import type { FactoryCandidate, FactoryLevel, MonthStat, SimMetrics } from "./types";
+import type {
+  FactoryCandidate,
+  FactoryLevel,
+  MonthStat,
+  SeedFact,
+  SimMetrics,
+} from "./types";
 
 type Leg = { lots: number; price: number; level: number };
 /** 월별 체결 집계 — MonthStat 의 거래 칸을 채우기 위한 것. */
-type MonthTrades = { tpCount: number; slCount: number; tpUsd: number; slUsd: number };
+type MonthTrades = {
+  tpCount: number;
+  slCount: number;
+  tpUsd: number;
+  slUsd: number;
+  /** 그 달에 체결된 로트 합계 — 리베이트 산정용 */
+  lots: number;
+};
 
 /** DUAL 후보는 BUY/SELL 두 시뮬의 월별 집계를 합친다. */
 function mergeMonthly(
@@ -23,11 +37,12 @@ function mergeMonthly(
   const out = new Map<string, MonthTrades>();
   for (const src of [a, b]) {
     for (const [k, v] of src) {
-      const row = out.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0 };
+      const row = out.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0, lots: 0 };
       row.tpCount += v.tpCount;
       row.slCount += v.slCount;
       row.tpUsd += v.tpUsd;
       row.slUsd += v.slUsd;
+      row.lots += v.lots;
       out.set(k, row);
     }
   }
@@ -38,9 +53,21 @@ function monthKey(iso: string) {
   return iso.slice(0, 7);
 }
 
-function bidAsk(bar: FactoryBar): { bid: number; ask: number } {
+/**
+ * 실측 브로커 스프레드를 쓴다.
+ *
+ * 예전에는 바에 붙은 spread(합성 바는 XAU 0.25 / GBP 0.00012)를 그대로 썼는데,
+ * 실제(XAU $40/랏 = 0.40, FX $28/랏 = 0.00028)의 절반 이하라 백테스트가
+ * 낙관적으로 나왔다. 바에 더 넓은 실측 스프레드가 있으면 그쪽을 쓴다.
+ */
+function bidAsk(bar: FactoryBar, symbol: string): { bid: number; ask: number } {
   const mid = bar.close;
-  const sp = Math.max(0, bar.spread ?? mid * 0.0001);
+  // bar.spread 는 쓰지 않는다.
+  // MetaAPI 캔들의 spread 는 '포인트' 단위다 (EURUSD 첫 바 = 74 → 0.00074).
+  // 예전 코드는 이걸 가격 델타로 그대로 썼는데, 합성 바에서는 값이 작아
+  // 티가 안 났지만 실제 데이터를 물리면 스프레드가 74가 되어 계산이 무너진다.
+  // 오너 실측 비용($/랏)을 가격으로 환산해 쓰는 쪽이 단위 사고도 없고 실전에 맞다.
+  const sp = spreadInPrice(symbol);
   return { bid: mid - sp / 2, ask: mid + sp / 2 };
 }
 
@@ -100,9 +127,17 @@ function simulateOneSide(opts: {
   // 월별 체결 집계. MonthStat 의 tpCount/slCount/tpUsd/slUsd 가 0 으로 하드코딩돼
   // 있어서 일일 보고의 월별 익절·손절 칸이 늘 비어 있었다.
   const monthly = new Map<string, MonthTrades>();
+  // 리베이트는 체결 로트 합계에 붙는다. 진입·물타기마다 로트를 적립한다.
+  let lotsTraded = 0;
+  const bumpMonthLots = (t: string, lots: number) => {
+    const k = monthKey(t);
+    const row = monthly.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0, lots: 0 };
+    row.lots += lots;
+    monthly.set(k, row);
+  };
   const bumpMonth = (t: string, kind: "tp" | "sl", usd: number) => {
     const k = monthKey(t);
-    const row = monthly.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0 };
+    const row = monthly.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0, lots: 0 };
     if (kind === "tp") {
       row.tpCount += 1;
       row.tpUsd += Math.max(0, usd);
@@ -115,13 +150,15 @@ function simulateOneSide(opts: {
   let allowEntry = true;
 
   for (const bar of opts.bars) {
-    const { bid, ask } = bidAsk(bar);
+    const { bid, ask } = bidAsk(bar, opts.symbol);
 
     if (!legs.length) {
       if (allowEntry) {
         const px = mt5EntryQuote(opts.direction, bid, ask);
         const lots = levels[0]?.lots ?? 0.01;
         legs = [{ lots, price: px, level: 0 }];
+        lotsTraded += lots;
+        bumpMonthLots(bar.time, lots);
         nextLevel = 1;
         if (!opts.repeatEnabled) allowEntry = false;
       }
@@ -173,7 +210,10 @@ function simulateOneSide(opts: {
       const dca = shouldTriggerDcaRoi({ pnl, usedMargin: margin, dropRoiPct: drop });
       if (dca.hit) {
         const px = mt5EntryQuote(opts.direction, bid, ask);
-        legs.push({ lots: levels[nextLevel]!.lots, price: px, level: nextLevel });
+        const addLots = levels[nextLevel]!.lots;
+        legs.push({ lots: addLots, price: px, level: nextLevel });
+        lotsTraded += addLots;
+        bumpMonthLots(bar.time, addLots);
         nextLevel += 1;
       }
     }
@@ -186,11 +226,11 @@ function simulateOneSide(opts: {
 
   if (legs.length && opts.bars.length) {
     const last = opts.bars[opts.bars.length - 1]!;
-    const { bid, ask } = bidAsk(last);
+    const { bid, ask } = bidAsk(last, opts.symbol);
     cash += basketPnl(opts.symbol, opts.direction, legs, bid, ask);
   }
 
-  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, finalEquity: cash };
+  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, lotsTraded, finalEquity: cash };
 }
 
 function metricsFromCurve(
@@ -198,6 +238,7 @@ function metricsFromCurve(
   seed: number,
   counts: { tpCount: number; slCount: number; tpUsd: number; slUsd: number },
   monthly?: Map<string, MonthTrades>,
+  lotsTraded = 0,
 ): SimMetrics {
   if (!curve.length) {
     return {
@@ -207,6 +248,9 @@ function metricsFromCurve(
       medianMonthReturnPct: 0,
       consistency: 0,
       maxDrawdownPct: 0,
+      lotsTraded: 0,
+      rebateUsd: 0,
+      seeds: [],
       ...counts,
       months: [],
       score: -1e9,
@@ -238,6 +282,8 @@ function metricsFromCurve(
       slCount: t?.slCount ?? 0,
       tpUsd: t?.tpUsd ?? 0,
       slUsd: t?.slUsd ?? 0,
+      lots: t?.lots ?? 0,
+      rebateUsd: rebateUsd(t?.lots ?? 0),
     };
   });
 
@@ -267,6 +313,9 @@ function metricsFromCurve(
     medianMonthReturnPct,
     consistency,
     maxDrawdownPct: maxDd,
+    lotsTraded,
+    rebateUsd: rebateUsd(lotsTraded),
+    seeds: [],
     ...counts,
     months,
     score,
@@ -317,6 +366,9 @@ export function simulateCandidate(
       tpUsd: 0,
       slUsd: 0,
       months: [],
+      lotsTraded: 0,
+      rebateUsd: 0,
+      seeds: [],
       score: -1e9,
     };
   }
@@ -357,6 +409,7 @@ export function simulateCandidate(
             slUsd: buy.slUsd + sell.slUsd,
           },
           mergeMonthly(buy.monthly, sell.monthly),
+          buy.lotsTraded + sell.lotsTraded,
         ),
       );
     } else {
@@ -381,12 +434,27 @@ export function simulateCandidate(
             slUsd: sim.slUsd,
           },
           sim.monthly,
+          sim.lotsTraded,
         ),
       );
     }
   }
 
   const primary = perSeed[0]!;
+  // 시드별 요약. 월별 상세는 빼고 집계값만 남긴다 (산출물 크기).
+  const seedFacts: SeedFact[] = perSeed.map((m) => ({
+    seed: m.seed,
+    medianMonthReturnPct: m.medianMonthReturnPct,
+    consistency: m.consistency,
+    maxDrawdownPct: m.maxDrawdownPct,
+    tpCount: m.tpCount,
+    slCount: m.slCount,
+    tpUsd: m.tpUsd,
+    slUsd: m.slUsd,
+    lotsTraded: m.lotsTraded,
+    rebateUsd: m.rebateUsd,
+    finalEquity: m.finalEquity,
+  }));
   return {
     seed: primary.seed,
     finalEquity: primary.finalEquity,
@@ -394,6 +462,9 @@ export function simulateCandidate(
     medianMonthReturnPct: Math.min(...perSeed.map((m) => m.medianMonthReturnPct)),
     consistency: Math.min(...perSeed.map((m) => m.consistency)),
     maxDrawdownPct: Math.max(...perSeed.map((m) => m.maxDrawdownPct)),
+    lotsTraded: primary.lotsTraded,
+    rebateUsd: primary.rebateUsd,
+    seeds: seedFacts,
     tpCount: primary.tpCount,
     slCount: primary.slCount,
     tpUsd: primary.tpUsd,
