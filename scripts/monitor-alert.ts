@@ -164,11 +164,12 @@ async function runOnce() {
   const isWeeklyClosed = isWeeklyMarketClosed();
   const isFxOpen = isFxMarketOpen();
 
+  // 폐장시간 완전 차단
   if (isWeeklyClosed || !isFxOpen) {
     const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
     const stamp = kst.toLocaleString("ko-KR");
-    console.log(`🌙 [monitor] ${stamp} — 폐장시간 (주말/공휴일/야간) — 심각 문제만 확인 중`);
-    // 폐장 중에도 엔진 정지/DB 오류 같은 심각 문제는 체크
+    console.log(`🌙 [monitor] ${stamp} — 폐장시간 (주말/공휴일/야간) — 알림 완전 차단`);
+    return; // 폐장 중에는 아무것도 하지 않음 (심각 문제도 알림 안 함)
   }
 
   const alerts: Alert[] = [
