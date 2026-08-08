@@ -165,9 +165,11 @@ async function runOnce() {
   if (disableUntil) {
     const until = new Date(disableUntil);
     if (Date.now() < until.getTime()) {
+      // 비활성화 중: 상태 파일 초기화 (스팸 방지)
+      saveState({});
       const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
       const stamp = kst.toLocaleString("ko-KR");
-      console.log(`🔇 [monitor] ${stamp} — 긴급 알림 비활성화 (${until.toISOString()}까지)`);
+      console.log(`🔇 [monitor] ${stamp} — 긴급 알림 비활성화 (${until.toISOString()}까지) + 상태 초기화`);
       return; // 완전 비활성화
     }
   }
