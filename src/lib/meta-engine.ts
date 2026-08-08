@@ -3253,7 +3253,12 @@ async function runSymbolTableDca(
       takeProfitPct: dcaTpPct,
       stopLossPct: slRoiFallback,
       brokerLeverage: brokerLev,
-      brokerMarginSum: brokerMarginSum > 0 ? brokerMarginSum : null,
+      // 여기는 물타기 '후' 상태(projLots/projAvg)를 계산하는 자리다.
+      // brokerMarginSum 은 물타기 '전' 마진이라 넘기면 안 된다 —
+      // basketMarginUsd 가 lots 를 무시하고 그 값을 그대로 쓰기 때문에,
+      // 새 주문에 붙는 TP/SL 이 실제보다 좁게 계산된다(조기 손절).
+      // 일반 DCA 경로도 같은 이유로 null 을 넘긴다.
+      brokerMarginSum: null,
     });
     let stopsLevelPoints = 0;
     try {

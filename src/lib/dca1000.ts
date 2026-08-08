@@ -402,15 +402,27 @@ export function basketMarginUsd(opts: {
   /** MetaAPI 포지션 margin 합 (있으면 우선) */
   brokerMarginSum?: number | null;
 }) {
-  if (opts.brokerMarginSum != null && opts.brokerMarginSum > 0) {
-    return opts.brokerMarginSum;
-  }
-  return mt5UsedMargin({
+  const computed = mt5UsedMargin({
     symbol: opts.symbol,
     lots: opts.lots,
     avgPrice: opts.avgPrice,
     brokerLeverage: opts.brokerLeverage ?? MT5_BROKER_LEVERAGE_DEFAULT,
   });
+  if (opts.brokerMarginSum != null && opts.brokerMarginSum > 0) {
+    // 브로커가 일부 포지션의 margin 을 안 줄 때가 있다(metaapi 가 undefined 로
+    // 둔다). 그러면 합계가 '일부만 더한 값'인데도 > 0 이라 전체 마진으로
+    // 신뢰됐다. 분모가 작아지면 ROI 가 부풀어 손절이 의도보다 훨씬 빨리 걸린다.
+    // 계산값의 절반에도 못 미치면 부분합으로 보고 계산값을 쓴다.
+    if (computed > 0 && opts.brokerMarginSum < computed * 0.5) {
+      console.warn(
+        `[dca1000] 브로커 마진 부분합 의심 ${opts.symbol}: ` +
+          `broker=${opts.brokerMarginSum.toFixed(2)} vs 계산=${computed.toFixed(2)} — 계산값 사용`,
+      );
+      return computed;
+    }
+    return opts.brokerMarginSum;
+  }
+  return computed;
 }
 
 /** 시작로트 기준 사용증거금($) — L0 미리보기·에디터 분모 */
