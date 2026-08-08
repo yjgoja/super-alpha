@@ -387,12 +387,28 @@ function metricsFromCurve(
     months.length === 0 ? 0 : months.filter((m) => m.returnPct > 0).length / months.length;
   const finalEquity = curve[curve.length - 1]!.equity;
   const totalReturnPct = seed > 0 ? ((finalEquity - seed) / seed) * 100 : 0;
+  // 점수 — 유전 알고리즘이 이 값을 따라 진화하므로 방향이 곧 탐색 방향이다.
+  //
+  // 예전 공식:
+  //   월수익률×1.2 + 일관성×5 + min(30,총수익)×0.05 − 낙폭×0.08 − 손절수×0.5
+  // 문제:
+  //   1) 손절 수를 개수로 빼서, 손실을 감수하고 벌어들이는 전략이 무조건 손해였다.
+  //   2) 낙폭도 상수로 빼서, 거래를 안 할수록 점수가 올라갔다.
+  //   3) 활동량 조건이 없어 거래 1건짜리가 1위로 올라왔다.
+  //   4) 강제청산(계좌 소멸)이 점수에 전혀 반영되지 않았다.
+  //
+  // 지금 공식: 위험조정 수익 × 활동량 × 일관성 − 강제청산 벌점.
+  // 감점을 곱셈으로 바꿔서 "거래를 안 하면 점수가 0 에 수렴"하게 만든다.
+  const tradesPerMonth =
+    months.length > 0 ? (counts.tpCount + counts.slCount) / months.length : 0;
+  /** 월 이 정도는 거래해야 제 점수를 받는다. 미달이면 비례해서 깎인다. */
+  const targetTrades = Math.max(1, Number(process.env.FACTORY_SCORE_TARGET_TRADES || 4));
+  const activity = Math.min(1, tradesPerMonth / targetTrades);
+  /** 낙폭 50% 면 수익을 절반으로 본다. */
+  const riskAdjusted = medianMonthReturnPct / (1 + maxDd / 50);
+  const consistencyFactor = 0.5 + consistency * 0.5;
   const score =
-    medianMonthReturnPct * 1.2 +
-    consistency * 5 +
-    Math.min(30, totalReturnPct) * 0.05 -
-    maxDd * 0.08 -
-    counts.slCount * 0.5;
+    riskAdjusted * activity * consistencyFactor - stoppedOutCount * 50;
 
   return {
     seed,
