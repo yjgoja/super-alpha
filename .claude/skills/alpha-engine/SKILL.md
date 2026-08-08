@@ -1,7 +1,7 @@
 ---
 name: alpha-engine
 description: 트레이딩 엔진 운영 (Render worker, tick, cron, DCA/TP/SL)
-model: opus
+model: fable
 effort: high
 disable-model-invocation: true
 ---

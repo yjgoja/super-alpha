@@ -29,6 +29,15 @@ export async function assertLevelNotAlreadyOpen(opts: {
     return { ok: false, reason: `leg_L${opts.level}_exists` };
   }
 
+  // DCA(level>0)는 바스켓 수명 안에서 레벨당 한 번만 체결되는 설계다.
+  // 90초 창만 보면 10분 간격의 재주문을 놓친다 — 2026-08-07 GBPUSD L3가
+  // 11:40/11:51 두 번 체결된 실제 경로 (reconcile 이 레그를 지워 leg 검사도
+  // 통과했다). DCA 는 현재 바스켓 생성 시점부터 전체를 본다.
+  // L0(ENTRY)는 TP 후 재진입이 정상이므로 기존 90초 창을 유지한다.
+  const fillLookbackSince =
+    opts.level > 0 && open
+      ? open.createdAt
+      : new Date(Date.now() - 90_000);
   const recent = await prisma.fill.findFirst({
     where: {
       accountId: opts.accountId,
@@ -36,7 +45,7 @@ export async function assertLevelNotAlreadyOpen(opts: {
       side: opts.direction,
       kind: opts.level === 0 ? "ENTRY" : "DCA",
       level: opts.level,
-      createdAt: { gte: new Date(Date.now() - 90_000) },
+      createdAt: { gte: fillLookbackSince },
     },
     select: { id: true, createdAt: true },
   });

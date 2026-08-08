@@ -1142,7 +1142,7 @@ async function runSoftSlCloseAttempt(opts: {
     return { ok: true, awaitSession: true, note: "fx_market_closed" };
   }
 
-  let slClose = await closeSideFailClosed({
+  const slClose = await closeSideFailClosed({
     metaId: opts.metaId,
     symbol: opts.symbol,
     direction: opts.direction,
@@ -2366,7 +2366,7 @@ async function closeBasketTp(opts: {
     brokerLeverage,
   } = opts;
 
-  let closeRes = await closeSideFailClosed({
+  const closeRes = await closeSideFailClosed({
     metaId,
     symbol,
     direction,
@@ -2875,7 +2875,21 @@ async function runSymbolTableDca(
     console.warn(
       `[engine] leg/pos lag account=${accountId} ${symbol} ${direction} dbLegs=${legs.length} live=${ourPositions.length} dbLots=${dbLots.toFixed(2)} liveLots=${liveLots.toFixed(2)}`,
     );
+    // 방금 기록된 레그는 브로커 스냅샷에 아직 안 보일 수 있다 (rate-limit 등으로
+    // stale). 그 상태로 reconcile 하면 방금 체결된 레벨이 지워지고, 다음 틱이
+    // 같은 레벨을 재주문해 물량이 2배가 된다 — 2026-08-07 GBPUSD L3 중복 체결의
+    // 실제 경로. 최신 레그가 3분 미만이면 reconcile 하지 않고 기다린다.
+    const newestLeg = await prisma.basketLeg.findFirst({
+      where: { basketId: basket.id },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    const newestLegAgeMs = newestLeg
+      ? Date.now() - new Date(newestLeg.createdAt).getTime()
+      : Number.POSITIVE_INFINITY;
+    const RECONCILE_LEG_GRACE_MS = 180_000;
     if (
+      newestLegAgeMs >= RECONCILE_LEG_GRACE_MS &&
       shouldSoftReconcileLegLag({
         dbLegCount: legs.length,
         livePosCount: ourPositions.length,

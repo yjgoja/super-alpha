@@ -68,7 +68,9 @@ async function checkLotDivergence(): Promise<Alert[]> {
   });
   const out: Alert[] = [];
   for (const a of accts) {
-    const live = a.liveState as { positions?: Array<{ symbol?: string; lots?: number }> } | null;
+    const live = a.liveState as {
+      positions?: Array<{ symbol?: string; direction?: string; lots?: number }>;
+    } | null;
     const positions = live?.positions;
     if (!Array.isArray(positions) || positions.length === 0) continue;
 
@@ -78,8 +80,10 @@ async function checkLotDivergence(): Promise<Alert[]> {
     });
     for (const b of baskets) {
       const dbLots = b.legs.reduce((s, l) => s + l.lots, 0);
+      // 방향까지 일치해야 한다 — 양방향(dualDirection) 계좌에서 심볼만으로
+      // 합치면 반대방향 물량이 섞여 가짜 괴리로 보인다 (2026-08-08 오탐 2건).
       const liveLots = positions
-        .filter((x) => x.symbol === b.symbol)
+        .filter((x) => x.symbol === b.symbol && (!x.direction || x.direction === b.direction))
         .reduce((s, x) => s + (x.lots ?? 0), 0);
       if (dbLots <= 0) continue;
       const diff = liveLots - dbLots;
