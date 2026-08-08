@@ -25,6 +25,12 @@ const DRY = process.argv.includes("--dry");
 
 /** 관문 — 이걸 통과해야 순위 대상. 낙폭은 관문으로만 쓰고 순위엔 안 쓴다. */
 const GATE_MAX_DD = Number(process.env.FACTORY_GATE_MAX_DD || 50);
+/**
+ * 최소 활동량 (월 평균 체결 수).
+ * 없으면 "거래를 거의 안 해서 낙폭 0" 인 후보가 1등이 된다. 실제로 거래 1건짜리가
+ * 1위로 올라왔다. 옛 보고서도 같은 경고를 달고 있었다.
+ */
+const GATE_MIN_TRADES_PER_MONTH = Number(process.env.FACTORY_GATE_MIN_TRADES || 2);
 /** 합격 = 월 5% 이상, 최상위 = 월 10% 이상 (월초 잔고 대비 중앙값) */
 const GRADE_TOP = 10;
 const GRADE_PASS = 5;
@@ -165,8 +171,10 @@ function passesGate(c: Cand): boolean {
   // 강제청산은 실계좌에서 계좌가 날아간 것이다. 수익률이 아무리 좋아도 탈락.
   if ((m.stoppedOutCount ?? 0) > 0) return false;
   if (m.maxDrawdownPct > GATE_MAX_DD) return false;
-  if (m.tpCount + m.slCount <= 0) return false;
   if (!Number.isFinite(m.score)) return false;
+  // 거의 거래하지 않아 낙폭이 낮은 후보를 걸러낸다.
+  const perMonth = (m.tpCount + m.slCount) / Math.max(1, m.months.length);
+  if (perMonth < GATE_MIN_TRADES_PER_MONTH) return false;
   return true;
 }
 

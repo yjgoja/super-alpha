@@ -12,17 +12,27 @@
  *   npx tsx --env-file=.env scripts/factory-notify.ts --dry    # 보내지 않고 출력
  *   npx tsx --env-file=.env scripts/factory-notify.ts --loop   # 상주 감시
  *
- * 스팸 방지: 직전 알린 기록을 넘어서야 하고, 최소 점수와 최소 개선폭을 둘 다 만족해야 한다.
- *   FACTORY_NOTIFY_MIN_SCORE   기본 100
- *   FACTORY_NOTIFY_MIN_GAIN    기본 3 (%)
+ * 알림 조건 — 넷을 모두 만족해야 한다.
+ *   1) 강제청산 0회          (계좌가 날아간 후보는 아무리 수익이 좋아도 무의미)
+ *   2) 낙폭 상한 이하
+ *   3) 직전 알린 기록보다 최소 개선폭 이상 높음
+ *   4) 최소 점수 이상
+ *
+ * 기준값은 실제 데이터 기준이다. 합성 데이터 시절에는 점수가 130~170 이라
+ * 최소 점수를 100 으로 뒀는데, 실제 데이터에서는 3~46 범위라 그 값이면
+ * 영원히 울리지 않는다.
+ *   FACTORY_NOTIFY_MIN_SCORE   기본 15
+ *   FACTORY_NOTIFY_MIN_GAIN    기본 10 (%)
+ *   FACTORY_NOTIFY_MAX_DD      기본 50 (%)
  */
 import * as fs from "fs";
 import * as path from "path";
 
 const LATEST = path.join(process.cwd(), "scripts", "out", "logic-factory", "LATEST.json");
 const STATE_PATH = path.join(process.cwd(), "scripts", "out", "factory-notify-state.json");
-const MIN_SCORE = Number(process.env.FACTORY_NOTIFY_MIN_SCORE || 100);
-const MIN_GAIN_PCT = Number(process.env.FACTORY_NOTIFY_MIN_GAIN || 3);
+const MIN_SCORE = Number(process.env.FACTORY_NOTIFY_MIN_SCORE || 15);
+const MIN_GAIN_PCT = Number(process.env.FACTORY_NOTIFY_MIN_GAIN || 10);
+const MAX_DD_PCT = Number(process.env.FACTORY_NOTIFY_MAX_DD || 50);
 const POLL_MS = Math.max(60_000, Number(process.env.FACTORY_NOTIFY_POLL_MS || 300_000));
 const DRY = process.argv.includes("--dry");
 
@@ -36,6 +46,7 @@ type Top = {
   maxDrawdownPct: number;
   symbol: string;
   direction: string;
+  stoppedOutCount?: number;
 };
 type Latest = {
   runId: string;
@@ -103,7 +114,8 @@ function format(best: Top, latest: Latest, prev?: number): string {
   L.push("");
   L.push(`월 수익률(중앙값) ${best.medianMonthReturnPct.toFixed(1)}%`);
   L.push(`최대 낙폭 ${best.maxDrawdownPct.toFixed(1)}%`);
-  L.push(`일관성 ${best.consistency}`);
+  L.push(`일관성 ${best.consistency.toFixed(3)}`);
+  L.push(`강제청산 ${best.stoppedOutCount ?? 0}회`);
   L.push("");
   L.push(`${best.label}`);
   L.push(`epoch ${latest.epoch} · gen ${latest.generation}`);
@@ -118,7 +130,18 @@ async function checkOnce(): Promise<boolean> {
     console.log("[factory-notify] LATEST.json 없음 또는 비어 있음 — 공장이 아직 안 돌았습니다.");
     return false;
   }
-  const best = latest.top.reduce((a, b) => (b.score > a.score ? b : a));
+  // 관문을 통과한 후보 중에서만 고른다.
+  // 강제청산된 후보는 실계좌에서 계좌가 날아간 것이므로 점수가 아무리 높아도 제외.
+  const eligible = latest.top.filter(
+    (t) => (t.stoppedOutCount ?? 0) === 0 && t.maxDrawdownPct <= MAX_DD_PCT,
+  );
+  if (eligible.length === 0) {
+    console.log(
+      `[factory-notify] 관문 통과 후보 없음 (강제청산 0회 + 낙폭 ${MAX_DD_PCT}% 이하) — 알리지 않음`,
+    );
+    return false;
+  }
+  const best = eligible.reduce((a, b) => (b.score > a.score ? b : a));
   const state = loadState();
   const prev = state.bestScore ?? 0;
 

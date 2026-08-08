@@ -9,6 +9,7 @@ import {
 } from "@/lib/dca1000";
 import { scaleLevelsToSeed } from "./param-search";
 import { rebateUsd, spreadInPrice, STOPOUT_LEVEL_PCT } from "./costs";
+import { isFxMarketClosed, isInOpenBurstQuietPeriod } from "@/lib/market-hours";
 import type { FactoryBar } from "./bars";
 import type {
   FactoryCandidate,
@@ -156,6 +157,17 @@ function simulateOneSide(opts: {
   let allowEntry = true;
 
   const sp = spreadInPrice(opts.symbol);
+  /**
+   * 엔진과 같은 신규 리스크 차단 규칙 (meta-engine 이 7군데서 강제하는 것).
+   *   - 폐장 중 진입 금지
+   *   - 개장 직후 15분(KST 09:00 / 17:00 / 22:30) 진입 금지
+   */
+  const canOpenAt = (iso: string) => {
+    const t = new Date(iso);
+    if (isFxMarketClosed(t)) return false;
+    if (isInOpenBurstQuietPeriod(t).active) return false;
+    return true;
+  };
   /** 캔들 안에서 이 방향에 가장 불리한 / 유리한 지점 */
   const extremes = (bar: FactoryBar) => {
     const advMid = opts.direction === "BUY" ? bar.low : bar.high;
@@ -170,7 +182,12 @@ function simulateOneSide(opts: {
     const { bid, ask } = bidAsk(bar, opts.symbol);
 
     if (!legs.length) {
-      if (allowEntry) {
+      // 엔진이 실제로 막는 시간대는 백테스트에서도 막아야 한다.
+      // meta-engine 은 폐장(isFxMarketClosed)과 개장 직후 15분
+      // (isInOpenBurstQuietPeriod)에 신규 진입을 거부하는데, 백테스트는
+      // market-hours 를 아예 import 하지 않아 실전에서 나오지 않을 진입으로
+      // 성과를 만들고 있었다.
+      if (allowEntry && canOpenAt(bar.time)) {
         const px = mt5EntryQuote(opts.direction, bid, ask);
         const lots = levels[0]?.lots ?? 0.01;
         legs = [{ lots, price: px, level: 0 }];
@@ -271,7 +288,8 @@ function simulateOneSide(opts: {
     }
 
     // 4) 물타기 — 불리한 지점에서 트리거되고, 그 가격에 체결된다.
-    if (nextLevel < levels.length) {
+    //    물타기도 신규 리스크라 엔진의 시간 규칙을 똑같이 받는다.
+    if (nextLevel < levels.length && canOpenAt(bar.time)) {
       const drop = levels[nextLevel]?.drop ?? 0;
       const dca = shouldTriggerDcaRoi({ pnl: pnlAdv, usedMargin: margin, dropRoiPct: drop });
       if (dca.hit) {
