@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
 import { runAllBots } from "@/lib/meta-engine";
 import { undeployIdleAccounts } from "@/lib/cost-optimize";
+import { isFxMarketClosed } from "@/lib/market-hours";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/** 장중 폴링 간격(초) — 호출측(GHA bot-tick)이 이 값을 따른다. */
+const POLL_OPEN_SEC = 60;
+/**
+ * 폐장 폴링 간격(초). 폐장엔 가격이 안 움직여 관리할 것이 없는데도 60초마다
+ * 돌면서 DB·MetaAPI 트래픽을 태우고, Render 엔진의 tick lock 까지 뺏었다.
+ * 완전히 끄지는 않는다 — 개장 시각을 놓치면 안 되므로 느리게 계속 확인한다.
+ */
+const POLL_CLOSED_SEC = 600;
 
 /**
  * Auth: Authorization Bearer CRON_SECRET only.
@@ -20,6 +30,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  // 폐장: 실제 틱을 돌리지 않고 다음 폴링을 늦추라고만 알린다.
+  // 브로커에 심어둔 TP/SL 은 그대로 살아 있고, 폐장엔 체결이 없다.
+  if (isFxMarketClosed()) {
+    return NextResponse.json({
+      ok: true,
+      skipped: "fx_market_closed",
+      count: 0,
+      nextPollSeconds: POLL_CLOSED_SEC,
+    });
+  }
+
   const idle = await undeployIdleAccounts(24);
   const results = await runAllBots({
     budgetMs: 52_000,
@@ -33,5 +54,6 @@ export async function GET(req: Request) {
     results,
     idleUndeploy: idle,
     forceManageOnly: true,
+    nextPollSeconds: POLL_OPEN_SEC,
   });
 }

@@ -64,9 +64,20 @@ jobs:
               echo "tick soft-fail HTTP $code (continue loop)"
             fi
 
-            # Aim for ~60s between tick starts.
+            # 폴링 간격은 서버가 정한다 (nextPollSeconds). 폐장이면 600초를
+            # 돌려줘서 주말 내내 60초로 도는 낭비를 막는다. 장중은 60초 그대로.
+            # 장 시간 판정을 bash 로 중복 구현하지 않기 위한 구조다.
+            # jq 를 쓰지 않는다 — 없는 환경에서 조용히 60초로 되돌아가
+            # 이 수정 자체가 무력화된다. grep 은 어디에나 있다.
+            period=$(grep -o '"nextPollSeconds"[[:space:]]*:[[:space:]]*[0-9][0-9]*' /tmp/tick.json 2>/dev/null | grep -o '[0-9][0-9]*$' | head -1)
+            case "$period" in
+              ''|*[!0-9]*) period=60 ;;
+            esac
+            if [ "$period" -lt 30 ]; then period=30; fi
+            if [ "$period" -gt 900 ]; then period=900; fi
+
             elapsed=$((SECONDS - t0))
-            sleep_for=$((60 - elapsed))
+            sleep_for=$((period - elapsed))
             if [ "$sleep_for" -lt 5 ]; then sleep_for=5; fi
             if [ "$SECONDS" -ge "$END" ]; then break; fi
             sleep "$sleep_for"
