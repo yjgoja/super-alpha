@@ -1,0 +1,34 @@
+# 폐장시간(주말) 엔진 자동 정지
+# 금요일 밤 11시(UTC+9) → 월요일 아침 9시(UTC+9)
+name: Market Close - Engine Stop
+
+on:
+  schedule:
+    # 금요일 23:00 KST (UTC 14:00) → 엔진 정지
+    - cron: "0 14 * * 5"
+  workflow_dispatch:
+
+jobs:
+  stop-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Stop Render engine for market close
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: srv-d9fhtaernols73c0l8k0
+        run: |
+          echo "🌙 폐장시간 엔진 정지"
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "⚠️ RENDER_API_KEY 없음 — 수동으로 Render에서 정지하세요"
+            exit 0
+          fi
+
+          # Render API를 통한 엔진 정지
+          curl -X POST https://api.render.com/v1/services/$RENDER_SERVICE_ID/suspend \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            && echo "✅ 엔진 정지 완료" || echo "❌ 정지 실패"
