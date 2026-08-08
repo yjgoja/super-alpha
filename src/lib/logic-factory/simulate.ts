@@ -131,6 +131,10 @@ function simulateOneSide(opts: {
   let lotsTraded = 0;
   /** 강제청산 횟수 — 실계좌에서 계좌가 날아간 횟수다. */
   let stoppedOutCount = 0;
+  // 낙폭도 캔들 내부 기준으로 잡는다. 종가만 보면 분 안에서 파인 골이 통째로
+  // 사라져 낙폭이 실제보다 얕게 나온다.
+  let peakEquity = opts.seed;
+  let maxDdPct = 0;
   const bumpMonthLots = (t: string, lots: number) => {
     const k = monthKey(t);
     const row = monthly.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0, lots: 0 };
@@ -151,6 +155,17 @@ function simulateOneSide(opts: {
   };
   let allowEntry = true;
 
+  const sp = spreadInPrice(opts.symbol);
+  /** 캔들 안에서 이 방향에 가장 불리한 / 유리한 지점 */
+  const extremes = (bar: FactoryBar) => {
+    const advMid = opts.direction === "BUY" ? bar.low : bar.high;
+    const favMid = opts.direction === "BUY" ? bar.high : bar.low;
+    return {
+      adv: { bid: advMid - sp / 2, ask: advMid + sp / 2 },
+      fav: { bid: favMid - sp / 2, ask: favMid + sp / 2 },
+    };
+  };
+
   for (const bar of opts.bars) {
     const { bid, ask } = bidAsk(bar, opts.symbol);
 
@@ -168,22 +183,40 @@ function simulateOneSide(opts: {
       continue;
     }
 
-    const pnl = basketPnl(opts.symbol, opts.direction, legs, bid, ask);
     const margin = basketMargin(opts.symbol, legs);
+
+    // 캔들 내부 경로를 반영한다.
+    //
+    // 예전에는 종가로만 판정해서, 1분 안에 강제청산·손절선을 뚫고 되돌아온
+    // 움직임이 통째로 무시됐다. 마틴게일은 바로 그 순간에 죽는다.
+    // M1 안에서 고가/저가 중 어느 쪽이 먼저인지는 알 수 없으므로
+    // **불리한 쪽을 먼저** 본다 (보수적).
+    const { adv, fav } = extremes(bar);
+    const pnlAdv = basketPnl(opts.symbol, opts.direction, legs, adv.bid, adv.ask);
+    const pnlFav = basketPnl(opts.symbol, opts.direction, legs, fav.bid, fav.ask);
+
+    peakEquity = Math.max(peakEquity, cash + pnlFav);
+    if (peakEquity > 0) {
+      // 순자산은 0 밑으로 못 내려간다 (계좌가 사라지는 것이 바닥). 갭으로 잠깐
+      // 마이너스가 찍혀도 낙폭은 100% 가 상한이다.
+      const trough = Math.max(0, cash + pnlAdv);
+      maxDdPct = Math.min(100, Math.max(maxDdPct, ((peakEquity - trough) / peakEquity) * 100));
+    }
 
     // 강제청산(스톱아웃) — 실계좌에는 있고 시뮬에는 없던 것.
     //
     // 없을 때는 순자산이 마이너스로 내려가도 시뮬이 태연히 버티다 회복해서,
     // 낙폭 128% 같은 현실에 없는 결과가 나왔다. MT5 는 마진레벨
     // (순자산 / 사용증거금 × 100)이 스톱아웃선 밑으로 가면 강제청산한다.
+    // 1) 강제청산 — 가장 불리한 지점에서 판정. 청산은 시장가라 그 시점 손익 그대로.
     {
-      const equity = cash + pnl;
+      const equity = cash + pnlAdv;
       const marginLevel = margin > 0 ? (equity / margin) * 100 : Infinity;
       if (marginLevel < STOPOUT_LEVEL_PCT) {
         cash = Math.max(0, equity);
         slCount += 1;
-        slUsd += Math.max(0, -pnl);
-        bumpMonth(bar.time, "sl", pnl);
+        slUsd += Math.max(0, -pnlAdv);
+        bumpMonth(bar.time, "sl", pnlAdv);
         stoppedOutCount += 1;
         legs = [];
         nextLevel = 0;
@@ -195,35 +228,20 @@ function simulateOneSide(opts: {
       }
     }
 
-    const tp = shouldTriggerTakeProfit({
-      pnl,
-      takeProfitUsd: 0,
-      usedMargin: margin,
-      tpRoiPct: opts.takeProfitPct,
-    });
-    if (tp.hit) {
-      cash += pnl;
-      tpCount += 1;
-      tpUsd += Math.max(0, pnl);
-      bumpMonth(bar.time, "tp", pnl);
-      legs = [];
-      nextLevel = 0;
-      allowEntry = opts.repeatEnabled;
-      equityCurve.push({ t: bar.time, equity: cash });
-      continue;
-    }
-
+    // 2) 손절 — 불리한 지점에서 판정하되 체결은 손절선에서 된다 (지정가처럼).
     const sl = shouldTriggerStopLossUsd({
-      pnl,
+      pnl: pnlAdv,
       stopLossUsd: 0,
       usedMargin: margin,
       stopLossRoiPct: opts.stopLossPct,
     });
     if (sl.hit) {
-      cash += pnl;
+      const slMoney = (margin * opts.stopLossPct) / 100;
+      const realized = -Math.min(slMoney, Math.abs(pnlAdv));
+      cash += realized;
       slCount += 1;
-      slUsd += Math.max(0, -pnl);
-      bumpMonth(bar.time, "sl", pnl);
+      slUsd += Math.max(0, -realized);
+      bumpMonth(bar.time, "sl", realized);
       legs = [];
       nextLevel = 0;
       allowEntry = false;
@@ -231,11 +249,33 @@ function simulateOneSide(opts: {
       continue;
     }
 
+    // 3) 익절 — 유리한 지점에서 판정하되 체결은 익절선에서 된다.
+    const tp = shouldTriggerTakeProfit({
+      pnl: pnlFav,
+      takeProfitUsd: 0,
+      usedMargin: margin,
+      tpRoiPct: opts.takeProfitPct,
+    });
+    if (tp.hit) {
+      const tpMoney = (margin * opts.takeProfitPct) / 100;
+      const realized = Math.min(tpMoney, pnlFav);
+      cash += realized;
+      tpCount += 1;
+      tpUsd += Math.max(0, realized);
+      bumpMonth(bar.time, "tp", realized);
+      legs = [];
+      nextLevel = 0;
+      allowEntry = opts.repeatEnabled;
+      equityCurve.push({ t: bar.time, equity: cash });
+      continue;
+    }
+
+    // 4) 물타기 — 불리한 지점에서 트리거되고, 그 가격에 체결된다.
     if (nextLevel < levels.length) {
       const drop = levels[nextLevel]?.drop ?? 0;
-      const dca = shouldTriggerDcaRoi({ pnl, usedMargin: margin, dropRoiPct: drop });
+      const dca = shouldTriggerDcaRoi({ pnl: pnlAdv, usedMargin: margin, dropRoiPct: drop });
       if (dca.hit) {
-        const px = mt5EntryQuote(opts.direction, bid, ask);
+        const px = mt5EntryQuote(opts.direction, adv.bid, adv.ask);
         const addLots = levels[nextLevel]!.lots;
         legs.push({ lots: addLots, price: px, level: nextLevel });
         lotsTraded += addLots;
@@ -256,7 +296,7 @@ function simulateOneSide(opts: {
     cash += basketPnl(opts.symbol, opts.direction, legs, bid, ask);
   }
 
-  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, lotsTraded, stoppedOutCount, finalEquity: cash };
+  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, lotsTraded, stoppedOutCount, maxDdPct, finalEquity: cash };
 }
 
 function metricsFromCurve(
@@ -266,6 +306,8 @@ function metricsFromCurve(
   monthly?: Map<string, MonthTrades>,
   lotsTraded = 0,
   stoppedOutCount = 0,
+  /** 캔들 내부 기준 낙폭. 종가 곡선만으로는 분 안의 골이 안 보인다. */
+  intraBarMaxDdPct = 0,
 ): SimMetrics {
   if (!curve.length) {
     return {
@@ -340,7 +382,7 @@ function metricsFromCurve(
     totalReturnPct,
     medianMonthReturnPct,
     consistency,
-    maxDrawdownPct: maxDd,
+    maxDrawdownPct: Math.max(maxDd, intraBarMaxDdPct),
     lotsTraded,
     rebateUsd: rebateUsd(lotsTraded),
     stoppedOutCount,
@@ -441,6 +483,7 @@ export function simulateCandidate(
           mergeMonthly(buy.monthly, sell.monthly),
           buy.lotsTraded + sell.lotsTraded,
           buy.stoppedOutCount + sell.stoppedOutCount,
+          Math.max(buy.maxDdPct, sell.maxDdPct),
         ),
       );
     } else {
@@ -467,6 +510,7 @@ export function simulateCandidate(
           sim.monthly,
           sim.lotsTraded,
           sim.stoppedOutCount,
+          sim.maxDdPct,
         ),
       );
     }
