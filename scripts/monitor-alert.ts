@@ -163,13 +163,12 @@ async function runOnce() {
   // 폐장시간 체크 (주말/공휴일/야간 등)
   const isWeeklyClosed = isWeeklyMarketClosed();
   const isFxOpen = isFxMarketOpen();
+  const isMarketClosed = isWeeklyClosed || !isFxOpen;
 
-  // 폐장시간 완전 차단
-  if (isWeeklyClosed || !isFxOpen) {
+  if (isMarketClosed) {
     const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
     const stamp = kst.toLocaleString("ko-KR");
-    console.log(`🌙 [monitor] ${stamp} — 폐장시간 (주말/공휴일/야간) — 알림 완전 차단`);
-    return; // 폐장 중에는 아무것도 하지 않음 (심각 문제도 알림 안 함)
+    console.log(`🌙 [monitor] ${stamp} — 폐장시간 — 심각 문제만 알림`);
   }
 
   const alerts: Alert[] = [
@@ -179,14 +178,20 @@ async function runOnce() {
     ...(await checkDrawdown()),
   ];
 
-  // 폐장시간 알림 필터링 (폐장 중이면 심각 오류만)
+  // 폐장시간 필터링: 심각한 문제는 계속 알림 (엔진 정지 제외 — 폐장 중 정상)
   let filteredAlerts = alerts;
-  if (isWeeklyClosed || !isFxOpen) {
+  if (isMarketClosed) {
+    // 물량 괴리, 큰 손실, 공장 정지만 폐장 중에도 알림
+    // engine:dead는 폐장 중 정상이므로 무시 (월~금 9시에 자동 시작됨)
     filteredAlerts = alerts.filter(a =>
-      a.key.includes("engine") || a.key.includes("db") || a.key.includes("equity")
+      a.key.includes("lot:") ||         // 물량 괴리 — 실제 거래 오류
+      a.key.includes("dd:") ||          // 큰 평가손실 — 실제 손실
+      a.key.includes("factory:stale")   // 공장 정지 — PC 확인 필요
+      // engine:dead는 폐장 중 정상이므로 필터링
     );
-    if (filteredAlerts.length < alerts.length) {
-      console.log(`🌙 [monitor] ${alerts.length - filteredAlerts.length}건 알림 생략 (폐장시간)`);
+    const skipped = alerts.length - filteredAlerts.length;
+    if (skipped > 0) {
+      console.log(`🌙 [monitor] 폐장시간: ${skipped}건 알림 필터링 (엔진 정지 등 폐장 정상)`);
     }
   }
 
