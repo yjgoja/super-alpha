@@ -217,19 +217,25 @@ async function runOnce() {
   const now = Date.now();
   const active = new Set(filteredAlerts.map((a) => a.key));
 
-  for (const a of filteredAlerts) {
-    if (state[a.key]) continue; // 이미 알린 문제
-    await sendTelegram(a.text);
-    state[a.key] = now;
-    console.log(`[monitor] 알림 발송: ${a.key}`);
+  // 한 통으로 묶어 보낸다.
+  // 문제마다 따로 보내던 탓에 최초 실행에서 9통이 한꺼번에 갔고,
+  // 그래서 알림을 통째로 꺼두게 됐다. 새 문제는 모아서 1통, 해소도 1통.
+  const fresh = filteredAlerts.filter((a) => !state[a.key]);
+  if (fresh.length > 0) {
+    const head =
+      fresh.length === 1 ? "🔔 슈퍼알파 알림" : `🔔 슈퍼알파 알림 — 새 문제 ${fresh.length}건`;
+    await sendTelegram([head, "", ...fresh.map((a) => a.text)].join("\n\n"));
+    for (const a of fresh) state[a.key] = now;
+    console.log(`[monitor] 알림 발송: ${fresh.map((a) => a.key).join(", ")}`);
   }
 
-  for (const key of Object.keys(state)) {
-    if (!active.has(key)) {
-      await sendTelegram(`✅ 해소됨: ${key}`);
-      delete state[key];
-      console.log(`[monitor] 해소: ${key}`);
-    }
+  const resolved = Object.keys(state).filter((k) => !active.has(k));
+  if (resolved.length > 0) {
+    await sendTelegram(
+      [`✅ 해소됨 ${resolved.length}건`, "", ...resolved.map((k) => `· ${k}`)].join("\n"),
+    );
+    for (const k of resolved) delete state[k];
+    console.log(`[monitor] 해소: ${resolved.join(", ")}`);
   }
 
   saveState(state);

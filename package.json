@@ -40,7 +40,13 @@
     "monitor:test": "tsx --env-file=.env scripts/monitor-alert.ts --test",
     "docs:logics": "tsx scripts/gen-logic-reference.ts",
     "verify:all": "tsx --env-file=.env scripts/verify-all.ts",
-    "verify:offline": "tsx --env-file=.env scripts/verify-all.ts --offline"
+    "verify:offline": "tsx --env-file=.env scripts/verify-all.ts --offline",
+    "daily": "tsx --env-file=.env scripts/daily-summary.ts",
+    "daily:dry": "tsx --env-file=.env scripts/daily-summary.ts --dry",
+    "daily:loop": "tsx --env-file=.env scripts/daily-summary.ts --loop",
+    "factory:notify": "tsx --env-file=.env scripts/factory-notify.ts",
+    "factory:notify:dry": "tsx --env-file=.env scripts/factory-notify.ts --dry",
+    "factory:notify:loop": "tsx --env-file=.env scripts/factory-notify.ts --loop"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
