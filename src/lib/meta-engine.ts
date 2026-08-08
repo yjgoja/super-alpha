@@ -1653,16 +1653,37 @@ async function skipEntryIfMarginInsufficient(opts: {
   });
   const eqRow = await prisma.brokerAccount.findUnique({
     where: { id: opts.accountId },
-    select: { equity: true, liveState: true },
+    select: { equity: true, liveState: true, liveStateAt: true },
   });
   const equity = Number(eqRow?.equity || 0);
   const live = (eqRow?.liveState || {}) as { freeMargin?: number; margin?: number };
+  // liveState 가 낡았으면 freeMargin 을 믿지 않는다. 신선도를 안 보고 있어서,
+  // 증거금이 이미 바닥난 뒤에도 예전 값(예: 800)으로 게이트를 통과시킬 수
+  // 있었다. 낡았으면 equity 로 떨어진다(같은 행에서 함께 갱신되는 값).
+  const liveAgeMs = eqRow?.liveStateAt
+    ? Date.now() - new Date(eqRow.liveStateAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  const LIVE_MARGIN_MAX_AGE_MS = Math.max(
+    30_000,
+    Number(process.env.ENGINE_MARGIN_STATE_MAX_AGE_MS || 120_000),
+  );
   const freeMargin =
-    typeof live.freeMargin === "number" && Number.isFinite(live.freeMargin)
+    liveAgeMs <= LIVE_MARGIN_MAX_AGE_MS &&
+    typeof live.freeMargin === "number" &&
+    Number.isFinite(live.freeMargin)
       ? live.freeMargin
       : null;
   // Prefer freeMargin when known; else equity. Buffer 15%.
   const budget = freeMargin != null && freeMargin >= 0 ? freeMargin : equity;
+  // budget 을 모를 때(0 이하) 통과시키던 fail-open 을 막는다. 이 함수는
+  // 스스로를 "Fail-closed L0 gate" 라고 선언하는데 실제로는 반대였다.
+  if (!(budget > 0) && estMargin > 0) {
+    console.warn(
+      `[engine] skip entry margin(unknown) account=${opts.accountId} ${opts.symbol} — ` +
+        `가용 증거금을 알 수 없어 보류 (free=${freeMargin ?? "n/a"} eq=${equity.toFixed(2)})`,
+    );
+    return { skip: true, note: "margin_unknown_skip", estMargin, equity };
+  }
   if (budget > 0 && estMargin > 0 && budget < estMargin * 1.15) {
     console.warn(
       `[engine] skip entry margin account=${opts.accountId} ${opts.symbol} budget=${budget.toFixed(2)} (free=${freeMargin ?? "n/a"} eq=${equity.toFixed(2)}) need~${estMargin.toFixed(2)} lots=${opts.lots}`,
@@ -3277,7 +3298,12 @@ async function runSymbolTableDca(
       stopsLevelPoints,
     });
     // DCA 전: 기존 레그 SL/TP를 새 바스켓 기준으로 먼저 재설정 (조기 손절 방지)
-    await syncBrokerBasketProtection({
+    //
+    // 반환값을 버리고 있었다(fail-open). 레그 하나라도 modify 에 실패하면
+    // 그 레그만 옛 TP 를 들고 남아, 나중에 브로커가 나머지만 청산하고
+    // 잔여 포지션이 생긴다. 그 잔여가 다음 사이클의 L0 로 흡수되면서
+    // 사다리가 어긋난다. 실패했으면 이번 틱 물타기를 건너뛴다.
+    const preSync = await syncBrokerBasketProtection({
       metaId,
       symbol,
       direction,
@@ -3288,6 +3314,21 @@ async function runSymbolTableDca(
       stopLossUsd: projLive.stopLossUsd,
       stopLossEnabled: cfg.stopLossEnabled,
     });
+    if ((preSync?.failed ?? 0) > 0) {
+      console.error(
+        `[engine] DCA 보류 account=${accountId} ${symbol} ${direction} L${next} — ` +
+          `기존 레그 보호 재설정 실패 ${preSync.failed}건. 부분 청산 잔여를 만들 수 있어 물타기를 미룬다.`,
+      );
+      return {
+        ok: true as const,
+        action: "hold",
+        symbol,
+        note: `dca_deferred_protect_failed=${preSync.failed}`,
+        filled,
+        actions,
+        spreadPct: spr,
+      };
+    }
 
     {
       const gate = await gateNewRiskOrder({
@@ -4119,7 +4160,8 @@ async function runSymbolDca(
         openPrices: [...ourPositions.map((p) => p.price), estFill],
         stopsLevelPoints,
       });
-      await syncBrokerBasketProtection({
+      // 표 로직 경로와 같은 이유로 실패를 확인한다 (부분 청산 잔여 방지).
+      const preSync2 = await syncBrokerBasketProtection({
         metaId,
         symbol,
         direction,
@@ -4130,6 +4172,18 @@ async function runSymbolDca(
         stopLossUsd: projLive.stopLossUsd,
         stopLossEnabled: cfg.stopLossEnabled,
       });
+      if ((preSync2?.failed ?? 0) > 0) {
+        console.error(
+          `[engine] DCA 보류 account=${accountId} ${symbol} ${direction} L${nextLevel} — ` +
+            `기존 레그 보호 재설정 실패 ${preSync2.failed}건`,
+        );
+        return {
+          ok: true as const,
+          action: "hold",
+          symbol,
+          note: `dca_deferred_protect_failed=${preSync2.failed}`,
+        };
+      }
       {
         const marginGate = await skipEntryIfMarginInsufficient({
           accountId,

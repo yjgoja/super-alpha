@@ -1385,6 +1385,18 @@ export function isStopsRejection(order: {
   );
 }
 
+/**
+ * **6시간 거래 크레딧 소진**인지 (일시적 429 와 구분).
+ *
+ * 호출측은 이미 `res.status === 429 || isRateLimitError(...)` 로 걸러낸 뒤
+ * 이 함수로 "잠깐 기다리면 되는 429" 와 "6시간 한도를 태운 429" 를 나눈다.
+ *
+ * 여기에 `/429|rate.?limit|too.?many.?requests/` 를 넣었더니 모든 429 가
+ * 크레딧 소진으로 판정돼 소프트 재시도 경로가 죽은 코드가 됐다. 그 결과
+ * 일시적 429 한 번에 15분 전역 정지가 걸렸고, 그 정지는 진입뿐 아니라
+ * closePosition·modifyPositionProtection 까지 막는다 —
+ * 즉 **모든 계좌의 소프트 손절이 15분간 멈췄다**. 그 패턴을 되돌린다.
+ */
 function isTradeCreditExhausted(data: unknown): boolean {
   const raw =
     typeof data === "string"
@@ -1392,9 +1404,8 @@ function isTradeCreditExhausted(data: unknown): boolean {
       : data && typeof data === "object"
         ? JSON.stringify(data)
         : "";
-  return (
-    /cpu credits per 6h|trade API allows|ws:trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(raw) ||
-    /429|rate.?limit|too.?many.?requests/i.test(raw)
+  return /cpu credits per 6h|trade API allows|ws:trade API allows|exceededPeriod["']?\s*:\s*["']?6h/i.test(
+    raw,
   );
 }
 
