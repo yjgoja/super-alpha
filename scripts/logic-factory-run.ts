@@ -59,6 +59,33 @@ async function main() {
       .filter((x) => x > 0),
   });
 
+  // 합성 폴백을 조용히 넘기지 않는다.
+  // bars.ts 는 ohlc-<심볼>-M1.json 이 없으면 난수 시계열로 떨어지는데, 이게
+  // 드러나지 않아 8일치 탐색(165,516 후보)이 전부 무의미해진 적이 있다.
+  {
+    const fs = await import("fs");
+    const path = await import("path");
+    const missing = cfg.symbols.filter(
+      (s) =>
+        !fs.existsSync(path.join(process.cwd(), "scripts", "out", `ohlc-${s}-M1.json`)) &&
+        !fs.existsSync(path.join(process.cwd(), "scripts", "out", `ohlc-${s}-M15.json`)) &&
+        !fs.existsSync(path.join(process.cwd(), "scripts", "out", `ohlc-${s}.json`)),
+    );
+    if (missing.length) {
+      console.warn(
+        `\n🔴 실제 시세 없음: ${missing.join(", ")} — 합성(난수) 데이터로 백테스트됩니다. 결과는 실제 성과가 아닙니다.`,
+      );
+      console.warn(
+        `   해결: npx tsx --env-file=.env scripts/_fetch-m1.ts\n`,
+      );
+      if (process.env.FACTORY_REQUIRE_REAL_BARS === "1") {
+        throw new Error(`실제 시세 없이 실행 중단 (${missing.join(", ")})`);
+      }
+    } else {
+      console.log(`✅ 실제 M1 시세 확인: ${cfg.symbols.join(", ")}`);
+    }
+  }
+
   console.log("🏭 Logic factory starting", {
     runId: cfg.runId,
     continuous: cfg.continuous,
