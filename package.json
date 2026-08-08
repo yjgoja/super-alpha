@@ -46,7 +46,10 @@
     "daily:loop": "tsx --env-file=.env scripts/daily-summary.ts --loop",
     "factory:notify": "tsx --env-file=.env scripts/factory-notify.ts",
     "factory:notify:dry": "tsx --env-file=.env scripts/factory-notify.ts --dry",
-    "factory:notify:loop": "tsx --env-file=.env scripts/factory-notify.ts --loop"
+    "factory:notify:loop": "tsx --env-file=.env scripts/factory-notify.ts --loop",
+    "factory:report": "tsx --env-file=.env scripts/factory-daily-report.ts",
+    "factory:report:dry": "tsx --env-file=.env scripts/factory-daily-report.ts --dry",
+    "factory:report:loop": "tsx --env-file=.env scripts/factory-daily-report.ts --loop"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

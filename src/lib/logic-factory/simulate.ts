@@ -12,6 +12,27 @@ import type { FactoryBar } from "./bars";
 import type { FactoryCandidate, FactoryLevel, MonthStat, SimMetrics } from "./types";
 
 type Leg = { lots: number; price: number; level: number };
+/** 월별 체결 집계 — MonthStat 의 거래 칸을 채우기 위한 것. */
+type MonthTrades = { tpCount: number; slCount: number; tpUsd: number; slUsd: number };
+
+/** DUAL 후보는 BUY/SELL 두 시뮬의 월별 집계를 합친다. */
+function mergeMonthly(
+  a: Map<string, MonthTrades>,
+  b: Map<string, MonthTrades>,
+): Map<string, MonthTrades> {
+  const out = new Map<string, MonthTrades>();
+  for (const src of [a, b]) {
+    for (const [k, v] of src) {
+      const row = out.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0 };
+      row.tpCount += v.tpCount;
+      row.slCount += v.slCount;
+      row.tpUsd += v.tpUsd;
+      row.slUsd += v.slUsd;
+      out.set(k, row);
+    }
+  }
+  return out;
+}
 
 function monthKey(iso: string) {
   return iso.slice(0, 7);
@@ -76,6 +97,21 @@ function simulateOneSide(opts: {
   let tpUsd = 0;
   let slUsd = 0;
   const equityCurve: { t: string; equity: number }[] = [];
+  // 월별 체결 집계. MonthStat 의 tpCount/slCount/tpUsd/slUsd 가 0 으로 하드코딩돼
+  // 있어서 일일 보고의 월별 익절·손절 칸이 늘 비어 있었다.
+  const monthly = new Map<string, MonthTrades>();
+  const bumpMonth = (t: string, kind: "tp" | "sl", usd: number) => {
+    const k = monthKey(t);
+    const row = monthly.get(k) ?? { tpCount: 0, slCount: 0, tpUsd: 0, slUsd: 0 };
+    if (kind === "tp") {
+      row.tpCount += 1;
+      row.tpUsd += Math.max(0, usd);
+    } else {
+      row.slCount += 1;
+      row.slUsd += Math.max(0, -usd);
+    }
+    monthly.set(k, row);
+  };
   let allowEntry = true;
 
   for (const bar of opts.bars) {
@@ -106,6 +142,7 @@ function simulateOneSide(opts: {
       cash += pnl;
       tpCount += 1;
       tpUsd += Math.max(0, pnl);
+      bumpMonth(bar.time, "tp", pnl);
       legs = [];
       nextLevel = 0;
       allowEntry = opts.repeatEnabled;
@@ -123,6 +160,7 @@ function simulateOneSide(opts: {
       cash += pnl;
       slCount += 1;
       slUsd += Math.max(0, -pnl);
+      bumpMonth(bar.time, "sl", pnl);
       legs = [];
       nextLevel = 0;
       allowEntry = false;
@@ -152,13 +190,14 @@ function simulateOneSide(opts: {
     cash += basketPnl(opts.symbol, opts.direction, legs, bid, ask);
   }
 
-  return { equityCurve, tpCount, slCount, tpUsd, slUsd, finalEquity: cash };
+  return { equityCurve, tpCount, slCount, tpUsd, slUsd, monthly, finalEquity: cash };
 }
 
 function metricsFromCurve(
   curve: { t: string; equity: number }[],
   seed: number,
   counts: { tpCount: number; slCount: number; tpUsd: number; slUsd: number },
+  monthly?: Map<string, MonthTrades>,
 ): SimMetrics {
   if (!curve.length) {
     return {
@@ -188,16 +227,19 @@ function metricsFromCurve(
     if (!row) byMonth.set(m, { start: p.equity, end: p.equity });
     else row.end = p.equity;
   }
-  const months: MonthStat[] = [...byMonth.entries()].map(([month, v]) => ({
-    month,
-    startEquity: v.start,
-    endEquity: v.end,
-    returnPct: v.start > 0 ? ((v.end - v.start) / v.start) * 100 : 0,
-    tpCount: 0,
-    slCount: 0,
-    tpUsd: 0,
-    slUsd: 0,
-  }));
+  const months: MonthStat[] = [...byMonth.entries()].map(([month, v]) => {
+    const t = monthly?.get(month);
+    return {
+      month,
+      startEquity: v.start,
+      endEquity: v.end,
+      returnPct: v.start > 0 ? ((v.end - v.start) / v.start) * 100 : 0,
+      tpCount: t?.tpCount ?? 0,
+      slCount: t?.slCount ?? 0,
+      tpUsd: t?.tpUsd ?? 0,
+      slUsd: t?.slUsd ?? 0,
+    };
+  });
 
   const returns = months.map((m) => m.returnPct).sort((a, b) => a - b);
   const mid = Math.floor(returns.length / 2);
@@ -305,12 +347,17 @@ export function simulateCandidate(
       });
       const curve = combineDualCurves(buy.equityCurve, sell.equityCurve, half, seed);
       perSeed.push(
-        metricsFromCurve(curve, seed, {
-          tpCount: buy.tpCount + sell.tpCount,
-          slCount: buy.slCount + sell.slCount,
-          tpUsd: buy.tpUsd + sell.tpUsd,
-          slUsd: buy.slUsd + sell.slUsd,
-        }),
+        metricsFromCurve(
+          curve,
+          seed,
+          {
+            tpCount: buy.tpCount + sell.tpCount,
+            slCount: buy.slCount + sell.slCount,
+            tpUsd: buy.tpUsd + sell.tpUsd,
+            slUsd: buy.slUsd + sell.slUsd,
+          },
+          mergeMonthly(buy.monthly, sell.monthly),
+        ),
       );
     } else {
       const sim = simulateOneSide({
@@ -324,12 +371,17 @@ export function simulateCandidate(
         seed,
       });
       perSeed.push(
-        metricsFromCurve(sim.equityCurve, seed, {
-          tpCount: sim.tpCount,
-          slCount: sim.slCount,
-          tpUsd: sim.tpUsd,
-          slUsd: sim.slUsd,
-        }),
+        metricsFromCurve(
+          sim.equityCurve,
+          seed,
+          {
+            tpCount: sim.tpCount,
+            slCount: sim.slCount,
+            tpUsd: sim.tpUsd,
+            slUsd: sim.slUsd,
+          },
+          sim.monthly,
+        ),
       );
     }
   }
