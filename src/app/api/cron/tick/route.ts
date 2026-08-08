@@ -41,9 +41,16 @@ export async function GET(req: Request) {
     });
   }
 
+  // maxDuration=60 을 넘기면 Vercel 이 인스턴스를 강제 종료하고, 그러면
+  // 락 해제 코드가 실행되지 않아 락이 고아로 남는다(= 그 계좌 관리 공백).
+  // undeployIdleAccounts 가 예산 밖에서 시간을 먹고 있었으므로, 실제 남은
+  // 시간을 재서 runAllBots 예산에 반영한다.
+  const startedAt = Date.now();
   const idle = await undeployIdleAccounts(24);
+  const elapsed = Date.now() - startedAt;
+  const budgetMs = Math.max(5_000, 52_000 - elapsed);
   const results = await runAllBots({
-    budgetMs: 52_000,
+    budgetMs,
     skipIdleUndeploy: true,
     // Fail-closed backup: never open new risk from cold serverless REST ticks.
     forceManageOnly: true,

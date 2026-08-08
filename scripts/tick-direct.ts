@@ -18,7 +18,7 @@ import {
   isFatalEngineError,
   isTransientDbError,
 } from "../src/lib/engine-guard";
-import { runAllBots, runDcaTick } from "../src/lib/meta-engine";
+import { releaseAllTickLocks, runAllBots, runDcaTick } from "../src/lib/meta-engine";
 import { logMetaApiHttpWindow } from "../src/lib/metaapi-metrics";
 import {
   countNakedBrokerPositions,
@@ -400,7 +400,19 @@ function setupSignals() {
     shuttingDown = true;
     console.log(`[direct] ${sig} — shutdown`);
     releasePidLock();
-    void prisma.$disconnect().finally(() => process.exit(0));
+    // 들고 있던 tick lock 을 반납하고 나간다. 안 하면 새 워커가 stale
+    // 임계(기본 180초)를 기다려야 해서, 배포마다 그 계좌가 관리 공백이 된다.
+    // 종료가 지연되면 Render 가 SIGKILL 하므로 3초 안에 끝낸다.
+    const bail = setTimeout(() => process.exit(0), 3_000);
+    bail.unref?.();
+    void releaseAllTickLocks()
+      .then((n) => {
+        if (n > 0) console.log(`[direct] tick lock ${n}건 반납`);
+      })
+      .catch(() => {})
+      .finally(() => {
+        void prisma.$disconnect().finally(() => process.exit(0));
+      });
   };
   process.on("SIGINT", () => stop("SIGINT"));
   process.on("SIGTERM", () => stop("SIGTERM"));

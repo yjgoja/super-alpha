@@ -4244,9 +4244,15 @@ const tickLocks = new Set<string>();
 const lastEquitySnapAt = new Map<string, number>();
 
 // Must exceed ENGINE_CLOUD_WAIT_MS (~45s) so a second worker cannot steal the lock mid-tick.
+//
+// 180초였다. 살아 있는 틱이 락을 갱신하지 않아서, 느린 틱이 임계를 넘기지
+// 않도록 넉넉히 잡을 수밖에 없었다. 이제 startTickLockRenewal 이 임계의 1/3
+// 주기로 갱신하므로 살아 있는 틱은 아무리 길어도 만료되지 않는다.
+// 그래서 낮춰도 안전하고, 낮춘 만큼 죽은 프로세스가 남긴 고아 락의
+// 공백(Vercel 60초 강제종료 등)이 짧아진다.
 const TICK_LOCK_STALE_MS = Math.max(
   90_000,
-  Number(process.env.ENGINE_TICK_LOCK_STALE_MS || 180_000),
+  Number(process.env.ENGINE_TICK_LOCK_STALE_MS || 90_000),
 );
 
 /** In-process + DB mutex so local engine / GHA / serverless don't double-trade. */
@@ -4282,6 +4288,73 @@ async function tryAcquireTickLock(accountId: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * 이 프로세스가 들고 있는 tick lock 을 전부 반납한다 (종료 직전용).
+ *
+ * SIGTERM 으로 죽으면 runDcaTick 의 finally 가 실행되지 않아 락이 DB 에 남고,
+ * 새 워커는 stale 임계(기본 180초)가 지나야 그 계좌를 틱할 수 있다.
+ * 배포할 때마다 해당 계좌가 최대 3분간 관리 공백이 됐다.
+ */
+export async function releaseAllTickLocks(): Promise<number> {
+  const held = [...tickLockStamps.entries()];
+  if (held.length === 0) return 0;
+  let freed = 0;
+  await Promise.all(
+    held.map(async ([accountId, stamp]) => {
+      try {
+        // 내가 심은 값일 때만 (남이 가져간 락은 건드리지 않는다)
+        const r = await prisma.brokerAccount.updateMany({
+          where: { id: accountId, tickLockedAt: stamp },
+          data: { tickLockedAt: null },
+        });
+        freed += r.count;
+      } catch {
+        /* 종료 경로 — 실패해도 stale 임계가 결국 정리한다 */
+      }
+    }),
+  );
+  tickLockStamps.clear();
+  tickLocks.clear();
+  return freed;
+}
+
+/**
+ * 틱이 도는 동안 락 만료를 막는다 (하트비트). 반환값을 호출하면 멈춘다.
+ *
+ * 갱신이 없으면 stale 임계(기본 180초)를 넘긴 느린 틱의 락을 다른 인스턴스가
+ * 가져가고, 같은 계좌를 둘이 동시에 틱한다. 갱신은 "내가 심은 타임스탬프일
+ * 때만" 이므로 이미 뺏긴 락을 되찾지는 않는다.
+ */
+function startTickLockRenewal(accountId: string): () => void {
+  const periodMs = Math.max(15_000, Math.floor(TICK_LOCK_STALE_MS / 3));
+  const timer = setInterval(() => {
+    void (async () => {
+      const prev = tickLockStamps.get(accountId);
+      if (!prev) return;
+      const next = new Date();
+      try {
+        const r = await prisma.brokerAccount.updateMany({
+          where: { id: accountId, tickLockedAt: prev },
+          data: { tickLockedAt: next },
+        });
+        if (r.count === 1) {
+          tickLockStamps.set(accountId, next);
+          return;
+        }
+        // 락을 뺏겼다. 흔적을 지워 이후 release 가 남의 락을 지우지 않게 한다.
+        tickLockStamps.delete(accountId);
+        console.error(
+          `[engine] tick lock 상실 account=${accountId} — 다른 인스턴스가 가져감(틱이 너무 오래 걸림)`,
+        );
+      } catch {
+        /* 일시 DB 오류: 다음 주기에 재시도 */
+      }
+    })();
+  }, periodMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 async function releaseTickLock(accountId: string) {
   tickLocks.delete(accountId);
   const stamp = tickLockStamps.get(accountId);
@@ -4309,9 +4382,14 @@ export async function runDcaTick(accountId: string, opts?: RunDcaTickOpts) {
   if (!got) {
     return { skipped: true as const, reason: "busy" };
   }
+  // 틱이 도는 동안 락을 계속 갱신한다. 갱신이 없으면 느린 틱(MetaAPI 지연 +
+  // 심볼 순차 처리)이 stale 임계를 넘겨 다른 인스턴스가 락을 가져가고,
+  // 같은 계좌를 둘이 동시에 틱하게 된다.
+  const renew = startTickLockRenewal(accountId);
   try {
     return await runDcaTickInner(accountId, opts);
   } finally {
+    renew();
     await releaseTickLock(accountId);
   }
 }
