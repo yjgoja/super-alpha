@@ -121,13 +121,37 @@ export function isMetaStreamEnabled() {
 }
 
 /** Synchronous read from local terminal state — 0 REST credits. */
+/**
+ * 스트림 스냅샷을 주문 판단에 써도 되는 상태인지.
+ *
+ * 예전 조건은 `!connectedToBroker && !connected` 였다 — 둘 다 거짓일 때만
+ * 막으므로, MT5 가 브로커 연결을 잃어 `connectedToBroker=false` 여도
+ * `connected=true` 면 낡은 포지션 목록을 그대로 내줬다. 그 목록으로 물타기·
+ * 청산을 판단하면 DB/브로커가 어긋난다.
+ *
+ * `conn.synchronized` 는 타입에 선언만 되어 있고 아무도 읽지 않았다.
+ * SDK 버전에 따라 없을 수 있으므로, 값이 있을 때만 강제한다.
+ */
+export function streamSnapshotTrustworthy(h: {
+  ready: boolean;
+  conn: { synchronized?: boolean; terminalState?: unknown };
+}): boolean {
+  if (!h.ready) return false;
+  const ts = h.conn.terminalState as
+    | { connectedToBroker?: boolean; connected?: boolean }
+    | undefined;
+  if (!ts?.connectedToBroker) return false;
+  if (typeof h.conn.synchronized === "boolean" && !h.conn.synchronized) return false;
+  return true;
+}
+
 export function readStreamSnapshot(metaApiAccountId: string): MetaSnap | MetaErr | null {
   if (!isMetaStreamEnabled()) return null;
   const id = String(metaApiAccountId);
   const h = handles.get(id);
   if (!h?.ready) return null;
+  if (!streamSnapshotTrustworthy(h)) return null;
   const ts = h.conn.terminalState;
-  if (!ts?.connectedToBroker && !ts?.connected) return null;
   const info = ts.accountInformation;
   if (!info || typeof info !== "object") return null;
   const positionsRaw = Array.isArray(ts.positions) ? ts.positions : [];
