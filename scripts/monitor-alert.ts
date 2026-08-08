@@ -160,6 +160,18 @@ async function checkDrawdown(): Promise<Alert[]> {
 }
 
 async function runOnce() {
+  // 긴급 비활성화 체크 (MONITOR_ALERT_DISABLE_UNTIL 설정됨)
+  const disableUntil = process.env.MONITOR_ALERT_DISABLE_UNTIL;
+  if (disableUntil) {
+    const until = new Date(disableUntil);
+    if (Date.now() < until.getTime()) {
+      const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+      const stamp = kst.toLocaleString("ko-KR");
+      console.log(`🔇 [monitor] ${stamp} — 긴급 알림 비활성화 (${until.toISOString()}까지)`);
+      return; // 완전 비활성화
+    }
+  }
+
   // 폐장시간 체크 (주말/공휴일/야간 등)
   const isWeeklyClosed = isWeeklyMarketClosed();
   const isFxOpen = isFxMarketOpen();
