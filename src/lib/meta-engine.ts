@@ -1493,7 +1493,7 @@ async function confirmLiveVolumeIncreased(opts: {
   beforeLots: number;
   expectedAdd: number;
 }): Promise<
-  | { ok: true; afterLots: number; fillPrice: number }
+  | { ok: true; afterLots: number; fillPrice: number; addedLots: number }
   | { ok: false; afterLots: number }
 > {
   const need = opts.beforeLots + Math.max(0.01, opts.expectedAdd) * 0.85;
@@ -1517,7 +1517,20 @@ async function confirmLiveVolumeIncreased(opts: {
     if (afterLots >= need - 1e-9) {
       const newest = [...side].sort((a, b) => b.lots - a.lots)[0];
       fillPrice = newest?.price ?? 0;
-      return { ok: true, afterLots, fillPrice };
+      // 하한만 보면 초과 체결(같은 주문이 두 번 나간 경우)을 통과시킨다.
+      // 그러면 DB에는 의도한 1회분 레그만 남아 브로커와 영구히 어긋난다.
+      // 상한을 넘으면 드러낸다 — 레그는 실제 증가분으로 기록해야 한다.
+      const added = afterLots - opts.beforeLots;
+      const overLimit = Math.max(0.01, opts.expectedAdd) * 1.5;
+      if (added > overLimit + 1e-9) {
+        console.error(
+          `[engine] OVER-FILL account=${opts.metaId} ${opts.symbol} ${opts.direction} — ` +
+            `expected +${opts.expectedAdd.toFixed(2)} but broker added +${added.toFixed(2)} lots ` +
+            `(before=${opts.beforeLots.toFixed(2)} after=${afterLots.toFixed(2)}). ` +
+            `같은 주문이 중복 발행됐을 수 있다. 레그는 실제 증가분으로 기록한다.`,
+        );
+      }
+      return { ok: true, afterLots, fillPrice, addedLots: added };
     }
   }
   return { ok: false, afterLots };
@@ -3370,19 +3383,27 @@ async function runSymbolTableDca(
       dcaConfirm.fillPrice > 0
         ? dcaConfirm.fillPrice
         : mt5EntryQuote(direction, price.bid, price.ask);
+    // 의도한 lots 가 아니라 브로커에서 실제로 늘어난 물량을 기록한다.
+    // 주문이 중복 발행되면(스트림 타임아웃 후 REST 재발행 등) 실제 증가분이
+    // 더 크다. 의도값만 적으면 그 차이가 영구 괴리로 남는다.
+    const recordedLots =
+      dcaConfirm.addedLots > lots + 1e-9
+        ? Math.round(dcaConfirm.addedLots * 100) / 100
+        : lots;
+    const overFillNote = recordedLots > lots + 1e-9 ? `|OVERFILL=${recordedLots}` : "";
     await prisma.basketLeg.create({
-      data: { basketId: basket.id, level: next, lots, price: fillPrice },
+      data: { basketId: basket.id, level: next, lots: recordedLots, price: fillPrice },
     });
     await prisma.fill.create({
       data: {
         accountId,
         symbol,
         side: direction,
-        lots,
+        lots: recordedLots,
         price: fillPrice,
         kind: "DCA",
         level: next,
-        note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}|confirmed`,
+        note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}|confirmed${overFillNote}`,
       },
     });
     filled = next;
@@ -4215,29 +4236,48 @@ const TICK_LOCK_STALE_MS = Math.max(
 );
 
 /** In-process + DB mutex so local engine / GHA / serverless don't double-trade. */
+/** 이 프로세스가 락을 잡을 때 심은 타임스탬프 — 해제 시 소유권 확인에 쓴다. */
+const tickLockStamps = new Map<string, Date>();
+
 async function tryAcquireTickLock(accountId: string): Promise<boolean> {
   if (tickLocks.has(accountId)) return false;
   const staleBefore = new Date(Date.now() - TICK_LOCK_STALE_MS);
+  // NOW() 대신 클라이언트 시각을 심는다. staleBefore 도 클라이언트 시각이라
+  // 둘을 같은 시계로 맞춰야 하고, 해제 시 "내가 심은 값인지" 대조할 수 있다.
+  const stamp = new Date();
   try {
     const grabbed = await prisma.$executeRaw`
       UPDATE "BrokerAccount"
-      SET "tickLockedAt" = NOW()
+      SET "tickLockedAt" = ${stamp}
       WHERE "id" = ${accountId}
         AND ("tickLockedAt" IS NULL OR "tickLockedAt" < ${staleBefore})
     `;
     if (Number(grabbed) < 1) return false;
-  } catch {
-    // Column missing / DB flake: fall back to in-process lock only
+  } catch (e) {
+    // Fail-closed. 예전에는 여기서 예외를 삼키고 return true 로 흘러가
+    // DB 장애 한 번에 여러 인스턴스가 동시에 같은 계좌를 틱할 수 있었다.
+    // 락을 확인 못 하면 틱하지 않는다 — 이중 주문보다 한 틱 거르는 게 낫다.
+    console.error(
+      `[engine] tick lock 획득 실패(DB) account=${accountId} — 이번 틱 건너뜀:`,
+      e instanceof Error ? e.message : e,
+    );
+    return false;
   }
+  tickLockStamps.set(accountId, stamp);
   tickLocks.add(accountId);
   return true;
 }
 
 async function releaseTickLock(accountId: string) {
   tickLocks.delete(accountId);
+  const stamp = tickLockStamps.get(accountId);
+  tickLockStamps.delete(accountId);
+  // 내가 심은 타임스탬프일 때만 지운다. 조건 없이 지우면, 내 틱이 늘어져
+  // 다른 인스턴스가 stale 판정으로 락을 가져간 뒤 내가 그 락을 풀어버린다.
+  if (!stamp) return;
   try {
-    await prisma.brokerAccount.update({
-      where: { id: accountId },
+    await prisma.brokerAccount.updateMany({
+      where: { id: accountId, tickLockedAt: stamp },
       data: { tickLockedAt: null },
     });
   } catch {

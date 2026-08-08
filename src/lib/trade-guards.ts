@@ -77,6 +77,10 @@ export async function getSharedSoftCloseCooldown(opts: {
     where: {
       accountId: opts.accountId,
       symbol: opts.symbol,
+      // persistSoftCloseCooldown 이 side 를 반전해 저장하므로 읽을 때도 반전해
+      // 맞춘다. 이 필터가 없어서 BUY 바스켓의 백오프가 SELL 바스켓의 익절까지
+      // 막고 있었다 (양방향 계좌에서 익절 유실).
+      side: opts.direction === "BUY" ? "SELL" : "BUY",
       kind: "GUARD",
       note: { startsWith: "soft_close_cd|" },
       createdAt: { gte: new Date(Date.now() - GUARD_LOOKBACK_MS) },
