@@ -229,15 +229,28 @@ def run_live_batch(
     pause: PauseFn | None = None,
     keywords: list[str] | None = None,
 ) -> list[dict]:
-    """성공한 건만 키워드 커서를 전진. 제목 중복 금지."""
+    """성공한 건만 키워드 커서를 전진. 하루 posts_per_day 상한 강제. 제목 중복 금지."""
     _log = log or print
-    n = count or cfg.posts_per_day
     queue = KeywordQueue(cfg.keywords, cfg.root / "output" / "keyword_state.json")
+    remaining = queue.remaining_today(cfg.posts_per_day)
+    want = count if count is not None else cfg.posts_per_day
+    n = min(int(want), remaining)
+    _log(
+        f"[BATCH] 오늘 이미 {queue.posted_today()}건 / 한도 {cfg.posts_per_day}건 "
+        f"→ 이번 실행 {n}건"
+    )
+    if n <= 0:
+        _log("[BATCH] 오늘 한도 소진 — 발행 안 함")
+        return []
+
     delay = int(cfg.publish.get("delay_between_posts_sec", 90))
     used_titles: set[str] = set()
     results: list[dict] = []
 
     for i in range(1, n + 1):
+        if queue.remaining_today(cfg.posts_per_day) <= 0:
+            _log("[BATCH] 오늘 한도 도달 — 중단")
+            break
         if keywords is not None:
             if i - 1 >= len(keywords):
                 break
@@ -260,8 +273,8 @@ def run_live_batch(
             break
         if result.get("title"):
             used_titles.add(str(result["title"]).strip())
-        if result.get("ok") and keywords is None:
-            queue.commit_one(kw)
+        if result.get("ok"):
+            queue.commit_one(kw, advance_cursor=keywords is None)
         results.append(result)
         if i < n and cfg.auto_publish:
             time.sleep(delay)

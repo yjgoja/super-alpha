@@ -12,6 +12,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { PrismaClient } from "@prisma/client";
+import { isFxMarketOpen, isWeeklyMarketClosed } from "../src/lib/market-hours";
 
 const prisma = new PrismaClient();
 
@@ -159,6 +160,17 @@ async function checkDrawdown(): Promise<Alert[]> {
 }
 
 async function runOnce() {
+  // 폐장시간 체크 (주말/공휴일/야간 등)
+  const isWeeklyClosed = isWeeklyMarketClosed();
+  const isFxOpen = isFxMarketOpen();
+
+  if (isWeeklyClosed || !isFxOpen) {
+    const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+    const stamp = kst.toLocaleString("ko-KR");
+    console.log(`🌙 [monitor] ${stamp} — 폐장시간 (주말/공휴일/야간) — 심각 문제만 확인 중`);
+    // 폐장 중에도 엔진 정지/DB 오류 같은 심각 문제는 체크
+  }
+
   const alerts: Alert[] = [
     ...(await checkEngineAlive()),
     ...(await checkFactoryAlive()),
@@ -166,11 +178,22 @@ async function runOnce() {
     ...(await checkDrawdown()),
   ];
 
+  // 폐장시간 알림 필터링 (폐장 중이면 심각 오류만)
+  let filteredAlerts = alerts;
+  if (isWeeklyClosed || !isFxOpen) {
+    filteredAlerts = alerts.filter(a =>
+      a.key.includes("engine") || a.key.includes("db") || a.key.includes("equity")
+    );
+    if (filteredAlerts.length < alerts.length) {
+      console.log(`🌙 [monitor] ${alerts.length - filteredAlerts.length}건 알림 생략 (폐장시간)`);
+    }
+  }
+
   const state = loadState();
   const now = Date.now();
-  const active = new Set(alerts.map((a) => a.key));
+  const active = new Set(filteredAlerts.map((a) => a.key));
 
-  for (const a of alerts) {
+  for (const a of filteredAlerts) {
     if (state[a.key]) continue; // 이미 알린 문제
     await sendTelegram(a.text);
     state[a.key] = now;

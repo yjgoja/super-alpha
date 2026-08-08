@@ -1,0 +1,14 @@
+// monitor-alert.ts에서 사용:
+import { isMarketClosed, shouldSendAlert } from "./market-hours";
+
+// 알림 전송 전 확인
+if (!shouldSendAlert()) {
+  console.log("🌙 폐장시간 — 알림 생략");
+  return;
+}
+
+// 또는 상태 확인
+const { closed, reason } = isMarketClosed();
+if (closed) {
+  console.log(`[감시] ${reason} — 진행 중인 거래만 모니터링`);
+}
