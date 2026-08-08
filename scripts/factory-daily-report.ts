@@ -38,6 +38,8 @@ type MonthStat = {
   slCount: number;
   tpUsd: number;
   slUsd: number;
+  lots?: number;
+  rebateUsd?: number;
 };
 type Metrics = {
   seed: number;
@@ -51,6 +53,9 @@ type Metrics = {
   tpUsd: number;
   slUsd: number;
   months: MonthStat[];
+  lotsTraded?: number;
+  rebateUsd?: number;
+  seeds?: SeedFact[];
   score: number;
 };
 type Bot = {
@@ -63,6 +68,19 @@ type Bot = {
   takeProfitPct: number;
   stopLossPct: number;
 };
+type SeedFact = {
+  seed: number;
+  medianMonthReturnPct: number;
+  consistency: number;
+  maxDrawdownPct: number;
+  tpCount: number;
+  slCount: number;
+  tpUsd: number;
+  slUsd: number;
+  lotsTraded: number;
+  rebateUsd: number;
+  finalEquity: number;
+};
 type Cand = {
   id: string;
   kind: string;
@@ -74,6 +92,22 @@ type Cand = {
   bot?: Bot;
   metrics: Metrics;
 };
+
+/**
+ * 백테스트가 실제 시세로 돌았는지 합성으로 돌았는지.
+ * bars.ts 는 scripts/out/ohlc-<심볼>-M1.json 이 없으면 조용히 난수 시계열로
+ * 폴백한다. 그 사실이 보고서에 안 보이면 가짜 결과를 진짜로 읽게 된다.
+ */
+function dataSource(): { real: string[]; synthetic: string[] } {
+  const symbols = ["EURUSD", "GBPUSD", "AUDUSD", "XAUUSD"];
+  const real: string[] = [];
+  const synthetic: string[] = [];
+  for (const s of symbols) {
+    const p = path.join(RUN_ROOT, "..", `ohlc-${s}-M1.json`);
+    (fs.existsSync(p) ? real : synthetic).push(s);
+  }
+  return { real, synthetic };
+}
 type Epoch = { runId: string; epoch: number; generation: number; tested: number; top: Cand[] };
 type State = {
   runId: string;
@@ -245,21 +279,38 @@ function rankTable(hof: Cand[]): string {
 
 function monthTable(c: Cand): string {
   const L: string[] = [];
-  L.push("수익률% 기준: 월초 잔고 대비");
+  L.push("수익률% 기준: 월초 잔고 대비 · 리베이트 제외");
   L.push(
-    `${pad("월", 10)} ${pad("수익률%", 10, true)} ${pad("익절금액$", 13, true)} ${pad("손절금액$", 13, true)} ${pad("익절", 6, true)} ${pad("손절", 6, true)}`,
+    `${pad("월", 9)} ${pad("수익률%", 9, true)} ${pad("익절$", 11, true)} ${pad("손절$", 11, true)} ${pad("익절", 5, true)} ${pad("손절", 5, true)} ${pad("리베이트$", 10, true)}`,
   );
-  L.push("-".repeat(64));
+  L.push("-".repeat(68));
   for (const m of c.metrics.months) {
     L.push(
-      `${pad(m.month, 10)} ${pad(sign(m.returnPct), 10, true)} ${pad(sign(m.tpUsd), 13, true)} ${pad(sign(-Math.abs(m.slUsd)), 13, true)} ${pad(m.tpCount, 6, true)} ${pad(m.slCount, 6, true)}`,
+      `${pad(m.month, 9)} ${pad(sign(m.returnPct), 9, true)} ${pad(sign(m.tpUsd), 11, true)} ${pad(sign(-Math.abs(m.slUsd)), 11, true)} ${pad(m.tpCount, 5, true)} ${pad(m.slCount, 5, true)} ${pad(sign(m.rebateUsd ?? 0), 10, true)}`,
     );
   }
   const tot = c.metrics;
-  L.push("-".repeat(64));
+  L.push("-".repeat(68));
   L.push(
-    `${pad("합계", 10)} ${pad(sign(tot.totalReturnPct), 10, true)} ${pad(sign(tot.tpUsd), 13, true)} ${pad(sign(-Math.abs(tot.slUsd)), 13, true)} ${pad(tot.tpCount, 6, true)} ${pad(tot.slCount, 6, true)}`,
+    `${pad("합계", 9)} ${pad(sign(tot.totalReturnPct), 9, true)} ${pad(sign(tot.tpUsd), 11, true)} ${pad(sign(-Math.abs(tot.slUsd)), 11, true)} ${pad(tot.tpCount, 5, true)} ${pad(tot.slCount, 5, true)} ${pad(sign(tot.rebateUsd ?? 0), 10, true)}`,
   );
+  return L.join("\n");
+}
+
+function seedTable(c: Cand): string | null {
+  const seeds = c.metrics.seeds;
+  if (!seeds || seeds.length === 0) return null;
+  const L: string[] = [];
+  L.push("월수익률% = 월별 중앙값, 월초 잔고 대비 · 리베이트 제외 / 낙폭% = 최고 잔고 대비");
+  L.push(
+    `${pad("시드$", 8, true)} ${pad("월수익률%", 10, true)} ${pad("익절$", 12, true)} ${pad("손절$", 12, true)} ${pad("익절", 5, true)} ${pad("손절", 5, true)} ${pad("리베이트$", 10, true)} ${pad("낙폭%", 7, true)}`,
+  );
+  L.push("-".repeat(76));
+  for (const s of seeds) {
+    L.push(
+      `${pad(s.seed, 8, true)} ${pad(sign(s.medianMonthReturnPct), 10, true)} ${pad(sign(s.tpUsd), 12, true)} ${pad(sign(-Math.abs(s.slUsd)), 12, true)} ${pad(s.tpCount, 5, true)} ${pad(s.slCount, 5, true)} ${pad(sign(s.rebateUsd), 10, true)} ${pad(s.maxDrawdownPct.toFixed(1), 7, true)}`,
+    );
+  }
   return L.join("\n");
 }
 
@@ -282,8 +333,18 @@ function buildReport(state: State): string[] {
   const passed = hof.filter((c) => grade(c) !== "미달");
   const top = hof.filter((c) => grade(c) === "최상위");
 
+  const src = dataSource();
   const head: string[] = [];
   head.push(`🌙 로직공장 일일 보고 · ${kstStamp()}`);
+  if (src.synthetic.length > 0) {
+    head.push("");
+    head.push(
+      `🔴 경고 — ${src.synthetic.join("·")} 는 **합성(난수) 데이터**로 백테스트했습니다. 실제 성과가 아닙니다.`,
+    );
+    head.push(`   실제 시세: ${src.real.length ? src.real.join("·") : "없음"}`);
+    head.push(`   해결: npx tsx --env-file=.env scripts/_fetch-m1.ts 로 실제 M1 을 받으세요.`);
+  }
+  head.push("");
   head.push(
     `지금까지 테스트한 로직 ${state.totalTested.toLocaleString()}개 · 탐색 경과 ${elapsed(Date.now() - state.firstSeenMs)} · 관문 통과 ${hof.length}개 · 합격(월 ${GRADE_PASS}% 이상) ${passed.length}개 · 최상위(월 ${GRADE_TOP}% 이상) ${top.length}개`,
   );
@@ -311,6 +372,13 @@ function buildReport(state: State): string[] {
     L.push("```");
     L.push(monthTable(c));
     L.push("```");
+    const seeds = seedTable(c);
+    if (seeds) {
+      L.push("시드별 요약");
+      L.push("```");
+      L.push(seeds);
+      L.push("```");
+    }
     L.push("📌 로직 간단설명");
     L.push("```");
     L.push(logicSpec(c));

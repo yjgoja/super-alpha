@@ -2397,15 +2397,16 @@ async function closeBasketTp(opts: {
     };
   }
 
-  await prisma.basket.update({
-    where: { id: basket.id },
-    data: {
-      status: "closed",
-      realizedPnl: pnlSum,
-      lastExitAt: new Date(),
-      unrealizedPnl: 0,
-    },
-  });
+  // 내가 닫은 경우에만 카운터·재진입을 진행한다. 다른 인스턴스가 먼저
+  // 닫았다면 그쪽이 이미 재진입까지 했으므로, 여기서 또 하면 그 포지션을
+  // 건드리게 된다.
+  const won = await closeBasketOnce({ basketId: basket.id, realizedPnl: pnlSum });
+  if (!won) {
+    console.warn(
+      `[engine] TP 중복 감지 account=${accountId} ${symbol} ${direction} — 이미 닫힌 바스켓, 재진입 생략`,
+    );
+    return { closed: true as const, reentered: false as const };
+  }
   await prisma.fill.create({
     data: {
       accountId,
@@ -3128,15 +3129,14 @@ async function runSymbolTableDca(
       };
     }
     const pnlSum = tpPnl.apiProfit;
-    await prisma.basket.update({
-      where: { id: basket.id },
-      data: {
-        status: "closed",
-        realizedPnl: pnlSum,
-        lastExitAt: new Date(),
-        unrealizedPnl: 0,
-      },
-    });
+    // 내가 닫은 경우에만 SL 기록·카운터를 남긴다 (중복 계상 방지).
+    const wonSl = await closeBasketOnce({ basketId: basket.id, realizedPnl: pnlSum });
+    if (!wonSl) {
+      console.warn(
+        `[engine] SL 중복 감지 account=${accountId} ${symbol} ${direction} — 이미 닫힌 바스켓`,
+      );
+      return { ok: true as const, action: "sl", symbol, profit, spreadPct: spr };
+    }
     await prisma.fill.create({
       data: {
         accountId,
@@ -3400,20 +3400,31 @@ async function runSymbolTableDca(
         ? Math.round(dcaConfirm.addedLots * 100) / 100
         : lots;
     const overFillNote = recordedLots > lots + 1e-9 ? `|OVERFILL=${recordedLots}` : "";
-    await prisma.basketLeg.create({
-      data: { basketId: basket.id, level: next, lots: recordedLots, price: fillPrice },
-    });
-    await prisma.fill.create({
-      data: {
-        accountId,
-        symbol,
-        side: direction,
-        lots: recordedLots,
-        price: fillPrice,
-        kind: "DCA",
-        level: next,
-        note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}|confirmed${overFillNote}`,
-      },
+    // 레그·체결기록·filledLevel 은 한 트랜잭션이어야 한다. 예전에는 셋이
+    // 따로 나가서, 레그만 쓰이고 중간에 실패하면 filledLevel 이 안 올라간 채
+    // 레그만 남았다. 다음 틱은 assertLevelNotAlreadyOpen 이 leg_L{n}_exists 로
+    // 막고 filledLevel 도 그대로라, 그 바스켓은 TP/SL 로 닫힐 때까지 물타기가
+    // 영구 정지된다 — 아무 경보도 없이.
+    await prisma.$transaction(async (tx) => {
+      await tx.basketLeg.create({
+        data: { basketId: basket!.id, level: next, lots: recordedLots, price: fillPrice },
+      });
+      await tx.fill.create({
+        data: {
+          accountId,
+          symbol,
+          side: direction,
+          lots: recordedLots,
+          price: fillPrice,
+          kind: "DCA",
+          level: next,
+          note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${dropRoi}%|margin$${usedMargin.toFixed(2)}|confirmed${overFillNote}`,
+        },
+      });
+      await tx.basket.update({
+        where: { id: basket!.id },
+        data: { filledLevel: next },
+      });
     });
     filled = next;
     actions += 1;
@@ -3944,15 +3955,17 @@ async function runSymbolDca(
         action: "sl_retry",
       };
     }
-    await prisma.basket.update({
-      where: { id: basket.id },
-      data: {
-        status: "closed",
-        realizedPnl: tpPnl.apiProfit,
-        lastExitAt: new Date(),
-        unrealizedPnl: 0,
-      },
+    // 내가 닫은 경우에만 카운터·기록을 남긴다 (중복 계상 방지).
+    const wonSl2 = await closeBasketOnce({
+      basketId: basket.id,
+      realizedPnl: tpPnl.apiProfit,
     });
+    if (!wonSl2) {
+      console.warn(
+        `[engine] SL 중복 감지 account=${accountId} ${symbol} ${direction} — 이미 닫힌 바스켓`,
+      );
+      return { ok: true as const, action: "sl", symbol };
+    }
     await prisma.brokerAccount.update({
       where: { id: accountId },
       data: { slCount: { increment: 1 } },
@@ -4184,24 +4197,32 @@ async function runSymbolDca(
       }
       const fillPrice =
         dcaConfirm.fillPrice > 0 ? dcaConfirm.fillPrice : estFill;
-      await prisma.basketLeg.create({
-        data: { basketId: basket.id, level: nextLevel, lots, price: fillPrice },
-      });
-      await prisma.basket.update({
-        where: { id: basket.id },
-        data: { filledLevel: nextLevel },
-      });
-      await prisma.fill.create({
-        data: {
-          accountId,
-          symbol,
-          side: direction,
-          lots,
-          price: fillPrice,
-          kind: "DCA",
-          level: nextLevel,
-          note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}|confirmed`,
-        },
+      // 표 로직 경로와 같은 이유로 한 트랜잭션에 묶는다 (부분 기록 시 물타기 정지).
+      const recordedLots2 =
+        dcaConfirm.addedLots > lots + 1e-9
+          ? Math.round(dcaConfirm.addedLots * 100) / 100
+          : lots;
+      const overFill2 = recordedLots2 > lots + 1e-9 ? `|OVERFILL=${recordedLots2}` : "";
+      await prisma.$transaction(async (tx) => {
+        await tx.basketLeg.create({
+          data: { basketId: basket.id, level: nextLevel, lots: recordedLots2, price: fillPrice },
+        });
+        await tx.fill.create({
+          data: {
+            accountId,
+            symbol,
+            side: direction,
+            lots: recordedLots2,
+            price: fillPrice,
+            kind: "DCA",
+            level: nextLevel,
+            note: `${logic}|dcaROI=${dcaHit.basketRoi.toFixed(2)}%<=-${needRoi}%|margin$${usedMargin.toFixed(2)}|confirmed${overFill2}`,
+          },
+        });
+        await tx.basket.update({
+          where: { id: basket.id },
+          data: { filledLevel: nextLevel },
+        });
       });
       const protectRes = await refreshAndProtectBasket({
         metaId,
@@ -4286,6 +4307,30 @@ async function tryAcquireTickLock(accountId: string): Promise<boolean> {
   tickLockStamps.set(accountId, stamp);
   tickLocks.add(accountId);
   return true;
+}
+
+/**
+ * 바스켓을 닫는다. **이미 닫혀 있었으면 false** 를 돌려준다.
+ *
+ * 예전에는 `update({ where: { id } })` 라 이미 닫힌 바스켓에도 성공했다.
+ * 그래서 두 인스턴스가 같은 TP 를 감지하면 tpCount/cycleCount 가 두 번 오르고
+ * 재진입도 두 번 돌았다 — 먼저 재진입한 포지션을 뒤늦은 쪽이 청산해버리는
+ * 손실 경로였다. false 를 받으면 카운터·재진입 같은 후속 동작을 하면 안 된다.
+ */
+async function closeBasketOnce(opts: {
+  basketId: string;
+  realizedPnl: number;
+}): Promise<boolean> {
+  const r = await prisma.basket.updateMany({
+    where: { id: opts.basketId, status: "open" },
+    data: {
+      status: "closed",
+      realizedPnl: opts.realizedPnl,
+      lastExitAt: new Date(),
+      unrealizedPnl: 0,
+    },
+  });
+  return r.count === 1;
 }
 
 /**
