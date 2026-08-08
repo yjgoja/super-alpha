@@ -177,7 +177,14 @@ def naver_login_with_clip(
             (By.XPATH, "//button[contains(.,'로그인')]"),
         ],
     ):
-        pw_input.send_keys(Keys.ENTER)
+        # 엔터 대체 제출. pw_input 은 이미 stale 일 수 있다 — 클릭 시도가
+        # 페이지를 건드렸거나 네이버가 폼을 다시 그렸을 때 그렇다.
+        # 여기서 예외가 나면 브라우저가 닫혀 사람이 캡차를 풀 기회조차
+        # 사라지므로, 실패해도 절대 죽지 않고 수동 진행으로 넘긴다.
+        try:
+            driver.find_element(By.ID, "pw").send_keys(Keys.ENTER)
+        except Exception as e:
+            _log(f"[LOGIN] 자동 제출 실패({type(e).__name__}) — 브라우저에서 직접 로그인하세요")
 
     time.sleep(2.0)
     if wait_until_logged_in(driver, timeout_sec=wait_captcha_sec, log=_log):

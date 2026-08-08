@@ -27,17 +27,25 @@ def main() -> int:
     driver = create_driver(headless=False, profile_dir=cfg.root / ".chrome-profile")
     try:
         # 쿠키 없이 폼 로그인 (이번 1회)
-        naver_login_with_clip(
-            driver,
-            cfg.naver_id,
-            cfg.naver_pw,
-            root=cfg.root,
-            log=print,
-            prefer_cookies=False,
-            wait_captcha_sec=600,
-        )
+        # 자동 로그인이 실패해도 여기서 죽으면 안 된다 — finally 가 브라우저를
+        # 닫아버려서 사람이 캡차를 풀 기회 자체가 사라진다. 이 스크립트의
+        # 존재 이유가 수동 캡차이므로, 무슨 일이 있어도 창을 열어둔다.
+        try:
+            naver_login_with_clip(
+                driver,
+                cfg.naver_id,
+                cfg.naver_pw,
+                root=cfg.root,
+                log=print,
+                prefer_cookies=False,
+                wait_captcha_sec=600,
+            )
+        except Exception as e:
+            print(f"[login_once] 자동 로그인 실패({type(e).__name__}: {e})")
+            print("[login_once] 브라우저에서 직접 로그인·캡차를 진행하세요 (10분 대기)")
+
         if not is_logged_in(driver):
-            print("[login_once] 대기 중...")
+            print("[login_once] 대기 중... 브라우저에서 로그인하면 자동으로 저장됩니다")
             wait_until_logged_in(driver, timeout_sec=600, log=print)
 
         if not is_logged_in(driver):
