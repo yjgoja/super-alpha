@@ -1,7 +1,7 @@
 ---
 name: alpha-safe
 description: 실계좌 보안 검증 (fail-closed). MetaAPI/force-close/실거래 항상 확인
-model: fable
+model: opus
 effort: high
 disable-model-invocation: true
 ---
