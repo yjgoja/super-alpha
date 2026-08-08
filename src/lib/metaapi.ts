@@ -189,6 +189,11 @@ async function api(
     opts?.timeoutMs ??
     (isProvisionWrite && pathName.includes("/accounts") ? 90_000 : 12_000);
   const maxAttempts = opts?.maxAttempts ?? (isProvisionWrite ? 2 : 3);
+  // 주문·청산 요청은 절대 자동 재시도하지 않는다. 응답을 못 받았다고 해서
+  // 주문이 브로커에 안 갔다는 뜻이 아니다 — 이 경로에 멱등키가 없어서
+  // 재전송하면 그대로 이중 체결이 된다 (2026-08-07 물량 3배 사고의 한 층).
+  // 결과를 모를 때는 호출측이 브로커 물량을 조회해 확인해야 한다.
+  const isTradeWrite = method === "POST" && /\/trade$/.test(pathName);
   let lastStatus = 0;
   let lastData: unknown = null;
 
@@ -233,7 +238,8 @@ async function api(
       }
 
       // 429: do not retry here — burns MetaAPI credits further; caller backs off
-      const retryable = res.status === 503 || res.status === 502;
+      // 주문 요청은 502/503 이어도 재시도하지 않는다 (이중 체결 방지).
+      const retryable = (res.status === 503 || res.status === 502) && !isTradeWrite;
       if (retryable && attempt < maxAttempts) {
         const ra = res.headers.get("retry-after");
         const parsed = ra ? Number(ra) * 1000 : NaN;
@@ -256,10 +262,21 @@ async function api(
       } catch {
         /* ignore */
       }
-      // Abort / fetch failed: at most 2 quick retries
-      if (attempt < Math.min(maxAttempts, 2)) {
+      // Abort / fetch failed: at most 2 quick retries (주문은 제외 — 이중 체결 방지)
+      if (!isTradeWrite && attempt < Math.min(maxAttempts, 2)) {
         await sleep(600 * attempt);
         continue;
+      }
+      if (isTradeWrite) {
+        // 결과 불명. "실패"가 아니라 "모름"이다 — 호출측이 브로커 물량을
+        // 조회해 실제 체결 여부를 확인해야 한다.
+        return {
+          status: 503,
+          data: {
+            message: "주문 결과를 확인하지 못했습니다. 브로커 물량 확인이 필요합니다.",
+            details: "TRADE_OUTCOME_UNKNOWN",
+          },
+        };
       }
       return {
         status: 503,
@@ -1351,6 +1368,23 @@ export function clearMetaApiRateLimitState() {
   metaApiAccountRateLimitUntil.clear();
 }
 
+/**
+ * 브로커가 동봉된 TP/SL 을 거부한 경우인지.
+ *
+ * 이때만 "TP/SL 없이 다시" 재발행하는 것이 안전하다. 예전에는 실패 사유를
+ * 가리지 않고 재발행해서, 타임아웃(=이미 체결됐을 수 있음)에도 같은 주문을
+ * 한 번 더 냈다.
+ */
+export function isStopsRejection(order: {
+  message?: string;
+  data?: unknown;
+}): boolean {
+  const raw = `${order.message || ""} ${JSON.stringify(order.data ?? "")}`;
+  return /Invalid stops|Invalid S\/L|Invalid T\/P|stops level|TRADE_RETCODE_INVALID_STOPS|TRADE_RETCODE_INVALID_PRICE/i.test(
+    raw,
+  );
+}
+
 function isTradeCreditExhausted(data: unknown): boolean {
   const raw =
     typeof data === "string"
@@ -2037,6 +2071,12 @@ export async function placeMarketOrder(input: {
   /** 진입과 동시에 브로커 지정가 심기 (나체 창 최소화) */
   stopLoss?: number | null;
   takeProfit?: number | null;
+  /**
+   * 주문 직전 이 심볼·방향의 브로커 물량. 넘기면, 스트림 주문이 결과 불명으로
+   * 실패했을 때 REST 로 재발행하기 전에 실제로 체결됐는지 확인한다.
+   * 없으면 확인을 못 하므로 예전처럼 재발행한다 (이중 체결 위험).
+   */
+  beforeLots?: number;
 }) {
   const t0 = Date.now();
   await syncTradeCreditPauseFromDb();
@@ -2045,6 +2085,30 @@ export async function placeMarketOrder(input: {
     noteTradeCreditExhausted(data, { accountId: creditAccountId });
 
   const brokerSym = await resolveBrokerSymbol(input.metaApiAccountId, input.symbol);
+
+  /**
+   * 결과 불명인 주문이 실제로 브로커에 도달했는지 확인한다.
+   * "실패 응답 = 미체결" 이라는 가정이 틀려서 같은 주문이 두 번 나가고 있었다.
+   */
+  const orderActuallyLanded = async (): Promise<boolean> => {
+    if (input.beforeLots == null) return false;
+    invalidateSnapshotCache(input.metaApiAccountId);
+    await sleep(700); // 체결이 스냅샷에 반영될 여유
+    const snap = await fetchSnapshot(input.metaApiAccountId, {
+      allowStaleMs: 0,
+      allowStaleOnRateLimit: false,
+    });
+    if (!snap.ok) return false;
+    const now = snap.positions
+      .filter(
+        (p) =>
+          (p.symbol === brokerSym || p.symbol === input.symbol) &&
+          p.direction === input.direction,
+      )
+      .reduce((s, p) => s + p.lots, 0);
+    // 요청 물량의 절반만 늘어도 체결된 것으로 본다 (부분 체결 포함).
+    return now >= input.beforeLots + input.lots * 0.5 - 1e-9;
+  };
 
   // Prefer streaming trade (avoids exhausted REST /trade CPU quota).
   try {
@@ -2090,12 +2154,38 @@ export async function placeMarketOrder(input: {
           via: "stream" as const,
         };
       }
+      // 여기까지 왔다는 건 타임아웃·소켓 끊김 등 "결과를 모르는" 실패다.
+      // 예전에는 곧장 REST 로 재발행해서, 이미 체결된 주문을 한 번 더 냈다.
+      if (await orderActuallyLanded()) {
+        console.warn(
+          `[metaapi] 스트림 주문이 실패로 보고됐지만 실제로는 체결됨 — REST 재발행 안 함 ` +
+            `(${brokerSym} ${input.direction} ${input.lots})`,
+        );
+        return {
+          ok: true as const,
+          data: streamed.data,
+          brokerSymbol: brokerSym,
+          via: "stream" as const,
+        };
+      }
     }
   } catch (e) {
     console.warn(
       "[metaapi] stream placeMarketOrder fallback",
       e instanceof Error ? e.message : e,
     );
+    if (await orderActuallyLanded()) {
+      console.warn(
+        `[metaapi] 스트림 주문이 예외로 끝났지만 실제로는 체결됨 — REST 재발행 안 함 ` +
+          `(${brokerSym} ${input.direction} ${input.lots})`,
+      );
+      return {
+        ok: true as const,
+        data: null,
+        brokerSymbol: brokerSym,
+        via: "stream" as const,
+      };
+    }
   }
 
   if (metaApiTradeCreditBlocked()) {

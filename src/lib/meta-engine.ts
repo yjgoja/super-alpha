@@ -44,6 +44,7 @@ import {
   refreshAccountRegion,
   clearMetaRegionCache,
   metaApiTradeCreditBlocked,
+  isStopsRejection,
   syncTradeCreditPauseFromDb,
 } from "./metaapi";
 import { ensureTradingSchema, prisma } from "./db";
@@ -2249,8 +2250,11 @@ async function placeTpReentry(opts: {
     takeProfit: reentryPx.takeProfit,
     stopLoss: reentryPx.stopLoss,
   });
+  // 나체 재시도는 "브로커가 동봉 TP/SL 을 거부했을 때"만이다. 예전에는 실패
+  // 사유를 안 봐서, 타임아웃(이미 체결됐을 수 있음)에도 같은 주문을 또 냈다.
   if (
     !order.ok &&
+    isStopsRejection(order) &&
     (reentryPx.takeProfit != null || reentryPx.stopLoss != null) &&
     !metaApiTradeCreditBlocked()
   ) {
@@ -2756,9 +2760,11 @@ async function runSymbolTableDca(
       takeProfit: entryPx.takeProfit,
       stopLoss: entryPx.stopLoss,
     });
-    // 동봉 TP/SL 거절 시 나체 진입 — trade credit 소진이면 나체 재시도 금지
+    // 동봉 TP/SL 거절 시에만 나체 진입 (거절이 아닌 실패는 이미 체결됐을 수
+    // 있으므로 재발행 금지). trade credit 소진이면 재시도 자체를 금지.
     if (
       !order.ok &&
+      isStopsRejection(order) &&
       (entryPx.takeProfit != null || entryPx.stopLoss != null) &&
       !metaApiTradeCreditBlocked()
     ) {
@@ -3328,9 +3334,12 @@ async function runSymbolTableDca(
       comment: `SA-${tag}-L${next}`,
       takeProfit: projPx.takeProfit,
       stopLoss: projPx.stopLoss,
+      beforeLots: posVol,
     });
+    // 손절가 거부일 때만 나체 재발행. 그 외 실패는 이미 체결됐을 수 있다.
     if (
       !order.ok &&
+      isStopsRejection(order) &&
       (projPx.takeProfit != null || projPx.stopLoss != null) &&
       !metaApiTradeCreditBlocked()
     ) {
@@ -3660,8 +3669,10 @@ async function runSymbolDca(
       takeProfit: entryPx.takeProfit,
       stopLoss: entryPx.stopLoss,
     });
+    // 손절가 거부일 때만 나체 재발행. 그 외 실패는 이미 체결됐을 수 있다.
     if (
       !order.ok &&
+      isStopsRejection(order) &&
       (entryPx.takeProfit != null || entryPx.stopLoss != null) &&
       !metaApiTradeCreditBlocked()
     ) {
@@ -4131,9 +4142,12 @@ async function runSymbolDca(
         comment: `SA-${logic}-L${nextLevel}`,
         takeProfit: projPx.takeProfit,
         stopLoss: projPx.stopLoss,
+        beforeLots: posVol,
       });
+      // 손절가 거부일 때만 나체 재발행. 그 외 실패는 이미 체결됐을 수 있다.
       if (
         !order.ok &&
+        isStopsRejection(order) &&
         (projPx.takeProfit != null || projPx.stopLoss != null) &&
         !metaApiTradeCreditBlocked()
       ) {
