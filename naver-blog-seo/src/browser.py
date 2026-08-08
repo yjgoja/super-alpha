@@ -7,6 +7,38 @@ os.environ.setdefault("WDM_LOG", "0")
 os.environ.setdefault("DOTENV_PATH", str(Path(__file__).resolve().parent.parent / ".env"))
 
 
+def _sanitize_profile(profile_dir: Path) -> None:
+    """
+    비정상 종료 흔적을 지운다.
+
+    Chrome 이 강제 종료되면 Preferences 에 exit_type="Crashed" 가 남고, 다음
+    실행 때 "페이지를 복원하시겠습니까?" 알림이 뜬다. 그 알림이 에디터 화면을
+    가려서 input[type=file] 같은 요소를 못 찾는다 (2026-08-09 썸네일 업로드 실패).
+    Preferences 가 통째로 손상됐으면 지운다 — Chrome 이 기본값으로 다시 만든다.
+    """
+    import json
+
+    pref = profile_dir / "Default" / "Preferences"
+    if not pref.exists():
+        return
+    try:
+        # 정상 Preferences 는 수백 KB 다. 비정상적으로 크면 손상으로 본다
+        # (실제로 2.3GB 까지 부풀어 Chrome 이 기동 직후 죽은 적이 있다).
+        if pref.stat().st_size > 20 * 1024 * 1024:
+            pref.unlink()
+            print(f"[browser] 손상된 Preferences 제거 ({pref})")
+            return
+        data = json.loads(pref.read_text(encoding="utf-8"))
+        prof = data.setdefault("profile", {})
+        if prof.get("exit_type") != "Normal" or prof.get("exited_cleanly") is not True:
+            prof["exit_type"] = "Normal"
+            prof["exited_cleanly"] = True
+            pref.write_text(json.dumps(data), encoding="utf-8")
+            print("[browser] 이전 비정상 종료 흔적 정리")
+    except Exception as e:
+        print(f"[browser] 프로필 정리 실패(무시): {e}")
+
+
 def create_driver(*, headless: bool = False, profile_dir: Path | None = None):
     """
     봇탐지 완화 드라이버.
@@ -16,6 +48,7 @@ def create_driver(*, headless: bool = False, profile_dir: Path | None = None):
     if profile_dir is None:
         profile_dir = Path(__file__).resolve().parent.parent / ".chrome-profile"
     profile_dir.mkdir(parents=True, exist_ok=True)
+    _sanitize_profile(profile_dir)
 
     # --- undetected-chromedriver ---
     try:
@@ -25,6 +58,9 @@ def create_driver(*, headless: bool = False, profile_dir: Path | None = None):
         options.add_argument("--lang=ko-KR")
         options.add_argument("--start-maximized")
         options.add_argument("--disable-popup-blocking")
+        options.add_argument("--disable-session-crashed-bubble")
+        options.add_argument("--hide-crash-restore-bubble")
+        options.add_argument("--no-first-run")
         options.add_argument(f"--user-data-dir={str(profile_dir.resolve())}")
         options.add_argument("--profile-directory=Default")
         if headless:
@@ -45,6 +81,9 @@ def create_driver(*, headless: bool = False, profile_dir: Path | None = None):
 
     options = Options()
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-session-crashed-bubble")
+    options.add_argument("--hide-crash-restore-bubble")
+    options.add_argument("--no-first-run")
     options.add_argument("--lang=ko-KR")
     options.add_argument("--start-maximized")
     options.add_argument(f"--user-data-dir={str(profile_dir.resolve())}")

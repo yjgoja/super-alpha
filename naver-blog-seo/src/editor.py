@@ -871,4 +871,12 @@ def publish_post(driver: WebDriver) -> str | None:
         if "Redirect=Write" not in url and "PostWriteForm" not in url:
             return url
         time.sleep(0.8)
-    return driver.current_url
+
+    # 25초가 지나도 글쓰기 화면이면 발행이 되지 않은 것이다.
+    # 예전에는 여기서 글쓰기 URL 을 그대로 반환했고, poster.py 가 그것을
+    # 성공(ok=True, "자동 발행 완료")으로 기록했다. 2026-08-09 에 글이 하나도
+    # 안 올라갔는데 로그에는 발행 완료 2건이 찍혀 있었던 원인이다.
+    raise RuntimeError(
+        f"발행 확인 실패 — 25초 후에도 글쓰기 화면입니다 (url={driver.current_url}). "
+        "발행 버튼 또는 확인 팝업을 처리하지 못했습니다."
+    )
